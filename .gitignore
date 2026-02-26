@@ -1,0 +1,19 @@
+# Python virtual environment
+api/.venv/
+api/__pycache__/
+api/*.pyc
+
+# Next.js / Node modules
+web/node_modules/
+web/.next/
+web/out/
+web/.git
+
+# Banco de dados e ambiente
+api/*.db
+.env
+.env.local
+
+# Sistema
+.DS_Store
+Thumbs.db
