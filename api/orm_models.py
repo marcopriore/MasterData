@@ -1,10 +1,74 @@
-from sqlalchemy import String, Text, Integer, Boolean
+from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import JSON
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import datetime
 from uuid import uuid4, UUID
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from db import Base
+
+
+class WorkflowHeaderORM(Base):
+    __tablename__ = "workflow_header"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    steps: Mapped[list["WorkflowConfigORM"]] = relationship(
+        "WorkflowConfigORM", back_populates="workflow", cascade="all, delete-orphan"
+    )
+
+
+class WorkflowConfigORM(Base):
+    __tablename__ = "workflow_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workflow_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workflow_header.id", ondelete="CASCADE"), nullable=False
+    )
+    step_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    status_key: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. pending_technical, completed
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    workflow: Mapped["WorkflowHeaderORM"] = relationship(
+        "WorkflowHeaderORM", back_populates="steps"
+    )
+
+
+class MaterialRequestORM(Base):
+    __tablename__ = "material_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pdm_id: Mapped[int] = mapped_column(Integer, ForeignKey("pdm_templates.id"), nullable=False)
+    workflow_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workflow_header.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(50), default="Pending", nullable=False)
+    requester: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    pdm: Mapped["PDMOrm"] = relationship("PDMOrm", back_populates="material_requests")
+    request_values: Mapped[list["RequestValueORM"]] = relationship(
+        "RequestValueORM", back_populates="request", cascade="all, delete-orphan"
+    )
+
+
+class RequestValueORM(Base):
+    __tablename__ = "request_values"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("material_requests.id"), nullable=False
+    )
+    attribute_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+    request: Mapped["MaterialRequestORM"] = relationship(
+        "MaterialRequestORM", back_populates="request_values"
+    )
 
 
 class PDMOrm(Base):
@@ -15,6 +79,10 @@ class PDMOrm(Base):
     internal_code: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     attributes: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+
+    material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
+        "MaterialRequestORM", back_populates="pdm"
+    )
 
 
 class ProductORM(Base):

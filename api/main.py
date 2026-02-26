@@ -2,11 +2,19 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from fastapi import Depends, HTTPException
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload
+from fastapi import Depends, HTTPException, Query
 
 from deps import get_db
-from orm_models import ProductORM, PDMOrm
+from orm_models import (
+    ProductORM,
+    PDMOrm,
+    MaterialRequestORM,
+    RequestValueORM,
+    WorkflowConfigORM,
+    WorkflowHeaderORM,
+)
 
 app = FastAPI()
 
@@ -23,7 +31,19 @@ def health():
     return {"status": "ok"}
 
 
-from models import Product, ProductCreate, PDMCreate
+from models import (
+    Product,
+    ProductCreate,
+    PDMCreate,
+    RequestCreate,
+    WorkflowConfigUpdate,
+    WorkflowConfigCreate,
+    WorkflowConfigStepUpdate,
+    WorkflowConfigBulkUpdate,
+    WorkflowMigratePayload,
+    WorkflowUpdate,
+    WorkflowHeaderCreate,
+)
 
 #products: list[Product] = []
 
@@ -82,6 +102,563 @@ def create_pdm(payload: PDMCreate, db: Session = Depends(get_db)):
         "is_active": row.is_active,
         "attributes": row.attributes,
     }
+
+
+# -------------------------------
+# HELPERS
+def _get_active_workflow_id(db: Session) -> int | None:
+    row = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.is_active == True).first()
+    return row.id if row else None
+
+
+# -------------------------------
+# LISTAR REQUISIÇÕES
+@app.get("/api/requests")
+def list_requests(
+    workflow_id: int | None = Query(None, description="Filter by workflow (default: active)"),
+    db: Session = Depends(get_db),
+):
+    q = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+        )
+        .order_by(MaterialRequestORM.created_at.desc())
+    )
+    wf_id = workflow_id or _get_active_workflow_id(db)
+    if wf_id is not None:
+        q = q.filter(MaterialRequestORM.workflow_id == wf_id)
+    rows = q.all()
+
+    def _attr_id_to_name(pdm) -> dict:
+        """Build attribute_id -> name lookup from PDM attributes JSON."""
+        attrs = pdm.attributes if pdm else None
+        if not isinstance(attrs, list):
+            return {}
+        return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
+
+    result = []
+    for r in rows:
+        attr_names = _attr_id_to_name(r.pdm)
+        values = [
+            {
+                "label": attr_names.get(rv.attribute_id, rv.attribute_id),
+                "value": rv.value,
+            }
+            for rv in (r.request_values or [])
+        ]
+        result.append(
+            {
+                "id": r.id,
+                "pdm_name": r.pdm.name if r.pdm else None,
+                "status": r.status,
+                "workflow_id": r.workflow_id,
+                "date": r.created_at.isoformat() if r.created_at else None,
+                "values": values,
+            }
+        )
+    return result
+
+
+# -------------------------------
+# CRIAR REQUISIÇÃO DE MATERIAL
+@app.post("/api/requests")
+def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
+    pdm = db.query(PDMOrm).filter(PDMOrm.id == payload.pdm_id).first()
+    if not pdm:
+        raise HTTPException(status_code=404, detail="PDM not found")
+    wf_id = payload.workflow_id or _get_active_workflow_id(db)
+    if not wf_id:
+        raise HTTPException(status_code=400, detail="No active workflow configured")
+    row = MaterialRequestORM(
+        pdm_id=payload.pdm_id,
+        workflow_id=wf_id,
+        requester=payload.requester,
+        status="Pending",
+    )
+    db.add(row)
+    db.flush()
+    for attribute_id, value in payload.values.items():
+        rv = RequestValueORM(
+            request_id=row.id,
+            attribute_id=attribute_id,
+            value=str(value),
+        )
+        db.add(rv)
+    db.commit()
+    db.refresh(row)
+    return {"id": row.id}
+
+
+# -------------------------------
+# PRÓXIMO STATUS (avança um passo no fluxo) – dinâmico via WorkflowConfig
+def get_next_status(current_status: str, workflow_id: int, db: Session) -> str | None:
+    """
+    Return the next status_key in the workflow, or None if already at the end.
+    Uses WorkflowConfig table for dynamic step order, scoped to workflow_id.
+    - Pending (initial) → first step's status_key
+    - Current status must match exactly a status_key in workflow (or step_name for legacy)
+    - Last step → 'completed'
+    - completed/Rejected → None
+    """
+    current = (current_status or "").strip()
+    if not current:
+        current = "Pending"
+
+    # Terminal statuses
+    if current.lower() in ("completed", "approved", "concluído", "rejected"):
+        return None
+
+    rows = (
+        db.query(WorkflowConfigORM)
+        .filter(
+            WorkflowConfigORM.workflow_id == workflow_id,
+            WorkflowConfigORM.is_active == True,
+        )
+        .order_by(WorkflowConfigORM.order.asc())
+        .all()
+    )
+    if not rows:
+        return None
+
+    # Pending (initial): advance to first workflow step
+    if current.lower() == "pending":
+        return rows[0].status_key
+
+    # Find current step: prefer exact status_key match, then step_name (case-insensitive)
+    current_idx = None
+    for i, r in enumerate(rows):
+        if r.status_key and r.status_key.strip().lower() == current.strip().lower():
+            current_idx = i
+            break
+        if r.step_name and r.step_name.strip().lower() == current.strip().lower():
+            current_idx = i
+            break
+
+    if current_idx is None:
+        return None
+
+    # Next step
+    if current_idx + 1 < len(rows):
+        return rows[current_idx + 1].status_key
+    # Last step → completed
+    return "completed"
+
+
+# -------------------------------
+# ATUALIZAR STATUS DA REQUISIÇÃO (avança para próximo passo - action=approve)
+@app.patch("/api/requests/{request_id}/status")
+def update_request_status(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+        )
+        .filter(MaterialRequestORM.id == request_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    # Immediately calculate next status from WorkflowConfig (request's workflow) and persist
+    next_status = get_next_status(row.status, row.workflow_id, db)
+    if next_status is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request already at final status: {row.status}",
+        )
+    row.status = next_status
+    db.commit()
+    db.refresh(row)
+
+    def _attr_id_to_name(pdm) -> dict:
+        attrs = pdm.attributes if pdm else None
+        if not isinstance(attrs, list):
+            return {}
+        return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
+
+    attr_names = _attr_id_to_name(row.pdm)
+    values = [
+        {"label": attr_names.get(rv.attribute_id, rv.attribute_id), "value": rv.value}
+        for rv in (row.request_values or [])
+    ]
+    return {
+        "id": row.id,
+        "pdm_name": row.pdm.name if row.pdm else None,
+        "status": row.status,
+        "date": row.created_at.isoformat() if row.created_at else None,
+        "values": values,
+    }
+
+
+# -------------------------------
+# REJEITAR REQUISIÇÃO
+@app.patch("/api/requests/{request_id}/reject")
+def reject_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+        )
+        .filter(MaterialRequestORM.id == request_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Request not found")
+    row.status = "Rejected"
+    db.commit()
+    db.refresh(row)
+
+    def _attr_id_to_name(pdm) -> dict:
+        attrs = pdm.attributes if pdm else None
+        if not isinstance(attrs, list):
+            return {}
+        return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
+
+    attr_names = _attr_id_to_name(row.pdm)
+    values = [
+        {"label": attr_names.get(rv.attribute_id, rv.attribute_id), "value": rv.value}
+        for rv in (row.request_values or [])
+    ]
+    return {
+        "id": row.id,
+        "pdm_name": row.pdm.name if row.pdm else None,
+        "status": row.status,
+        "date": row.created_at.isoformat() if row.created_at else None,
+        "values": values,
+    }
+
+
+# -------------------------------
+# WORKFLOW HEADERS
+def _workflow_header_to_dict(h):
+    return {
+        "id": h.id,
+        "name": h.name,
+        "description": h.description,
+        "is_active": h.is_active,
+    }
+
+
+@app.get("/api/workflows")
+def list_workflows(db: Session = Depends(get_db)):
+    rows = db.query(WorkflowHeaderORM).order_by(WorkflowHeaderORM.id.asc()).all()
+    return [_workflow_header_to_dict(h) for h in rows]
+
+
+@app.post("/api/workflows")
+def create_workflow(payload: WorkflowHeaderCreate, db: Session = Depends(get_db)):
+    row = WorkflowHeaderORM(
+        name=payload.name.strip(),
+        description=payload.description.strip() if payload.description else None,
+        is_active=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _workflow_header_to_dict(row)
+
+
+@app.get("/api/workflows/{workflow_id}/migration-info")
+def get_workflow_migration_info(
+    workflow_id: int,
+    db: Session = Depends(get_db),
+):
+    """Returns steps that have requests, with counts. Used for migration UI."""
+    wf = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    steps = (
+        db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == workflow_id)
+        .order_by(WorkflowConfigORM.order.asc())
+        .all()
+    )
+    result = []
+    for step in steps:
+        count = (
+            db.query(MaterialRequestORM)
+            .filter(
+                MaterialRequestORM.workflow_id == workflow_id,
+                or_(
+                    MaterialRequestORM.status == step.status_key,
+                    MaterialRequestORM.status == step.step_name,
+                ),
+            )
+            .count()
+        )
+        if count > 0:
+            result.append(
+                {"step_name": step.step_name, "status_key": step.status_key, "request_count": count}
+            )
+    return {"workflow_name": wf.name, "steps_with_requests": result}
+
+
+@app.post("/api/workflows/migrate")
+def migrate_workflow_requests(
+    payload: WorkflowMigratePayload,
+    db: Session = Depends(get_db),
+):
+    """
+    Migrate requests from one workflow to another with step mapping.
+    Updates workflow_id and status for each matched request.
+    """
+    from_wf = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.id == payload.from_workflow_id).first()
+    to_wf = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.id == payload.to_workflow_id).first()
+    if not from_wf or not to_wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if payload.from_workflow_id == payload.to_workflow_id:
+        raise HTTPException(status_code=400, detail="Source and target workflow must differ")
+    from_steps_map = {
+        s.status_key: (s.status_key, s.step_name)
+        for s in db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == payload.from_workflow_id)
+        .all()
+    }
+    migrated = 0
+    for m in payload.mappings:
+        to_key = m.to_status_key
+        status_key, step_name = from_steps_map.get(
+            m.from_status_key, (m.from_status_key, m.from_status_key)
+        )
+        values_to_match = [v for v in (status_key, step_name) if v]
+        if not values_to_match:
+            values_to_match = [m.from_status_key]
+        rows = (
+            db.query(MaterialRequestORM)
+            .filter(
+                MaterialRequestORM.workflow_id == payload.from_workflow_id,
+                MaterialRequestORM.status.in_(values_to_match),
+            )
+            .all()
+        )
+        for row in rows:
+            row.workflow_id = payload.to_workflow_id
+            row.status = to_key
+            migrated += 1
+    db.commit()
+    return {"migrated_count": migrated}
+
+
+@app.patch("/api/workflows/{workflow_id}")
+def update_workflow(
+    workflow_id: int,
+    payload: WorkflowUpdate,
+    db: Session = Depends(get_db),
+):
+    row = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.id == workflow_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if payload.is_active is False:
+        count = db.query(MaterialRequestORM).filter(MaterialRequestORM.workflow_id == workflow_id).count()
+        if count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Não é possível arquivar: existem {count} requisições neste workflow. Execute a migração primeiro.",
+            )
+    if payload.is_active is not None:
+        row.is_active = payload.is_active
+        if payload.is_active is True:
+            db.query(WorkflowHeaderORM).filter(
+                WorkflowHeaderORM.id != workflow_id
+            ).update({WorkflowHeaderORM.is_active: False})
+    db.commit()
+    db.refresh(row)
+    return _workflow_header_to_dict(row)
+
+
+# -------------------------------
+# WORKFLOW CONFIG (steps)
+def _workflow_row_to_dict(r):
+    return {
+        "id": r.id,
+        "workflow_id": r.workflow_id,
+        "step_name": r.step_name,
+        "status_key": r.status_key,
+        "order": r.order,
+        "is_active": r.is_active,
+    }
+
+
+@app.get("/api/workflow/config")
+def get_workflow_config(
+    workflow_id: int | None = Query(None, description="Workflow to fetch (default: active)"),
+    db: Session = Depends(get_db),
+):
+    wf_id = workflow_id or _get_active_workflow_id(db)
+    if not wf_id:
+        return []
+    rows = (
+        db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == wf_id)
+        .order_by(WorkflowConfigORM.order.asc())
+        .all()
+    )
+    return [_workflow_row_to_dict(r) for r in rows]
+
+
+def _slugify_status_key(name: str) -> str:
+    """Generate status_key from step_name: 'Aprovação Fiscal' -> 'aprovacao_fiscal'"""
+    import unicodedata
+    s = unicodedata.normalize("NFD", name)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = s.lower().strip().replace(" ", "_").replace("-", "_")
+    return "".join(c if c.isalnum() or c == "_" else "_" for c in s) or "step"
+
+
+@app.post("/api/workflow/config")
+def add_workflow_step(payload: WorkflowConfigCreate, db: Session = Depends(get_db)):
+    status_key = payload.status_key or _slugify_status_key(payload.step_name)
+    rows = (
+        db.query(WorkflowConfigORM)
+        .order_by(WorkflowConfigORM.order.asc())
+        .all()
+    )
+    insert_order = len(rows) + 1
+    if payload.insert_after_id is not None:
+        if payload.insert_after_id == 0:
+            insert_order = 1
+        else:
+            after = next((r for r in rows if r.id == payload.insert_after_id), None)
+            insert_order = (after.order + 1) if after else len(rows) + 1
+        for r in reversed(rows):
+            if r.order >= insert_order:
+                r.order = r.order + 1
+    row = WorkflowConfigORM(
+        step_name=payload.step_name,
+        status_key=status_key,
+        order=insert_order,
+        is_active=payload.is_active,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _workflow_row_to_dict(row)
+
+
+@app.patch("/api/workflow/config/{step_id}")
+def update_workflow_step(
+    step_id: int, payload: WorkflowConfigStepUpdate, db: Session = Depends(get_db)
+):
+    row = db.query(WorkflowConfigORM).filter(WorkflowConfigORM.id == step_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Step not found")
+    if payload.step_name is not None:
+        row.step_name = payload.step_name
+    if payload.status_key is not None:
+        row.status_key = payload.status_key
+    db.commit()
+    db.refresh(row)
+    return _workflow_row_to_dict(row)
+
+
+@app.delete("/api/workflow/config/{step_id}")
+def delete_workflow_step(step_id: int, db: Session = Depends(get_db)):
+    row = db.query(WorkflowConfigORM).filter(WorkflowConfigORM.id == step_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Step not found")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@app.put("/api/workflow/config")
+def update_workflow_config(payload: WorkflowConfigUpdate, db: Session = Depends(get_db)):
+    for item in payload.steps:
+        row = db.query(WorkflowConfigORM).filter(WorkflowConfigORM.id == item.id).first()
+        if row:
+            row.order = item.order
+    db.commit()
+    rows = (
+        db.query(WorkflowConfigORM)
+        .order_by(WorkflowConfigORM.order.asc())
+        .all()
+    )
+    return [_workflow_row_to_dict(r) for r in rows]
+
+
+@app.put("/api/workflow/config/bulk")
+def bulk_update_workflow_config(
+    payload: WorkflowConfigBulkUpdate, db: Session = Depends(get_db)
+):
+    """
+    Replace workflow config with the provided list for the given workflow_id.
+    In a single transaction: delete all current steps for that workflow and insert the new list.
+    Safety: blocks delete if any request in this workflow has the step's status_key.
+    """
+    incoming_status_keys = {
+        (item.status_key or _slugify_status_key(item.step_name))
+        for item in payload.steps
+    }
+    current_steps = (
+        db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == payload.workflow_id)
+        .all()
+    )
+    steps_being_deleted = [s for s in current_steps if s.status_key not in incoming_status_keys]
+
+    for step in steps_being_deleted:
+        count = (
+            db.query(MaterialRequestORM)
+            .filter(
+                MaterialRequestORM.workflow_id == payload.workflow_id,
+                or_(
+                    MaterialRequestORM.status == step.status_key,
+                    MaterialRequestORM.status == step.step_name,
+                ),
+            )
+            .count()
+        )
+        if count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Não é possível excluir esta etapa pois existem {count} requisições nela.",
+            )
+
+    try:
+        db.query(WorkflowConfigORM).filter(
+            WorkflowConfigORM.workflow_id == payload.workflow_id
+        ).delete()
+        for item in payload.steps:
+            status_key = item.status_key or _slugify_status_key(item.step_name)
+            row = WorkflowConfigORM(
+                workflow_id=payload.workflow_id,
+                step_name=item.step_name,
+                status_key=status_key,
+                order=item.order,
+                is_active=item.is_active,
+            )
+            db.add(row)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    rows = (
+        db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == payload.workflow_id)
+        .order_by(WorkflowConfigORM.order.asc())
+        .all()
+    )
+    return [_workflow_row_to_dict(r) for r in rows]
+
+
+# -------------------------------
+# OBTER ATRIBUTOS DO PDM
+@app.get("/api/pdm/{pdm_id}/attributes")
+def get_pdm_attributes(pdm_id: int, db: Session = Depends(get_db)):
+    row = db.query(PDMOrm).filter(PDMOrm.id == pdm_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="PDM not found")
+    return row.attributes or []
 
 
 # -------------------------------
