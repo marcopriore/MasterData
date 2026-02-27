@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from fastapi import Depends, HTTPException, Query
+from datetime import datetime
 
 from deps import get_db
 from orm_models import (
@@ -14,9 +15,12 @@ from orm_models import (
     RequestValueORM,
     WorkflowConfigORM,
     WorkflowHeaderORM,
+    RoleORM,
+    UserORM,
 )
+from security import hash_password
 
-app = FastAPI()
+app = FastAPI(title="MasterData API", version="1.8.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,6 +29,96 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Seed ─────────────────────────────────────────────────────────────────────
+
+# Default role definitions
+_DEFAULT_ROLES: list[dict] = [
+    {
+        "name": "ADMIN",
+        "permissions": {
+            "can_approve": True,
+            "can_reject": True,
+            "can_edit_pdm": True,
+            "can_manage_users": True,
+            "can_manage_workflows": True,
+            "can_submit_request": True,
+        },
+    },
+    {
+        "name": "GOVERNANCA",
+        "permissions": {
+            "can_approve": True,
+            "can_reject": True,
+            "can_edit_pdm": True,
+            "can_manage_users": False,
+            "can_manage_workflows": True,
+            "can_submit_request": True,
+        },
+    },
+    {
+        "name": "SOLICITANTE",
+        "permissions": {
+            "can_approve": False,
+            "can_reject": False,
+            "can_edit_pdm": False,
+            "can_manage_users": False,
+            "can_manage_workflows": False,
+            "can_submit_request": True,
+        },
+    },
+]
+
+_DEFAULT_ADMIN = {
+    "name": "Administrador",
+    "email": "admin@masterdata.com",
+    "password": "Admin@1234",   # changed on first login in production
+}
+
+
+def seed_database(db: Session) -> None:
+    """Populate roles and default admin user if the tables are empty."""
+    if db.query(RoleORM).count() > 0:
+        return  # already seeded
+
+    # Create roles
+    role_map: dict[str, RoleORM] = {}
+    for r in _DEFAULT_ROLES:
+        orm = RoleORM(name=r["name"], permissions=r["permissions"])
+        db.add(orm)
+        role_map[r["name"]] = orm
+    db.flush()  # get IDs without committing
+
+    # Create default admin user
+    admin_role = role_map["ADMIN"]
+    admin = UserORM(
+        name=_DEFAULT_ADMIN["name"],
+        email=_DEFAULT_ADMIN["email"],
+        hashed_password=hash_password(_DEFAULT_ADMIN["password"]),
+        role_id=admin_role.id,
+        is_active=True,
+        preferences={"theme": "light", "language": "pt"},
+        created_at=datetime.utcnow(),
+    )
+    db.add(admin)
+    db.commit()
+    print(
+        f"[seed] Created {len(_DEFAULT_ROLES)} roles and default admin "
+        f"({_DEFAULT_ADMIN['email']} / {_DEFAULT_ADMIN['password']})"
+    )
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    from db import SessionLocal
+    db = SessionLocal()
+    try:
+        seed_database(db)
+    finally:
+        db.close()
+
+
+# ─── Health ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -46,6 +140,9 @@ from models import (
     RequestOut,
     MoveToPayload,
 )
+
+from routes.admin import router as admin_router
+app.include_router(admin_router)
 
 #products: list[Product] = []
 
@@ -780,3 +877,5 @@ def delete_product(product_id: UUID, db: Session = Depends(get_db)):
     db.delete(row)
     db.commit()
     return {"ok": True}
+
+

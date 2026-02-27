@@ -1,11 +1,49 @@
 from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from uuid import uuid4, UUID
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from db import Base
+
+
+# ─── Access Control ───────────────────────────────────────────────────────────
+
+class RoleORM(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    # JSON flags: { "can_approve": true, "can_edit_pdm": true, "can_manage_users": true, ... }
+    permissions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    users: Mapped[list["UserORM"]] = relationship("UserORM", back_populates="role")
+
+
+class UserORM(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str] = mapped_column(String(254), nullable=False, unique=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    role_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False
+    )
+    # User preferences: { "theme": "light"|"dark", "language": "pt"|"en" }
+    preferences: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=lambda: {"theme": "light", "language": "pt"}
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    role: Mapped["RoleORM"] = relationship("RoleORM", back_populates="users")
+    material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
+        "MaterialRequestORM", back_populates="user"
+    )
 
 
 class WorkflowHeaderORM(Base):
@@ -48,7 +86,11 @@ class MaterialRequestORM(Base):
     )
     status: Mapped[str] = mapped_column(String(50), default="Pending", nullable=False)
 
-    # Requester info
+    # Requester info — user_id links to the User table when auth is active;
+    # requester string is kept for backwards-compat and anonymous submissions
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     requester: Mapped[str] = mapped_column(String(200), nullable=False)
     cost_center: Mapped[str | None] = mapped_column(String(100), nullable=True)
     urgency: Mapped[str] = mapped_column(String(20), default="low", nullable=False)
@@ -64,6 +106,7 @@ class MaterialRequestORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     pdm: Mapped["PDMOrm"] = relationship("PDMOrm", back_populates="material_requests")
+    user: Mapped["UserORM | None"] = relationship("UserORM", back_populates="material_requests")
     request_values: Mapped[list["RequestValueORM"]] = relationship(
         "RequestValueORM", back_populates="request", cascade="all, delete-orphan"
     )

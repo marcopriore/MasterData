@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { apiGet, apiPost } from '@/lib/api'
+import { useUser } from '@/contexts/user-context'
 import { Stepper, type StepItem } from '@/components/request/stepper'
 import { PhaseAdmin } from '@/components/request/phase-admin'
 import { PhaseSpecs } from '@/components/request/phase-specs'
@@ -47,6 +48,7 @@ export type UploadedFile = {
 
 export default function NewMaterialRequestPage() {
   const router = useRouter()
+  const { user } = useUser()
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -69,6 +71,14 @@ export default function NewMaterialRequestPage() {
   // Phase 3 – Docs & Justificativa
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [justificativa, setJustificativa] = useState('')
+
+  // Auto-fill requester name from the logged-in user (only on first mount)
+  useEffect(() => {
+    if (user?.name) {
+      setRequesterName(user.name.toUpperCase())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Fetch PDM templates on mount
   useEffect(() => {

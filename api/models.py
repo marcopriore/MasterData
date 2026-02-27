@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional, Literal
 from uuid import UUID, uuid4
 
 class ProductCreate(BaseModel):
@@ -171,3 +171,88 @@ class WorkflowUpdate(BaseModel):
 
 class MoveToPayload(BaseModel):
     status_key: str
+
+
+# ─── Roles ────────────────────────────────────────────────────────────────────
+
+class RolePermissions(BaseModel):
+    can_approve: bool = False
+    can_reject: bool = False
+    can_edit_pdm: bool = False
+    can_manage_users: bool = False
+    can_manage_workflows: bool = False
+    can_submit_request: bool = True
+
+
+class RoleCreate(BaseModel):
+    name: str
+    permissions: RolePermissions = Field(default_factory=RolePermissions)
+
+
+class RoleUpdate(BaseModel):
+    name: Optional[str] = None
+    permissions: Optional[RolePermissions] = None
+
+
+class RoleOut(BaseModel):
+    id: int
+    name: str
+    permissions: RolePermissions
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Users ────────────────────────────────────────────────────────────────────
+
+class UserPreferences(BaseModel):
+    theme: Literal["light", "dark"] = "light"
+    language: Literal["pt", "en"] = "pt"
+
+
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str                          # plain-text; hashed before storage
+    role_id: int
+    preferences: UserPreferences = Field(default_factory=UserPreferences)
+
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    role_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    preferences: Optional[UserPreferences] = None
+
+
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UserOut(BaseModel):
+    id: int
+    name: str
+    email: str
+    role_id: int
+    role_name: Optional[str] = None
+    is_active: bool
+    preferences: UserPreferences
+    created_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    # Plain str so Pydantic never rejects the input before the DB lookup.
+    # The handler normalises (strip + lower) before querying.
+    email: str
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
