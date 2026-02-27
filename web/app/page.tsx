@@ -1,36 +1,64 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { apiGet } from '@/lib/api'
+import Link from 'next/link'
+import { Database, FilePlus, GitBranch, ShieldCheck } from 'lucide-react'
 
-type Health = { status: string }
-
-export default function Home() {
-  const [data, setData] = useState<Health | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-  apiGet<Health>('/health')
-    .then(setData)
-    .catch((e: any) => setError(e?.message ?? 'erro desconhecido'))
-}, [])
-
+export default function Dashboard() {
   return (
-    <main className="min-h-screen p-10">
-      <h1 className="text-3xl font-semibold">MasterData</h1>
+    <main className="flex min-h-screen flex-col items-center justify-center p-8">
+      <div className="mb-12 text-center">
+        <h1 className="text-3xl font-bold text-foreground">MDM Platform</h1>
+        <p className="mt-2 text-muted-foreground">Master Data Management</p>
+      </div>
 
-      <div className="mt-6 rounded-xl border p-4">
-        <div className="text-sm text-gray-500">Backend health</div>
-
-        {error ? (
-          <div className="mt-2 text-red-600">{error}</div>
-        ) : data ? (
-          <div className="mt-2">
-            Status: <span className="font-medium">{data.status}</span>
+      <div className="grid w-full max-w-4xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <Link href="/admin-pdm" className="group">
+          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46]/50 hover:bg-primary/5 dark:border-zinc-700/50 dark:bg-card dark:hover:border-[#C69A46]/50">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#0F1C38] text-white transition-transform group-hover:scale-105">
+              <Database className="size-8" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground">Gestão de PDMs</h2>
+            <p className="text-center text-sm text-muted-foreground">
+              Configure padrões de descrição de material
+            </p>
           </div>
-        ) : (
-          <div className="mt-2">Carregando...</div>
-        )}
+        </Link>
+
+        <Link href="/governance" className="group">
+          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46]/50 hover:bg-primary/5 dark:border-zinc-700/50 dark:bg-card dark:hover:border-[#C69A46]/50">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#0F1C38] text-white transition-transform group-hover:scale-105">
+              <ShieldCheck className="size-8" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground">Governança de Dados</h2>
+            <p className="text-center text-sm text-muted-foreground">
+              Políticas e controle de qualidade dos dados
+            </p>
+          </div>
+        </Link>
+
+        <Link href="/settings/workflow" className="group">
+          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46]/50 hover:bg-primary/5 dark:border-zinc-700/50 dark:bg-card dark:hover:border-[#C69A46]/50">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#0F1C38] text-white transition-transform group-hover:scale-105">
+              <GitBranch className="size-8" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground">Fluxos de Trabalho</h2>
+            <p className="text-center text-sm text-muted-foreground">
+              Gerencie as etapas de aprovação e governança de dados.
+            </p>
+          </div>
+        </Link>
+
+        <Link href="/request" className="group">
+          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border-2 border-[#C69A46] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46] hover:bg-[#C69A46]/5 dark:bg-card dark:hover:bg-[#C69A46]/10">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#C69A46] text-white transition-transform group-hover:scale-105">
+              <FilePlus className="size-8" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground">Nova Requisição</h2>
+            <p className="text-center text-sm text-muted-foreground">
+              Criar nova requisição de descrição de material
+            </p>
+          </div>
+        </Link>
       </div>
     </main>
   )

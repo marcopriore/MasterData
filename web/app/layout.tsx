@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AppSidebar } from "@/components/app-sidebar";
 import "./globals.css";
 
 const inter = Inter({
@@ -30,7 +31,10 @@ export default function RootLayout({
         className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ThemeProvider defaultTheme="dark" attribute="class">
-          {children}
+          <AppSidebar />
+          <main className="min-h-screen p-8 ml-0 md:ml-[14rem]">
+            {children}
+          </main>
         </ThemeProvider>
       </body>
     </html>

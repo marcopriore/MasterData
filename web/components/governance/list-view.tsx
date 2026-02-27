@@ -4,10 +4,11 @@ import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
 
 interface ListViewProps {
   requests: MaterialRequest[]
-  onCompleteData: (id: string) => void
+  onCompleteData?: (id: string) => void
+  onViewDetails?: (id: string) => void
 }
 
-export function ListView({ requests, onCompleteData }: ListViewProps) {
+export function ListView({ requests, onCompleteData, onViewDetails }: ListViewProps) {
   if (requests.length === 0) {
     return <EmptyColumn message="Nenhuma requisicao encontrada com os filtros atuais." />
   }
@@ -33,6 +34,7 @@ export function ListView({ requests, onCompleteData }: ListViewProps) {
           request={req}
           variant="list"
           onCompleteData={onCompleteData}
+          onViewDetails={onViewDetails}
         />
       ))}
     </div>

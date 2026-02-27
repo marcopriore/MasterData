@@ -293,8 +293,8 @@ export function PhaseCategory({ selectedPDM, onSelectPDM }: PhaseCategoryProps) 
         <Input
           placeholder="Buscar material... (ex: bearing, bolt, cable)"
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10 h-11 bg-card"
+          onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
+          className="pl-10 h-11 uppercase bg-card"
         />
       </div>
 

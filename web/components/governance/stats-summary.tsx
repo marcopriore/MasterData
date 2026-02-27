@@ -7,14 +7,54 @@ import {
   AlertTriangle,
   Clock,
   CheckCircle2,
+  XCircle,
 } from "lucide-react"
 import type { MaterialRequest } from "./request-card"
 
 interface StatsSummaryProps {
   requests: MaterialRequest[]
+  variant?: "default" | "governance"
 }
 
-export function StatsSummary({ requests }: StatsSummaryProps) {
+export function StatsSummary({ requests, variant = "default" }: StatsSummaryProps) {
+  if (variant === "governance") {
+    const pendente = requests.filter((r) => {
+      const s = (r.statusLabel || r.status || "").toLowerCase()
+      return s === "pending" || s === "pendente" || r.status === "draft"
+    }).length
+    const aprovado = requests.filter((r) => {
+      const s = (r.statusLabel || r.status || "").toLowerCase()
+      return s === "approved" || s === "aprovado" || r.status === "completed"
+    }).length
+    const rejeitado = requests.filter((r) => {
+      const s = (r.statusLabel || r.status || "").toLowerCase()
+      return s === "rejected" || s === "rejeitado"
+    }).length
+    const stats = [
+      { label: "PENDENTE", value: pendente, icon: <Clock className="size-5" />, color: "text-blue-600 dark:text-blue-400", bgColor: "bg-blue-100 dark:bg-blue-500/20", labelColor: "text-blue-600 dark:text-blue-400" },
+      { label: "APROVADO", value: aprovado, icon: <CheckCircle2 className="size-5" />, color: "text-green-600 dark:text-green-400", bgColor: "bg-green-100 dark:bg-green-500/20", labelColor: "text-green-600 dark:text-green-400" },
+      { label: "REJEITADO", value: rejeitado, icon: <XCircle className="size-5" />, color: "text-red-600 dark:text-red-400", bgColor: "bg-red-100 dark:bg-red-500/20", labelColor: "text-red-600 dark:text-red-400" },
+    ]
+    return (
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className="flex items-center gap-4 rounded-xl border border-slate-200/60 bg-white p-4 shadow-sm dark:border-zinc-400/40 dark:bg-transparent"
+          >
+            <div className={cn("flex size-12 shrink-0 items-center justify-center rounded-full", stat.bgColor, stat.color)}>
+              {stat.icon}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-3xl font-bold tracking-tight text-slate-900 leading-none dark:text-white">{stat.value}</p>
+              <p className={cn("mt-1.5 text-xs font-medium uppercase tracking-wider truncate", stat.labelColor)}>{stat.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   const total = requests.length
   const pending = requests.filter(
     (r) => r.status === "pending_technical" || r.status === "pending_fiscal" || r.status === "pending_mrp"

@@ -73,7 +73,7 @@ export function PhaseSpecs({
                 value={quantity}
                 onChange={(e) => onQuantityChange(e.target.value)}
                 placeholder="Ex: 10"
-                className="h-10 bg-card"
+                className="h-10 uppercase bg-card"
               />
             </div>
             <div className="space-y-2">
@@ -96,9 +96,9 @@ export function PhaseSpecs({
             <Input
               id="description-note"
               value={description}
-              onChange={(e) => onDescriptionChange(e.target.value)}
+              onChange={(e) => onDescriptionChange(e.target.value.toUpperCase())}
               placeholder="Informacoes adicionais relevantes para esta requisicao..."
-              className="h-10 bg-card"
+              className="h-10 uppercase bg-card"
             />
           </div>
         </CardContent>
@@ -173,13 +173,13 @@ export function PhaseSpecs({
                         id={`attr-${attr.id}`}
                         type={attr.dataType === "numeric" ? "number" : "text"}
                         value={values[attr.id] || ""}
-                        onChange={(e) => onChange(attr.id, e.target.value)}
+                        onChange={(e) => onChange(attr.id, attr.dataType === "numeric" ? e.target.value : e.target.value.toUpperCase())}
                         placeholder={
                           attr.dataType === "numeric"
                             ? `Valor em ${attr.unit || "numerico"}`
                             : `Informe ${attr.name.toLowerCase()}`
                         }
-                        className="h-10 bg-card"
+                        className="h-10 uppercase bg-card"
                       />
                     )}
                     {attr.unit && attr.dataType === "numeric" && (

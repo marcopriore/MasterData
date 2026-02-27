@@ -87,9 +87,9 @@ export function PhaseAdmin({
                 <Input
                   id="requester-name"
                   value={requesterName}
-                  onChange={(e) => onRequesterNameChange(e.target.value)}
+                  onChange={(e) => onRequesterNameChange(e.target.value.toUpperCase())}
                   placeholder="Nome completo"
-                  className="h-10 pl-10 bg-card"
+                  className="h-10 pl-10 uppercase bg-card"
                 />
               </div>
             </div>
@@ -103,9 +103,9 @@ export function PhaseAdmin({
                 <Input
                   id="cost-center"
                   value={costCenter}
-                  onChange={(e) => onCostCenterChange(e.target.value)}
+                  onChange={(e) => onCostCenterChange(e.target.value.toUpperCase())}
                   placeholder="Ex: CC-4500-MNT"
-                  className="h-10 pl-10 bg-card font-mono"
+                  className="h-10 pl-10 uppercase bg-card font-mono"
                 />
               </div>
             </div>

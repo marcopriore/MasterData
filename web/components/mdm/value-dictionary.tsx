@@ -87,20 +87,20 @@ export function ValueDictionary({
                 <Label className="text-xs text-muted-foreground">Valor</Label>
                 <Input
                   value={newValue}
-                  onChange={(e) => setNewValue(e.target.value)}
+                  onChange={(e) => setNewValue(e.target.value.toUpperCase())}
                   onKeyDown={handleKeyDown}
                   placeholder="Ex: Stainless Steel"
-                  className="h-8 text-sm bg-background"
+                  className="h-8 text-sm bg-background uppercase"
                 />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Abreviacao</Label>
                 <Input
                   value={newAbbr}
-                  onChange={(e) => setNewAbbr(e.target.value)}
+                  onChange={(e) => setNewAbbr(e.target.value.toUpperCase())}
                   onKeyDown={handleKeyDown}
                   placeholder="Ex: SS"
-                  className="h-8 text-sm font-mono bg-background"
+                  className="h-8 text-sm font-mono bg-background uppercase"
                 />
               </div>
               <Button
@@ -141,10 +141,10 @@ export function ValueDictionary({
                       className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/30"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-sm font-medium text-foreground truncate">
+                        <span className="text-sm font-medium uppercase text-foreground truncate">
                           {v.value}
                         </span>
-                        <Badge variant="outline" className="font-mono text-xs shrink-0">
+                        <Badge variant="outline" className="font-mono text-xs uppercase shrink-0">
                           {v.abbreviation}
                         </Badge>
                       </div>

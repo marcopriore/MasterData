@@ -56,17 +56,17 @@ export function FiltersBar({
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Buscar por solicitante, material ou ID..."
+            placeholder="Buscar por PDM ou ID..."
             value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-10 h-10 bg-card"
+            onChange={(e) => onSearchChange(e.target.value.toUpperCase())}
+            className="pl-10 h-10 uppercase bg-white text-[#0F1C38] placeholder:text-slate-500 border-slate-200/80 dark:bg-card dark:text-foreground dark:border-zinc-400/40"
           />
         </div>
 
         {/* Filters */}
         <div className="flex items-center gap-2">
           <Select value={category} onValueChange={onCategoryChange}>
-            <SelectTrigger className="h-10 w-[150px] bg-card">
+            <SelectTrigger className="h-10 w-[150px] uppercase bg-white text-[#0F1C38] border-slate-200/80 dark:bg-card dark:text-foreground dark:border-zinc-400/40">
               <SlidersHorizontal className="size-3.5 text-muted-foreground mr-1.5" />
               <SelectValue placeholder="Categoria" />
             </SelectTrigger>
@@ -80,7 +80,7 @@ export function FiltersBar({
           </Select>
 
           <Select value={dateRange} onValueChange={onDateRangeChange}>
-            <SelectTrigger className="h-10 w-[140px] bg-card">
+            <SelectTrigger className="h-10 w-[140px] uppercase bg-white text-[#0F1C38] border-slate-200/80 dark:bg-card dark:text-foreground dark:border-zinc-400/40">
               <SelectValue placeholder="Periodo" />
             </SelectTrigger>
             <SelectContent>
@@ -93,7 +93,7 @@ export function FiltersBar({
           </Select>
 
           {/* View toggle */}
-          <div className="flex items-center rounded-lg border bg-card p-0.5">
+          <div className="flex items-center rounded-lg border border-slate-200/80 bg-white p-0.5 dark:border-zinc-400/40 dark:bg-card">
             <Button
               variant="ghost"
               size="icon"
@@ -124,9 +124,9 @@ export function FiltersBar({
 
       {/* Active filters summary */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          <span className="font-semibold text-foreground">{resultCount}</span>{" "}
-          requisicao{resultCount !== 1 ? "es" : ""} encontrada{resultCount !== 1 ? "s" : ""}
+        <p className="text-xs uppercase text-muted-foreground">
+          <span className="font-semibold text-[#0F1C38] dark:text-foreground">{resultCount}</span>{" "}
+          solicitaç{resultCount !== 1 ? "ões" : "ão"} encontrada{resultCount !== 1 ? "s" : ""}
         </p>
         {hasFilters && (
           <Button
@@ -136,7 +136,7 @@ export function FiltersBar({
             onClick={clearFilters}
           >
             <X className="size-3" />
-            Limpar filtros
+            Limpar Filtros
           </Button>
         )}
       </div>

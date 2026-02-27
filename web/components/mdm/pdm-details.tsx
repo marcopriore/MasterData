@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { FileText, ChevronDown, ChevronUp } from "lucide-react"
+import { FileText, ChevronDown, ChevronUp, Eye } from "lucide-react"
+import type { Attribute } from "./attributes-table"
 
 interface PdmDetailsProps {
   name: string
@@ -17,6 +18,8 @@ interface PdmDetailsProps {
   selectedPdmId?: number | null
   isOpen?: boolean
   onToggle?: () => void
+  readOnly?: boolean
+  attributes?: Attribute[]
 }
 
 export function PdmDetails({
@@ -29,8 +32,27 @@ export function PdmDetails({
   selectedPdmId = null,
   isOpen = true,
   onToggle,
+  readOnly = false,
+  attributes = [],
 }: PdmDetailsProps) {
   const isActivePdm = selectedPdmId != null
+  const includedAttrs = attributes.filter((a) => a.includeInDescription)
+  const generatePreview = () => {
+    const parts: string[] = []
+    if (name) {
+      parts.push(name.toUpperCase().replace(/\s+/g, " "))
+    } else {
+      parts.push("MATERIAL")
+    }
+    includedAttrs.forEach((attr) => {
+      if (attr.abbreviation) {
+        parts.push(`[${attr.abbreviation.toUpperCase()}]`)
+      } else if (attr.name) {
+        parts.push(`[${attr.name.toUpperCase().replace(/\s+/g, "_")}]`)
+      }
+    })
+    return parts.join(" ")
+  }
   return (
     <Card
       className={cn(
@@ -70,9 +92,10 @@ export function PdmDetails({
             <Input
               id="pdm-name"
               value={name}
-              onChange={(e) => onNameChange(e.target.value)}
+              onChange={(e) => onNameChange(e.target.value.toUpperCase())}
               placeholder="Ex: Bearing Ball Radial"
-              className="bg-background"
+              disabled={readOnly}
+              className={cn("bg-background uppercase", readOnly && "cursor-not-allowed bg-slate-100 dark:bg-slate-800/50")}
             />
           </div>
           <div className="space-y-2">
@@ -81,22 +104,40 @@ export function PdmDetails({
             </Label>
             <Input
               id="pdm-code"
+              type="text"
               value={code}
-              onChange={(e) => onCodeChange(e.target.value)}
-              placeholder="Ex: MEC-BRG-001"
-              className="font-mono bg-background"
+              onChange={(e) => onCodeChange(e.target.value.toUpperCase().slice(0, 7))}
+              placeholder="Ex: MEC001"
+              maxLength={7}
+              disabled={readOnly}
+              className={cn("font-mono bg-background uppercase", readOnly && "cursor-not-allowed bg-slate-100 dark:bg-slate-800/50")}
             />
+            <p className="text-xs text-muted-foreground">
+              Máximo 7 caracteres
+            </p>
           </div>
-          <div className="flex items-end gap-3 pb-1">
+          <div className="flex flex-col justify-end gap-2 pb-1">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <Eye className="size-4 shrink-0 text-primary" />
+              <code className="font-mono text-sm font-bold text-preview-foreground whitespace-nowrap">
+                {generatePreview()}
+              </code>
+            </div>
             <div className="flex items-center gap-3">
-              <Switch
-                id="pdm-active"
-                checked={isActive}
-                onCheckedChange={onActiveChange}
-              />
-              <Label htmlFor="pdm-active" className="text-sm font-medium text-foreground cursor-pointer">
-                {isActive ? "Ativo" : "Inativo"}
-              </Label>
+              <span className="rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
+                {includedAttrs.length} {includedAttrs.length === 1 ? "campo" : "campos"}
+              </span>
+              <div className={cn("flex items-center gap-2", readOnly && "opacity-70")}>
+                <Switch
+                  id="pdm-active"
+                  checked={isActive}
+                  onCheckedChange={onActiveChange}
+                  disabled={readOnly}
+                />
+                <Label htmlFor="pdm-active" className="text-sm font-medium text-foreground cursor-pointer">
+                  {isActive ? "Ativo" : "Inativo"}
+                </Label>
+              </div>
             </div>
           </div>
         </div>

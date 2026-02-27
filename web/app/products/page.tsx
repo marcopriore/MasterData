@@ -93,9 +93,9 @@ export default function ProductsPage() {
             <div className="grid gap-1">
               <label className="text-sm text-gray-600">Nome</label>
               <input
-                className="rounded-lg border px-3 py-2"
+                className="rounded-lg border px-3 py-2 uppercase"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => setName(e.target.value.toUpperCase())}
                 required
               />
             </div>
@@ -103,9 +103,9 @@ export default function ProductsPage() {
             <div className="grid gap-1">
               <label className="text-sm text-gray-600">Descrição</label>
               <textarea
-                className="rounded-lg border px-3 py-2"
+                className="rounded-lg border px-3 py-2 uppercase"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => setDescription(e.target.value.toUpperCase())}
                 rows={3}
               />
             </div>

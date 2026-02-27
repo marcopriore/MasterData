@@ -1,18 +1,27 @@
-# Python virtual environment
-api/.venv/
-api/__pycache__/
-api/*.pyc
+# Dependencies
+node_modules/
 
-# Next.js / Node modules
-web/node_modules/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Next.js
 web/.next/
 web/out/
 web/.git
-
-# Banco de dados e ambiente
-api/*.db
-.env
-.env.local
 
 # Sistema
 .DS_Store

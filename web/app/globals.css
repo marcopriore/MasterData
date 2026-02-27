@@ -188,3 +188,72 @@ h1, h2, h3, h4, h5, h6,
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(15, 28, 56, 0.3);
 }
+
+/* Thin, professional scrollbar (scrollbar-thin scrollbar-thumb-slate-300 equivalent) */
+.scrollbar-thin-professional {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) transparent; /* slate-300 */
+}
+
+.scrollbar-thin-professional::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin-professional::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin-professional::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225); /* slate-300 */
+  border-radius: 4px;
+}
+
+.scrollbar-thin-professional::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184); /* slate-400 */
+}
+
+/* Attributes grid scrollbar: thin, slate-400 thumb, slate-100 track */
+.scrollbar-thin.scrollbar-thumb-slate-400.scrollbar-track-slate-100 {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184) rgb(241 245 249);
+}
+
+.scrollbar-thin.scrollbar-thumb-slate-400.scrollbar-track-slate-100::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin.scrollbar-thumb-slate-400.scrollbar-track-slate-100::-webkit-scrollbar-track {
+  background: rgb(241 245 249);
+}
+
+.scrollbar-thin.scrollbar-thumb-slate-400.scrollbar-track-slate-100::-webkit-scrollbar-thumb {
+  background-color: rgb(148 163 184);
+  border-radius: 4px;
+}
+
+/* Scrollbar: thin + slate-300 thumb (for attributes grid) */
+.scrollbar-thin.scrollbar-thumb-slate-300 {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) transparent;
+}
+
+.scrollbar-thin.scrollbar-thumb-slate-300::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin.scrollbar-thumb-slate-300::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin.scrollbar-thumb-slate-300::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225);
+  border-radius: 4px;
+}
+
+/* Force overflow-y for attributes grid scroll */
+.attributes-scroll-container {
+  overflow-y: auto !important;
+}

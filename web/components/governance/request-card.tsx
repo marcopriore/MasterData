@@ -36,7 +36,7 @@ export interface MaterialRequest {
   requesterAvatar: string
   date: string
   urgency: "low" | "medium" | "high"
-  status: "pending_technical" | "pending_fiscal" | "pending_mrp" | "completed" | "draft"
+  status: string
   statusLabel: string
   enrichment: EnrichmentStep[]
   pendingAction?: string
@@ -67,12 +67,15 @@ const statusColors: Record<string, string> = {
   pending_mrp: "bg-chart-2/10 text-chart-2 border-chart-2/20",
   completed: "bg-success/10 text-success border-success/20",
   draft: "bg-muted text-muted-foreground border-border",
+  Pending: "bg-muted text-muted-foreground border-border",
 }
 
 interface RequestCardProps {
   request: MaterialRequest
-  variant?: "kanban" | "list"
+  variant?: "kanban" | "list" | "grid"
+  invalidStatus?: boolean
   onCompleteData?: (id: string) => void
+  onViewDetails?: (id: string) => void
 }
 
 function MiniProgress({ label, percent }: { label: string; percent: number }) {
@@ -82,7 +85,7 @@ function MiniProgress({ label, percent }: { label: string; percent: number }) {
         <TooltipTrigger asChild>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-muted-foreground truncate">{label}</span>
+              <span className="text-[10px] text-slate-600 truncate dark:text-muted-foreground">{label}</span>
               <span className="text-[10px] font-bold text-foreground ml-1">{percent}%</span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -108,17 +111,72 @@ function MiniProgress({ label, percent }: { label: string; percent: number }) {
   )
 }
 
-export function RequestCard({ request, variant = "kanban", onCompleteData }: RequestCardProps) {
+export function RequestCard({
+  request,
+  variant = "kanban",
+  invalidStatus = false,
+  onCompleteData,
+  onViewDetails,
+}: RequestCardProps) {
   const urg = urgencyConfig[request.urgency]
   const needsAction =
     request.status === "pending_fiscal" || request.status === "pending_mrp"
   const totalProgress = Math.round(
-    request.enrichment.reduce((acc, s) => acc + s.percent, 0) / request.enrichment.length
+    request.enrichment.reduce((acc, s) => acc + s.percent, 0) /
+      (request.enrichment.length || 1)
   )
+  const statusColor = statusColors[request.status] ?? statusColors[request.statusLabel] ?? statusColors.draft
+
+  if (variant === "grid") {
+    return (
+      <Card className="group border-border/60 hover:border-primary/20 hover:shadow-md transition-all">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-mono font-bold text-primary">
+              {request.requestId}
+            </span>
+            <div className="flex items-center gap-1">
+              {invalidStatus && (
+                <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
+                  Status Inválido
+                </Badge>
+              )}
+              <Badge variant="outline" className={cn("text-[10px]", statusColor)}>
+                {request.statusLabel}
+              </Badge>
+            </div>
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-foreground leading-tight line-clamp-1">
+              {request.materialName}
+            </h4>
+            <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
+              <Clock className="size-3" />
+              {request.date}
+            </p>
+          </div>
+          {onViewDetails && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full gap-1.5 h-8 text-xs"
+              onClick={(e) => {
+                e.stopPropagation()
+                onViewDetails(request.id)
+              }}
+            >
+              <ChevronRight className="size-3.5" />
+              Ver Detalhes
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
 
   if (variant === "list") {
     return (
-      <div className="group flex items-center gap-4 rounded-lg border bg-card px-4 py-3 transition-all hover:border-primary/20 hover:shadow-sm">
+      <div className="group flex items-center gap-4 rounded-lg border border-slate-200/60 !bg-white px-4 py-3 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] transition-all hover:border-primary/20 hover:shadow-sm dark:!bg-card dark:border-zinc-400/40 dark:shadow-none">
         {/* Urgency dot */}
         <div className={cn("size-2.5 rounded-full shrink-0", urg.dotClass)} />
 
@@ -171,7 +229,7 @@ export function RequestCard({ request, variant = "kanban", onCompleteData }: Req
 
         {/* Status + Action */}
         <div className="flex items-center gap-2 shrink-0">
-          <Badge variant="outline" className={cn("text-[10px]", statusColors[request.status])}>
+          <Badge variant="outline" className={cn("text-[10px]", statusColor)}>
             {request.statusLabel}
           </Badge>
           {needsAction && onCompleteData && (
@@ -185,7 +243,18 @@ export function RequestCard({ request, variant = "kanban", onCompleteData }: Req
               <span className="hidden sm:inline">Completar</span>
             </Button>
           )}
-          <ChevronRight className="size-4 text-muted-foreground/30 group-hover:text-primary transition-colors" />
+          {onViewDetails ? (
+            <button
+              type="button"
+              className="rounded p-1 text-muted-foreground hover:text-primary transition-colors"
+              onClick={(e) => { e.stopPropagation(); onViewDetails(request.id) }}
+              aria-label="Ver Detalhes"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          ) : (
+            <ChevronRight className="size-4 text-muted-foreground/30 group-hover:text-primary transition-colors" />
+          )}
         </div>
       </div>
     )
@@ -193,17 +262,24 @@ export function RequestCard({ request, variant = "kanban", onCompleteData }: Req
 
   // Kanban card
   return (
-    <Card className="group border-border/60 hover:border-primary/20 hover:shadow-md transition-all cursor-pointer">
+    <Card className="group border-slate-200/60 !bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] hover:border-primary/20 hover:shadow-md transition-all cursor-pointer dark:!bg-zinc-400/25 dark:border-zinc-400/40 dark:shadow-none">
       <CardContent className="p-4 space-y-3">
-        {/* Top row: ID + Urgency */}
-        <div className="flex items-center justify-between">
+        {/* Top row: ID + Urgency + Invalid status badge */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-xs font-mono font-bold text-primary">
             {request.requestId}
           </span>
-          <Badge variant="outline" className={cn("text-[10px]", urg.badgeClass)}>
-            <div className={cn("size-1.5 rounded-full mr-0.5", urg.dotClass)} />
-            {urg.label}
-          </Badge>
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            {invalidStatus && (
+              <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
+                Status Inválido
+              </Badge>
+            )}
+            <Badge variant="outline" className={cn("text-[10px]", urg.badgeClass)}>
+              <div className={cn("size-1.5 rounded-full mr-0.5", urg.dotClass)} />
+              {urg.label}
+            </Badge>
+          </div>
         </div>
 
         {/* Material name */}
@@ -260,6 +336,20 @@ export function RequestCard({ request, variant = "kanban", onCompleteData }: Req
             Completar Dados
           </Button>
         )}
+        {onViewDetails && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full gap-1.5 h-8 text-xs border-[#C69A46]/50 text-[#0F1C38] transition-colors duration-200 hover:bg-[#0F1C38] hover:text-white hover:border-[#0F1C38] dark:border-[#C69A46]/50 dark:text-foreground dark:hover:bg-[#0F1C38] dark:hover:text-white dark:hover:border-[#0F1C38]"
+            onClick={(e) => {
+              e.stopPropagation()
+              onViewDetails(request.id)
+            }}
+          >
+            <ChevronRight className="size-3.5" />
+            Ver Detalhes
+          </Button>
+        )}
       </CardContent>
     </Card>
   )
@@ -267,7 +357,7 @@ export function RequestCard({ request, variant = "kanban", onCompleteData }: Req
 
 export function EmptyColumn({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 py-10 px-4 text-center">
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200/60 !bg-white py-10 px-4 text-center dark:!bg-zinc-400/30 dark:border-zinc-400/40">
       <Package className="size-8 text-muted-foreground/30 mb-2" />
       <p className="text-sm text-muted-foreground">{message}</p>
     </div>
