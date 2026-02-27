@@ -43,6 +43,8 @@ from models import (
     WorkflowMigratePayload,
     WorkflowUpdate,
     WorkflowHeaderCreate,
+    RequestOut,
+    MoveToPayload,
 )
 
 #products: list[Product] = []
@@ -111,6 +113,56 @@ def _get_active_workflow_id(db: Session) -> int | None:
     return row.id if row else None
 
 
+def _get_first_step_status_key(workflow_id: int, db: Session) -> str:
+    """Return the status_key of the first active step in the workflow."""
+    first = (
+        db.query(WorkflowConfigORM)
+        .filter(
+            WorkflowConfigORM.workflow_id == workflow_id,
+            WorkflowConfigORM.is_active == True,
+        )
+        .order_by(WorkflowConfigORM.order.asc())
+        .first()
+    )
+    return first.status_key if first else "Pending"
+
+
+def _attr_id_to_name(pdm) -> dict:
+    """Build attribute_id -> name lookup from PDM attributes JSON."""
+    attrs = pdm.attributes if pdm else None
+    if not isinstance(attrs, list):
+        return {}
+    return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
+
+
+def _request_to_dict(r) -> dict:
+    """Serialize a MaterialRequestORM row to the full response dict."""
+    attr_names = _attr_id_to_name(r.pdm)
+    values = [
+        {
+            "label": attr_names.get(rv.attribute_id, rv.attribute_id),
+            "value": rv.value,
+        }
+        for rv in (r.request_values or [])
+    ]
+    return {
+        "id": r.id,
+        "pdm_id": r.pdm_id,
+        "pdm_name": r.pdm.name if r.pdm else None,
+        "status": r.status,
+        "workflow_id": r.workflow_id,
+        "requester": r.requester,
+        "cost_center": r.cost_center,
+        "urgency": r.urgency,
+        "justification": r.justification,
+        "generated_description": r.generated_description,
+        "technical_attributes": r.technical_attributes,
+        "attachments": r.attachments,
+        "date": r.created_at.isoformat() if r.created_at else None,
+        "values": values,
+    }
+
+
 # -------------------------------
 # LISTAR REQUISIÇÕES
 @app.get("/api/requests")
@@ -129,66 +181,88 @@ def list_requests(
     wf_id = workflow_id or _get_active_workflow_id(db)
     if wf_id is not None:
         q = q.filter(MaterialRequestORM.workflow_id == wf_id)
-    rows = q.all()
-
-    def _attr_id_to_name(pdm) -> dict:
-        """Build attribute_id -> name lookup from PDM attributes JSON."""
-        attrs = pdm.attributes if pdm else None
-        if not isinstance(attrs, list):
-            return {}
-        return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
-
-    result = []
-    for r in rows:
-        attr_names = _attr_id_to_name(r.pdm)
-        values = [
-            {
-                "label": attr_names.get(rv.attribute_id, rv.attribute_id),
-                "value": rv.value,
-            }
-            for rv in (r.request_values or [])
-        ]
-        result.append(
-            {
-                "id": r.id,
-                "pdm_name": r.pdm.name if r.pdm else None,
-                "status": r.status,
-                "workflow_id": r.workflow_id,
-                "date": r.created_at.isoformat() if r.created_at else None,
-                "values": values,
-            }
-        )
-    return result
+    return [_request_to_dict(r) for r in q.all()]
 
 
 # -------------------------------
 # CRIAR REQUISIÇÃO DE MATERIAL
 @app.post("/api/requests")
 def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
+    # Validate PDM exists
     pdm = db.query(PDMOrm).filter(PDMOrm.id == payload.pdm_id).first()
     if not pdm:
         raise HTTPException(status_code=404, detail="PDM not found")
+
+    # Resolve workflow — explicit or active
     wf_id = payload.workflow_id or _get_active_workflow_id(db)
     if not wf_id:
         raise HTTPException(status_code=400, detail="No active workflow configured")
+
+    # Initial status = first step of the workflow (not a hardcoded "Pending")
+    initial_status = _get_first_step_status_key(wf_id, db)
+
+    # Build generated description if not supplied by client
+    generated_description = payload.generated_description
+    if not generated_description and pdm.attributes:
+        parts = [pdm.name.upper()]
+        for attr in sorted(pdm.attributes, key=lambda a: a.get("order", 0)):
+            attr_id = str(attr.get("id", ""))
+            if not attr.get("includeInDescription"):
+                continue
+            val = payload.values.get(attr_id, "")
+            if val:
+                # Use LOV abbreviation if available
+                lov_abbr = next(
+                    (
+                        av.get("abbreviation", "")
+                        for av in (attr.get("allowedValues") or [])
+                        if av.get("value") == val and av.get("abbreviation")
+                    ),
+                    None,
+                )
+                parts.append((lov_abbr or val).upper())
+            else:
+                parts.append(f"[{attr.get('abbreviation', attr_id)}]")
+        generated_description = " ".join(parts)
+
     row = MaterialRequestORM(
         pdm_id=payload.pdm_id,
         workflow_id=wf_id,
+        status=initial_status,
         requester=payload.requester,
-        status="Pending",
+        cost_center=payload.cost_center,
+        urgency=payload.urgency,
+        justification=payload.justificativa,
+        generated_description=generated_description,
+        # Store full attribute dict for quick access without joining request_values
+        technical_attributes=payload.values,
+        attachments=payload.attachments or [],
     )
     db.add(row)
     db.flush()
+
+    # Also persist individual attribute values in request_values for backwards compat
     for attribute_id, value in payload.values.items():
-        rv = RequestValueORM(
+        db.add(RequestValueORM(
             request_id=row.id,
             attribute_id=attribute_id,
             value=str(value),
-        )
-        db.add(rv)
+        ))
+
     db.commit()
     db.refresh(row)
-    return {"id": row.id}
+
+    # Eager-load relationships for the response
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+        )
+        .filter(MaterialRequestORM.id == row.id)
+        .one()
+    )
+    return _request_to_dict(row)
 
 
 # -------------------------------
@@ -275,25 +349,7 @@ def update_request_status(
     row.status = next_status
     db.commit()
     db.refresh(row)
-
-    def _attr_id_to_name(pdm) -> dict:
-        attrs = pdm.attributes if pdm else None
-        if not isinstance(attrs, list):
-            return {}
-        return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
-
-    attr_names = _attr_id_to_name(row.pdm)
-    values = [
-        {"label": attr_names.get(rv.attribute_id, rv.attribute_id), "value": rv.value}
-        for rv in (row.request_values or [])
-    ]
-    return {
-        "id": row.id,
-        "pdm_name": row.pdm.name if row.pdm else None,
-        "status": row.status,
-        "date": row.created_at.isoformat() if row.created_at else None,
-        "values": values,
-    }
+    return _request_to_dict(row)
 
 
 # -------------------------------
@@ -317,25 +373,50 @@ def reject_request(
     row.status = "Rejected"
     db.commit()
     db.refresh(row)
+    return _request_to_dict(row)
 
-    def _attr_id_to_name(pdm) -> dict:
-        attrs = pdm.attributes if pdm else None
-        if not isinstance(attrs, list):
-            return {}
-        return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
 
-    attr_names = _attr_id_to_name(row.pdm)
-    values = [
-        {"label": attr_names.get(rv.attribute_id, rv.attribute_id), "value": rv.value}
-        for rv in (row.request_values or [])
-    ]
-    return {
-        "id": row.id,
-        "pdm_name": row.pdm.name if row.pdm else None,
-        "status": row.status,
-        "date": row.created_at.isoformat() if row.created_at else None,
-        "values": values,
+# -------------------------------
+# MOVER REQUISIÇÃO PARA STATUS ARBITRÁRIO (drag-and-drop)
+@app.patch("/api/requests/{request_id}/move-to")
+def move_request_to_status(
+    request_id: int,
+    payload: MoveToPayload,
+    db: Session = Depends(get_db),
+):
+    """
+    Set the request status to any valid status_key that belongs to its workflow.
+    Used by the Kanban drag-and-drop to move cards between columns.
+    """
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+        )
+        .filter(MaterialRequestORM.id == request_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    # Validate that the target status_key exists in the request's workflow
+    valid_keys = {
+        s.status_key
+        for s in db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == row.workflow_id)
+        .all()
     }
+    if payload.status_key not in valid_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{payload.status_key}' is not a valid status for workflow {row.workflow_id}",
+        )
+
+    row.status = payload.status_key
+    db.commit()
+    db.refresh(row)
+    return _request_to_dict(row)
 
 
 # -------------------------------

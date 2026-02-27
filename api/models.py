@@ -65,8 +65,33 @@ class RequestValueCreate(BaseModel):
 class RequestCreate(BaseModel):
     pdm_id: int
     requester: str = "Anonymous"
-    values: dict[str, str] = Field(default_factory=dict)  # attribute_id -> value
-    workflow_id: Optional[int] = None  # defaults to active workflow if omitted
+    cost_center: Optional[str] = None
+    urgency: str = "low"                          # "low" | "medium" | "high"
+    quantity: Optional[int] = None
+    description_note: Optional[str] = None
+    justificativa: Optional[str] = None
+    generated_description: Optional[str] = None
+    values: dict[str, str] = Field(default_factory=dict)   # attribute_id -> value
+    attachments: list[str] = Field(default_factory=list)   # file names / URLs
+    workflow_id: Optional[int] = None             # defaults to active workflow if omitted
+
+
+class RequestOut(BaseModel):
+    """Full response shape returned by GET /api/requests and POST /api/requests."""
+    id: int
+    pdm_id: int
+    pdm_name: Optional[str] = None
+    status: str
+    workflow_id: int
+    requester: str
+    cost_center: Optional[str] = None
+    urgency: str = "low"
+    justification: Optional[str] = None
+    generated_description: Optional[str] = None
+    technical_attributes: Optional[dict] = None
+    attachments: Optional[list] = None
+    date: Optional[str] = None
+    values: list[dict] = Field(default_factory=list)
 
 
 class WorkflowConfig(BaseModel):
@@ -142,3 +167,7 @@ class WorkflowMigratePayload(BaseModel):
 
 class WorkflowUpdate(BaseModel):
     is_active: Optional[bool] = None
+
+
+class MoveToPayload(BaseModel):
+    status_key: str

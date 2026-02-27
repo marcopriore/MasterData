@@ -47,7 +47,20 @@ class MaterialRequestORM(Base):
         Integer, ForeignKey("workflow_header.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(50), default="Pending", nullable=False)
+
+    # Requester info
     requester: Mapped[str] = mapped_column(String(200), nullable=False)
+    cost_center: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    urgency: Mapped[str] = mapped_column(String(20), default="low", nullable=False)
+
+    # Content
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # JSON blobs — store attribute values and attachment metadata
+    technical_attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     pdm: Mapped["PDMOrm"] = relationship("PDMOrm", back_populates="material_requests")
