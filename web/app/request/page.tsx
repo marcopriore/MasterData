@@ -1,40 +1,37 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { apiGet, apiPost } from '@/lib/api'
 import { Stepper, type StepItem } from '@/components/request/stepper'
+import { PhaseAdmin } from '@/components/request/phase-admin'
+import { PhaseSpecs } from '@/components/request/phase-specs'
+import { PhaseDocs } from '@/components/request/phase-docs'
+import { RequestSummary } from '@/components/request/request-summary'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Field, FieldGroup, FieldLabel, FieldError } from '@/components/ui/field'
 import { Toaster, toast } from 'sonner'
-import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react'
 
 const STEPS: StepItem[] = [
-  { id: 1, label: 'Phase 1', description: 'Category Selection' },
-  { id: 2, label: 'Phase 2', description: 'Technical Attributes' },
-  { id: 3, label: 'Phase 3', description: 'Review' },
+  { id: 1, label: 'Fase 1', description: 'Informações Administrativas' },
+  { id: 2, label: 'Fase 2', description: 'Atributos Técnicos' },
+  { id: 3, label: 'Fase 3', description: 'Documentação e Justificativa' },
+  { id: 4, label: 'Fase 4', description: 'Revisão Final' },
 ]
 
-type PDMTemplate = {
+export type PDMTemplate = {
   id: number
   name: string
   internal_code: string
   is_active: boolean
 }
 
-type Attribute = {
+export type Attribute = {
   id: string
   order: number
   name: string
+  description?: string
   dataType: string
   isRequired: boolean
   includeInDescription: boolean
@@ -42,337 +39,427 @@ type Attribute = {
   allowedValues?: Array<{ value: string; abbreviation: string }>
 }
 
+export type UploadedFile = {
+  id: string
+  file: File
+  preview?: string
+}
+
 export default function NewMaterialRequestPage() {
   const router = useRouter()
   const [currentStep, setCurrentStep] = useState(1)
-  const [selectedPdm, setSelectedPdm] = useState<number | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Phase 1 – Admin
+  const [requesterName, setRequesterName] = useState('')
+  const [costCenter, setCostCenter] = useState('')
+  const [urgency, setUrgency] = useState<'low' | 'medium' | 'high'>('low')
+
+  // Phase 2 – Specs
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
   const [pdmsLoading, setPdmsLoading] = useState(false)
-  const [pdmsError, setPdmsError] = useState<string | null>(null)
+  const [selectedPdm, setSelectedPdm] = useState<number | null>(null)
   const [attributes, setAttributes] = useState<Attribute[]>([])
   const [attributesLoading, setAttributesLoading] = useState(false)
-  const [attributesError, setAttributesError] = useState<string | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
   const [invalidFieldIds, setInvalidFieldIds] = useState<Set<string>>(new Set())
+  const [quantity, setQuantity] = useState('')
+  const [descriptionNote, setDescriptionNote] = useState('')
 
-  // Fetch templates on mount
+  // Phase 3 – Docs & Justificativa
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const [justificativa, setJustificativa] = useState('')
+
+  // Fetch PDM templates on mount
   useEffect(() => {
     setPdmsLoading(true)
-    setPdmsError(null)
     apiGet<PDMTemplate[]>('/api/pdm')
-      .then((data) => setPdms(data))
-      .catch((e: unknown) => setPdmsError((e as Error)?.message ?? 'Erro ao carregar PDMs'))
+      .then(setPdms)
+      .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar PDMs'))
       .finally(() => setPdmsLoading(false))
   }, [])
 
-  // Fetch attributes when entering Phase 2 with a selected PDM (keep for Phase 3 review)
+  // Fetch attributes when PDM is selected (entering Phase 2)
   useEffect(() => {
-    if (currentStep === 1 || selectedPdm == null) {
-      setAttributes([])
-      return
-    }
-    if (currentStep !== 2) return // Phase 3: keep attributes from Phase 2
+    if (selectedPdm == null) { setAttributes([]); return }
     setAttributesLoading(true)
-    setAttributesError(null)
     apiGet<Attribute[]>(`/api/pdm/${selectedPdm}/attributes`)
       .then((data) => setAttributes([...data].sort((a, b) => a.order - b.order)))
-      .catch((e: unknown) =>
-        setAttributesError((e as Error)?.message ?? 'Erro ao carregar atributos')
-      )
+      .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar atributos'))
       .finally(() => setAttributesLoading(false))
-  }, [currentStep, selectedPdm])
+  }, [selectedPdm])
 
-  const selectedPdmTemplate = pdms.find((p) => p.id === selectedPdm)
+  const selectedPdmTemplate = pdms.find((p) => p.id === selectedPdm) ?? null
 
-  const handleNext = () => {
-    // Phase 3: Finalize (must run before early return)
-    if (currentStep === 3 && selectedPdm != null) {
-      const data = {
-        pdm_id: selectedPdm,
-        requester: 'Anonymous',
-        values: formData,
-      }
-      apiPost<{ id: number }>('/api/requests', data)
-        .then(() => {
-          toast.success('Solicitação enviada para governança com sucesso!', {
-            position: 'top-right',
-            duration: 1500,
-          })
-          setTimeout(() => router.push('/'), 1500)
-        })
-        .catch(() => {
-          toast.error('Falha ao enviar solicitação. Tente novamente.', {
-            position: 'top-right',
-            duration: 3000,
-          })
-        })
-      return
+  const handleAttrChange = useCallback((attrId: string, value: string) => {
+    setFormData((prev) => ({ ...prev, [attrId]: value }))
+    if (value.trim()) {
+      setInvalidFieldIds((prev) => { const n = new Set(prev); n.delete(attrId); return n })
     }
+  }, [])
 
-    if (currentStep >= STEPS.length) return
+  const handlePdmChange = useCallback((v: string) => {
+    const newId = v ? Number(v) : null
+    if (newId !== selectedPdm) setFormData({})
+    setSelectedPdm(newId)
+  }, [selectedPdm])
 
-    // Phase 2: validate required fields before advancing
-    if (currentStep === 2) {
-      const requiredAttrs = attributes.filter((a) => a.isRequired)
-      const missingIds = requiredAttrs.filter((a) => {
-        const val = formData[a.id] ?? ''
-        return !val.trim()
-      }).map((a) => a.id)
-
-      if (missingIds.length > 0) {
-        setInvalidFieldIds(new Set(missingIds))
-        toast.error('Por favor, preencha todos os campos obrigatórios.', {
-          position: 'top-right',
-          duration: 3000,
-        })
-        return
+  const validateStep = (step: number): boolean => {
+    if (step === 1) {
+      if (!requesterName.trim()) { toast.error('Informe o nome do solicitante.'); return false }
+      if (!costCenter.trim()) { toast.error('Informe o centro de custo.'); return false }
+      return true
+    }
+    if (step === 2) {
+      if (!selectedPdm) { toast.error('Selecione um template PDM.'); return false }
+      if (!quantity.trim() || Number(quantity) < 1) { toast.error('Informe uma quantidade válida.'); return false }
+      const missing = attributes.filter((a) => a.isRequired && !(formData[a.id] ?? '').trim()).map((a) => a.id)
+      if (missing.length > 0) {
+        setInvalidFieldIds(new Set(missing))
+        toast.error('Preencha todos os campos obrigatórios.')
+        return false
       }
       setInvalidFieldIds(new Set())
+      return true
     }
+    if (step === 3) {
+      if (!justificativa.trim()) { toast.error('A justificativa da solicitação é obrigatória.'); return false }
+      return true
+    }
+    return true
+  }
 
-    setCurrentStep(currentStep + 1)
+  const handleNext = async () => {
+    if (currentStep === 4) {
+      // Build the generated description the same way ReviewPhase renders it
+      const selectedPdmObj = pdms.find((p) => p.id === selectedPdm) ?? null
+      const generatedDescription = selectedPdmObj
+        ? [
+            selectedPdmObj.name.toUpperCase(),
+            ...attributes
+              .filter((a) => a.includeInDescription)
+              .map((a) => {
+                const val = formData[a.id]
+                const lov = a.allowedValues?.find((av) => av.value === val)
+                return val ? (lov?.abbreviation || val).toUpperCase() : `[${a.abbreviation}]`
+              }),
+          ].join(' ')
+        : ''
+
+      const payload = {
+        pdm_id: selectedPdm,
+        requester: requesterName,
+        cost_center: costCenter,
+        urgency,
+        quantity: Number(quantity),
+        description_note: descriptionNote,
+        justificativa,
+        generated_description: generatedDescription,
+        values: formData,
+        attachments: uploadedFiles.map((f) => f.file.name),
+      }
+
+      setIsSubmitting(true)
+      try {
+        const result = await apiPost<{ id: number }>('/api/requests', payload)
+        toast.success(`Solicitação #${result.id} criada com sucesso!`, {
+          description: 'Redirecionando para Governança…',
+          duration: 3000,
+        })
+        setTimeout(() => router.push('/governance'), 1600)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+        toast.error('Falha ao enviar solicitação', {
+          description: msg,
+          duration: 6000,
+        })
+      } finally {
+        setIsSubmitting(false)
+      }
+      return
+    }
+    if (!validateStep(currentStep)) return
+    setCurrentStep((s) => s + 1)
   }
 
   const handleBack = () => {
     if (currentStep > 1) {
       if (currentStep === 2) setInvalidFieldIds(new Set())
-      setCurrentStep(currentStep - 1)
+      setCurrentStep((s) => s - 1)
     }
   }
 
-  const canGoNext =
-    currentStep <= STEPS.length &&
-    (currentStep === 1 ? selectedPdm != null : true)
-
-  const handleAttrChange = (attrId: string, value: string) => {
-    setFormData((prev) => ({ ...prev, [attrId]: value }))
-    // Clear validation error when user fixes the field
-    if (value.trim()) {
-      setInvalidFieldIds((prev) => {
-        const next = new Set(prev)
-        next.delete(attrId)
-        return next
-      })
-    }
-  }
-
-  // Smart reset: when PDM changes, clear formData so user starts with a fresh form
-  const handlePdmChange = (v: string) => {
-    const newPdmId = v ? Number(v) : null
-    if (newPdmId !== selectedPdm) {
-      setFormData({})
-    }
-    setSelectedPdm(newPdmId)
-  }
-
-  const isListaDeValores = (attr: Attribute) =>
-    attr.dataType === 'lov' && (attr.allowedValues?.length ?? 0) > 0
-  const isTextoOuNumerico = (attr: Attribute) =>
-    attr.dataType === 'text' || attr.dataType === 'numeric'
+  const isPhase2 = currentStep === 2
+  const showSidebar = isPhase2 && selectedPdmTemplate != null
 
   return (
-    <main className="flex min-h-screen flex-col p-8">
-      <div className="mx-auto w-full max-w-3xl">
-        <div className="flex items-center gap-3">
+    <main className="flex min-h-screen flex-col p-6 md:p-8">
+      <div className="mx-auto w-full max-w-5xl">
+
+        {/* Page header */}
+        <div className="mb-6 flex items-center gap-3">
           <Link href="/">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0 gap-1.5 text-slate-500 hover:bg-transparent hover:text-[#0F1C38] dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
-            >
+            <Button variant="ghost" size="sm" className="shrink-0 gap-1.5 text-slate-500 hover:bg-transparent hover:text-[#0F1C38]">
               <ChevronLeft className="size-4" />
               Início
             </Button>
           </Link>
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">
-              New Material Request
+            <h1 className="text-2xl font-semibold text-foreground flex items-center gap-2">
+              <FileText className="size-6 text-[#0F1C38]" />
+              Nova Solicitação de Cadastro
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Follow the steps to create a new material description request
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Siga as etapas para criar uma nova solicitação de descrição de material
             </p>
           </div>
         </div>
 
-        <div className="mt-8 rounded-2xl border border-[#B4B9BE] bg-card p-6 dark:border-zinc-700/50">
+        {/* Stepper */}
+        <div className="mb-6 rounded-2xl border border-[#B4B9BE] bg-white px-6 py-5 shadow-[var(--shadow-card-float)]">
           <Stepper steps={STEPS} currentStep={currentStep} />
+        </div>
 
-          {/* Phase 1: PDM Template Selection */}
-          {currentStep === 1 && (
-            <div className="mt-8">
-              <FieldGroup>
-                <Field>
-                  <FieldLabel className="text-[#0F1C38] dark:text-heading">
-                    PDM Template
-                  </FieldLabel>
-                  <Select
-                    value={selectedPdm?.toString() ?? ''}
-                    onValueChange={handlePdmChange}
-                    disabled={pdmsLoading}
-                  >
-                    <SelectTrigger className="w-full border-[#B4B9BE] focus-visible:ring-[#C69A46]/50 dark:border-zinc-600/50">
-                      <SelectValue
-                        placeholder={
-                          pdmsLoading ? 'Carregando...' : 'Selecione um template...'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {pdms.map((pdm) => (
-                        <SelectItem key={pdm.id} value={pdm.id.toString()}>
-                          {pdm.name} ({pdm.internal_code})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {pdmsError && (
-                    <p className="mt-1 text-sm text-destructive">{pdmsError}</p>
-                  )}
-                </Field>
-              </FieldGroup>
-            </div>
-          )}
+        {/* Main content area — sidebar layout on Phase 2 */}
+        <div className={showSidebar ? 'grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]' : ''}>
 
-          {/* Phase 2: Technical Attributes */}
-          {currentStep === 2 && (
-            <div className="mt-8">
-              {attributesLoading ? (
-                <p className="text-muted-foreground">Carregando atributos...</p>
-              ) : attributesError ? (
-                <p className="text-sm text-destructive">{attributesError}</p>
-              ) : attributes.length === 0 ? (
-                <p className="text-muted-foreground">
-                  Este PDM não possui atributos técnicos.
-                </p>
-              ) : (
-                <FieldGroup>
-                  {attributes.map((attr) => {
-                    const isInvalid = invalidFieldIds.has(attr.id)
-                    const inputCn = isInvalid
-                      ? 'border-destructive focus-visible:ring-destructive/50 dark:border-destructive'
-                      : 'border-[#B4B9BE] focus-visible:ring-[#C69A46]/50 dark:border-zinc-600/50'
-                    return (
-                      <Field key={attr.id} data-invalid={isInvalid}>
-                        <FieldLabel className="text-[#0F1C38] dark:text-heading">
-                          {attr.name}
-                          {attr.isRequired && (
-                            <span className="text-[#C69A46]"> *</span>
-                          )}
-                        </FieldLabel>
-                        {isListaDeValores(attr) ? (
-                          <Select
-                            value={formData[attr.id] ?? ''}
-                            onValueChange={(v) => handleAttrChange(attr.id, v)}
-                          >
-                            <SelectTrigger
-                              className={`w-full ${inputCn}`}
-                              aria-invalid={isInvalid}
-                            >
-                              <SelectValue placeholder={`Selecione ${attr.name}...`} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {attr.allowedValues!.map((av, idx) => (
-                                <SelectItem key={`${av.value}-${idx}`} value={av.value}>
-                                  {av.value}
-                                  {av.abbreviation && ` (${av.abbreviation})`}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : isTextoOuNumerico(attr) ? (
-                          <Input
-                            type={attr.dataType === 'numeric' ? 'number' : 'text'}
-                            value={formData[attr.id] ?? ''}
-                            onChange={(e) => handleAttrChange(attr.id, attr.dataType === 'numeric' ? e.target.value : e.target.value.toUpperCase())}
-                            placeholder={attr.name}
-                            className={attr.dataType === 'numeric' ? inputCn : `${inputCn} uppercase`}
-                            aria-invalid={isInvalid}
-                          />
-                        ) : null}
-                        {isInvalid && (
-                          <FieldError>Campo obrigatório</FieldError>
-                        )}
-                      </Field>
-                    )
-                  })}
-                </FieldGroup>
-              )}
-            </div>
-          )}
+          {/* Form card */}
+          <div className="rounded-2xl border border-[#B4B9BE] bg-white px-6 py-6 shadow-[var(--shadow-card-float)]">
 
-          {/* Phase 3: Review */}
-          {currentStep === 3 && (
-            <div className="mt-8 space-y-6">
-              <h2 className="text-lg font-semibold text-foreground">
-                Confirmação da Solicitação
-              </h2>
-
-              <div>
-                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Template PDM
-                </h3>
-                <p className="text-base font-medium text-foreground">
-                  {selectedPdmTemplate?.name ?? '—'}
-                </p>
-              </div>
-
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Atributos
-                </h3>
-                <div className="overflow-hidden rounded-lg border border-[#B4B9BE] dark:border-zinc-700/50">
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {attributes.map((attr) => (
-                        <tr
-                          key={attr.id}
-                          className="border-b border-[#B4B9BE]/60 last:border-b-0 dark:border-zinc-700/40"
-                        >
-                          <td className="w-[45%] bg-muted/30 px-4 py-3 font-medium text-foreground">
-                            {attr.name}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {formData[attr.id]?.trim() || '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-8 flex items-center justify-between gap-4">
-            {currentStep > 1 ? (
-              <Button variant="outline" onClick={handleBack}>
-                <ChevronLeft className="size-4" />
-                Back
-              </Button>
-            ) : (
-              <div />
+            {/* Phase 1 – Admin */}
+            {currentStep === 1 && (
+              <PhaseAdmin
+                requesterName={requesterName}
+                onRequesterNameChange={setRequesterName}
+                costCenter={costCenter}
+                onCostCenterChange={setCostCenter}
+                urgency={urgency}
+                onUrgencyChange={setUrgency}
+              />
             )}
-            <Button
-              onClick={handleNext}
-              disabled={!canGoNext}
-              className="bg-[#0F1C38] hover:bg-[#0F1C38]/90 focus-visible:ring-[#C69A46]/50 dark:bg-primary dark:hover:bg-primary/90"
-            >
-              {currentStep === 3 ? (
-                <>
-                  Finalizar Solicitação
-                  <Check className="size-4" />
-                </>
-              ) : (
-                <>
-                  Next
-                  <ChevronRight className="size-4" />
-                </>
-              )}
-            </Button>
+
+            {/* Phase 2 – Technical Specs */}
+            {currentStep === 2 && (
+              <PhaseSpecs
+                pdms={pdms}
+                pdmsLoading={pdmsLoading}
+                selectedPdmId={selectedPdm}
+                onPdmChange={handlePdmChange}
+                attributes={attributes}
+                attributesLoading={attributesLoading}
+                values={formData}
+                onChange={handleAttrChange}
+                invalidFieldIds={invalidFieldIds}
+                quantity={quantity}
+                onQuantityChange={setQuantity}
+                descriptionNote={descriptionNote}
+                onDescriptionNoteChange={setDescriptionNote}
+              />
+            )}
+
+            {/* Phase 3 – Docs & Justificativa */}
+            {currentStep === 3 && (
+              <PhaseDocs
+                files={uploadedFiles}
+                onFilesChange={setUploadedFiles}
+                justificativa={justificativa}
+                onJustificativaChange={setJustificativa}
+              />
+            )}
+
+            {/* Phase 4 – Review */}
+            {currentStep === 4 && (
+              <ReviewPhase
+                pdm={selectedPdmTemplate}
+                attributes={attributes}
+                formData={formData}
+                quantity={quantity}
+                requesterName={requesterName}
+                costCenter={costCenter}
+                urgency={urgency}
+                justificativa={justificativa}
+                files={uploadedFiles}
+                descriptionNote={descriptionNote}
+              />
+            )}
+
+            {/* Navigation buttons */}
+            <div className="mt-8 flex items-center justify-between gap-4 border-t border-[#B4B9BE]/40 pt-6">
+              {currentStep > 1 ? (
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  disabled={isSubmitting}
+                  className="gap-1.5"
+                >
+                  <ChevronLeft className="size-4" />
+                  Voltar
+                </Button>
+              ) : <div />}
+              <Button
+                onClick={handleNext}
+                disabled={isSubmitting}
+                className="gap-1.5 bg-[#0F1C38] hover:bg-[#0F1C38]/90 focus-visible:ring-[#C69A46]/50 disabled:opacity-60"
+              >
+                {currentStep === 4 ? (
+                  isSubmitting ? (
+                    <><Loader2 className="size-4 animate-spin" />Enviando…</>
+                  ) : (
+                    <><Check className="size-4" />Finalizar Solicitação</>
+                  )
+                ) : (
+                  <>Próximo<ChevronRight className="size-4" /></>
+                )}
+              </Button>
+            </div>
           </div>
+
+          {/* Sticky preview sidebar — only on Phase 2 */}
+          {showSidebar && (
+            <div className="hidden lg:block">
+              <RequestSummary
+                pdm={selectedPdmTemplate}
+                attributes={attributes}
+                attrValues={formData}
+                quantity={quantity}
+                requesterName={requesterName}
+                costCenter={costCenter}
+                urgency={urgency}
+              />
+            </div>
+          )}
         </div>
       </div>
       <Toaster position="top-right" richColors duration={3000} />
     </main>
+  )
+}
+
+// ─── Inline Review Phase ──────────────────────────────────────────────────────
+
+type ReviewPhaseProps = {
+  pdm: PDMTemplate | null
+  attributes: Attribute[]
+  formData: Record<string, string>
+  quantity: string
+  requesterName: string
+  costCenter: string
+  urgency: 'low' | 'medium' | 'high'
+  justificativa: string
+  files: UploadedFile[]
+  descriptionNote: string
+}
+
+const urgencyLabel = { low: 'Baixa', medium: 'Média', high: 'Alta' }
+const urgencyClass = {
+  low: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  medium: 'bg-amber-50 text-amber-700 border-amber-200',
+  high: 'bg-red-50 text-red-700 border-red-200',
+}
+
+function ReviewSection({ title }: { title: string }) {
+  return (
+    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {title}
+    </h3>
+  )
+}
+
+function ReviewRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 border-b border-[#B4B9BE]/30 last:border-0">
+      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
+      <span className={`text-sm font-medium text-foreground text-right ${mono ? 'font-mono' : ''}`}>{value || '—'}</span>
+    </div>
+  )
+}
+
+function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costCenter, urgency, justificativa, files, descriptionNote }: ReviewPhaseProps) {
+  // Build description preview
+  const preview = pdm
+    ? [pdm.name.toUpperCase(), ...attributes.filter(a => a.includeInDescription).map(a => {
+        const val = formData[a.id]
+        const lov = a.allowedValues?.find(av => av.value === val)
+        return val ? (lov?.abbreviation || val).toUpperCase() : `[${a.abbreviation}]`
+      })].join(' ')
+    : '—'
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-foreground">Revisão da Solicitação</h2>
+        <p className="text-sm text-muted-foreground mt-1">Confirme todos os dados antes de enviar.</p>
+      </div>
+
+      {/* Description preview */}
+      <div className="rounded-xl border border-[#B4B9BE]/60 bg-slate-50 p-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-[#0F1C38]/60 mb-2">Descrição Gerada</p>
+        <code className="text-sm font-mono font-bold text-[#0F1C38] break-words leading-relaxed">{preview}</code>
+      </div>
+
+      {/* Admin */}
+      <div>
+        <ReviewSection title="Informações Administrativas" />
+        <div className="rounded-xl border border-[#B4B9BE]/60 bg-white px-4">
+          <ReviewRow label="Solicitante" value={requesterName} />
+          <ReviewRow label="Centro de Custo" value={costCenter} mono />
+          <ReviewRow label="Quantidade" value={quantity} />
+          <div className="flex items-start justify-between gap-4 py-2">
+            <span className="text-sm text-muted-foreground">Urgência</span>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${urgencyClass[urgency]}`}>
+              {urgencyLabel[urgency]}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Attributes */}
+      <div>
+        <ReviewSection title="Atributos Técnicos" />
+        <div className="overflow-hidden rounded-xl border border-[#B4B9BE]/60">
+          <table className="w-full text-sm">
+            <tbody>
+              {attributes.map((attr) => (
+                <tr key={attr.id} className="border-b border-[#B4B9BE]/40 last:border-0">
+                  <td className="w-[45%] bg-slate-50 px-4 py-2.5 font-medium text-foreground">{attr.name}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground font-mono">{formData[attr.id]?.trim() || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Justificativa */}
+      <div>
+        <ReviewSection title="Justificativa" />
+        <div className="rounded-xl border border-[#B4B9BE]/60 bg-white px-4 py-3">
+          <p className="text-sm text-foreground whitespace-pre-wrap">{justificativa || '—'}</p>
+        </div>
+      </div>
+
+      {/* Docs */}
+      {files.length > 0 && (
+        <div>
+          <ReviewSection title={`Documentação de Apoio (${files.length} arquivo${files.length !== 1 ? 's' : ''})`} />
+          <div className="flex flex-wrap gap-2">
+            {files.map((f) => (
+              <span key={f.id} className="inline-flex items-center gap-1.5 rounded-lg border border-[#B4B9BE]/60 bg-slate-50 px-3 py-1.5 text-xs font-medium text-foreground">
+                {f.file.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {descriptionNote && (
+        <div>
+          <ReviewSection title="Observação Complementar" />
+          <div className="rounded-xl border border-[#B4B9BE]/60 bg-white px-4 py-3">
+            <p className="text-sm text-foreground">{descriptionNote}</p>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

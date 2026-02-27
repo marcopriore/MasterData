@@ -18,53 +18,91 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Clipboard, Hash, Settings2, Info, Asterisk } from "lucide-react"
-import type { PDMTemplate } from "./phase-category"
+import { Clipboard, Hash, Settings2, Info, AlertCircle } from "lucide-react"
+import type { PDMTemplate, Attribute } from "@/app/request/page"
 
 interface PhaseSpecsProps {
-  pdm: PDMTemplate
+  pdms: PDMTemplate[]
+  pdmsLoading: boolean
+  selectedPdmId: number | null
+  onPdmChange: (v: string) => void
+  attributes: Attribute[]
+  attributesLoading: boolean
   values: Record<string, string>
   onChange: (attrId: string, value: string) => void
+  invalidFieldIds: Set<string>
   quantity: string
   onQuantityChange: (v: string) => void
-  description: string
-  onDescriptionChange: (v: string) => void
+  descriptionNote: string
+  onDescriptionNoteChange: (v: string) => void
 }
 
 export function PhaseSpecs({
-  pdm,
+  pdms,
+  pdmsLoading,
+  selectedPdmId,
+  onPdmChange,
+  attributes,
+  attributesLoading,
   values,
   onChange,
+  invalidFieldIds,
   quantity,
   onQuantityChange,
-  description,
-  onDescriptionChange,
+  descriptionNote,
+  onDescriptionNoteChange,
 }: PhaseSpecsProps) {
+  const selectedPdm = pdms.find((p) => p.id === selectedPdmId)
+
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-foreground">Especificacoes Tecnicas</h2>
+        <h2 className="text-lg font-bold text-foreground">Especificações Técnicas</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Preencha os campos obrigatorios para{" "}
-          <span className="font-semibold text-foreground">{pdm.name}</span>.
+          Selecione o template PDM e preencha os atributos do material.
         </p>
       </div>
 
-      {/* General info */}
-      <Card className="border-border/60 shadow-sm">
+      {/* PDM Selection + General Info */}
+      <Card className="border-[#B4B9BE]/60 shadow-sm">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Clipboard className="size-4 text-primary" />
-            Informacoes Gerais
+            <Clipboard className="size-4 text-[#0F1C38]" />
+            Informações Gerais
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* PDM Template selector */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium flex items-center gap-1">
+              Template PDM
+              <span className="text-[#C69A46]"> *</span>
+            </Label>
+            <Select
+              value={selectedPdmId?.toString() ?? ''}
+              onValueChange={onPdmChange}
+              disabled={pdmsLoading}
+            >
+              <SelectTrigger className="w-full border-[#B4B9BE] focus-visible:ring-[#C69A46]/50">
+                <SelectValue placeholder={pdmsLoading ? 'Carregando...' : 'Selecione um template PDM...'} />
+              </SelectTrigger>
+              <SelectContent>
+                {pdms.map((pdm) => (
+                  <SelectItem key={pdm.id} value={pdm.id.toString()}>
+                    {pdm.name} ({pdm.internal_code})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Quantity + PDM badge */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="quantity" className="text-sm font-medium flex items-center gap-1">
                 <Hash className="size-3.5 text-muted-foreground" />
                 Quantidade
-                <Asterisk className="size-2.5 text-destructive" />
+                <span className="text-[#C69A46]"> *</span>
               </Label>
               <Input
                 id="quantity"
@@ -73,127 +111,161 @@ export function PhaseSpecs({
                 value={quantity}
                 onChange={(e) => onQuantityChange(e.target.value)}
                 placeholder="Ex: 10"
-                className="h-10 uppercase bg-card"
+                className="h-10 border-[#B4B9BE] focus-visible:ring-[#C69A46]/50"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="pdm-code" className="text-sm font-medium flex items-center gap-1">
-                <Settings2 className="size-3.5 text-muted-foreground" />
-                PDM Selecionado
-              </Label>
-              <div className="flex h-10 items-center rounded-md border bg-muted/40 px-3">
-                <span className="text-sm font-mono text-muted-foreground">{pdm.code}</span>
-                <Badge variant="secondary" className="ml-auto text-[10px]">
-                  {pdm.category}
-                </Badge>
+            {selectedPdm && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium flex items-center gap-1">
+                  <Settings2 className="size-3.5 text-muted-foreground" />
+                  PDM Selecionado
+                </Label>
+                <div className="flex h-10 items-center rounded-lg border border-[#B4B9BE]/60 bg-slate-50 px-3">
+                  <span className="text-sm font-mono text-muted-foreground truncate">{selectedPdm.internal_code}</span>
+                  <Badge variant="secondary" className="ml-auto text-[10px] shrink-0">
+                    {selectedPdm.name}
+                  </Badge>
+                </div>
               </div>
-            </div>
+            )}
           </div>
+
+          {/* Complementary description */}
           <div className="space-y-2">
             <Label htmlFor="description-note" className="text-sm font-medium">
-              Observacao / Descricao Complementar
+              Observação / Descrição Complementar
             </Label>
             <Input
               id="description-note"
-              value={description}
-              onChange={(e) => onDescriptionChange(e.target.value.toUpperCase())}
-              placeholder="Informacoes adicionais relevantes para esta requisicao..."
-              className="h-10 uppercase bg-card"
+              value={descriptionNote}
+              onChange={(e) => onDescriptionNoteChange(e.target.value.toUpperCase())}
+              placeholder="INFORMAÇÕES ADICIONAIS RELEVANTES..."
+              className="h-10 uppercase border-[#B4B9BE] focus-visible:ring-[#C69A46]/50"
             />
           </div>
         </CardContent>
       </Card>
 
       {/* Technical Attributes */}
-      <Card className="border-border/60 shadow-sm">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Settings2 className="size-4 text-primary" />
-            Atributos Tecnicos
-            <Badge variant="outline" className="ml-auto text-[10px] font-normal">
-              {pdm.attributes.filter((a) => a.isRequired).length} obrigatorio(s)
-            </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-1">
-            {pdm.attributes.map((attr, index) => (
-              <div key={attr.id}>
-                {index > 0 && <Separator className="my-4" />}
-                <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-[1fr_1.5fr] items-start">
-                  <div className="flex items-center gap-2 sm:pt-2.5">
-                    <Label
-                      htmlFor={`attr-${attr.id}`}
-                      className="text-sm font-medium flex items-center gap-1.5"
-                    >
-                      {attr.name}
-                      {attr.isRequired && (
-                        <Asterisk className="size-2.5 text-destructive" />
-                      )}
-                    </Label>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <Info className="size-3.5 text-muted-foreground/50" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right" className="max-w-[200px]">
-                          <p className="text-xs">
-                            Tipo: {attr.dataType === "numeric" ? "Numerico" : attr.dataType === "text" ? "Texto" : "Lista"}
-                            {attr.unit ? ` (${attr.unit})` : ""}
-                            <br />
-                            Abreviacao: <span className="font-mono font-bold">{attr.abbreviation}</span>
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
+      {selectedPdmId != null && (
+        <Card className="border-[#B4B9BE]/60 shadow-sm">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Settings2 className="size-4 text-[#0F1C38]" />
+              Atributos Técnicos
+              {!attributesLoading && attributes.length > 0 && (
+                <Badge variant="outline" className="ml-auto text-[10px] font-normal border-[#B4B9BE]">
+                  {attributes.filter((a) => a.isRequired).length} obrigatório(s)
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {attributesLoading ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Carregando atributos...</p>
+            ) : attributes.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Este PDM não possui atributos técnicos.</p>
+            ) : (
+              <div className="space-y-1">
+                {attributes.map((attr, index) => {
+                  const isInvalid = invalidFieldIds.has(attr.id)
+                  const isLov = attr.dataType === 'lov' && (attr.allowedValues?.length ?? 0) > 0
+                  const inputCn = isInvalid
+                    ? 'border-destructive focus-visible:ring-destructive/50'
+                    : 'border-[#B4B9BE] focus-visible:ring-[#C69A46]/50'
 
-                  <div>
-                    {attr.dataType === "lov" && attr.allowedValues ? (
-                      <Select
-                        value={values[attr.id] || ""}
-                        onValueChange={(v) => onChange(attr.id, v)}
-                      >
-                        <SelectTrigger
-                          id={`attr-${attr.id}`}
-                          className="h-10 bg-card w-full"
-                        >
-                          <SelectValue placeholder={`Selecione ${attr.name.toLowerCase()}`} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {attr.allowedValues.map((val) => (
-                            <SelectItem key={val} value={val}>
-                              {val}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input
-                        id={`attr-${attr.id}`}
-                        type={attr.dataType === "numeric" ? "number" : "text"}
-                        value={values[attr.id] || ""}
-                        onChange={(e) => onChange(attr.id, attr.dataType === "numeric" ? e.target.value : e.target.value.toUpperCase())}
-                        placeholder={
-                          attr.dataType === "numeric"
-                            ? `Valor em ${attr.unit || "numerico"}`
-                            : `Informe ${attr.name.toLowerCase()}`
-                        }
-                        className="h-10 uppercase bg-card"
-                      />
-                    )}
-                    {attr.unit && attr.dataType === "numeric" && (
-                      <p className="text-[11px] text-muted-foreground mt-1 ml-0.5">
-                        Unidade: {attr.unit}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                  return (
+                    <div key={attr.id}>
+                      {index > 0 && <Separator className="my-4 bg-[#B4B9BE]/30" />}
+                      <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-[1fr_1.5fr] items-start">
+
+                        {/* Label + tooltip */}
+                        <div className="flex items-center gap-2 sm:pt-2.5">
+                          <Label
+                            htmlFor={`attr-${attr.id}`}
+                            className="text-sm font-medium"
+                          >
+                            {attr.name}
+                            {attr.isRequired && (
+                              <span className="text-[#C69A46] ml-0.5"> *</span>
+                            )}
+                          </Label>
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="size-3.5 text-muted-foreground/50 cursor-help shrink-0" />
+                              </TooltipTrigger>
+                              <TooltipContent side="right" className="max-w-[220px] space-y-1">
+                                {attr.description && (
+                                  <p className="text-xs leading-relaxed">{attr.description}</p>
+                                )}
+                                <p className="text-xs text-muted-foreground">
+                                  Tipo:{' '}
+                                  {attr.dataType === 'numeric' ? 'Numérico' : attr.dataType === 'text' ? 'Texto' : 'Lista de Valores'}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Abreviação:{' '}
+                                  <span className="font-mono font-bold text-foreground">{attr.abbreviation}</span>
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+
+                        {/* Input */}
+                        <div className="space-y-1">
+                          {isLov ? (
+                            <Select
+                              value={values[attr.id] ?? ''}
+                              onValueChange={(v) => onChange(attr.id, v)}
+                            >
+                              <SelectTrigger
+                                id={`attr-${attr.id}`}
+                                className={`h-10 w-full ${inputCn}`}
+                                aria-invalid={isInvalid}
+                              >
+                                <SelectValue placeholder={`Selecione ${attr.name.toLowerCase()}...`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {attr.allowedValues!.map((av, i) => (
+                                  <SelectItem key={`${av.value}-${i}`} value={av.value}>
+                                    {av.value}
+                                    {av.abbreviation && (
+                                      <span className="ml-1.5 text-muted-foreground font-mono text-[11px]">({av.abbreviation})</span>
+                                    )}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Input
+                              id={`attr-${attr.id}`}
+                              type={attr.dataType === 'numeric' ? 'number' : 'text'}
+                              value={values[attr.id] ?? ''}
+                              onChange={(e) =>
+                                onChange(attr.id, attr.dataType === 'numeric' ? e.target.value : e.target.value.toUpperCase())
+                              }
+                              placeholder={attr.dataType === 'numeric' ? 'Valor numérico...' : `INFORME ${attr.name.toUpperCase()}...`}
+                              className={`h-10 ${attr.dataType !== 'numeric' ? 'uppercase' : ''} ${inputCn}`}
+                              aria-invalid={isInvalid}
+                            />
+                          )}
+                          {isInvalid && (
+                            <p className="flex items-center gap-1 text-xs text-destructive">
+                              <AlertCircle className="size-3" />
+                              Campo obrigatório
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

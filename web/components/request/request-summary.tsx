@@ -3,12 +3,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Eye, FileText, Package } from "lucide-react"
-import type { PDMTemplate } from "./phase-category"
+import { Eye, FileText, Package, Hash } from "lucide-react"
+import type { PDMTemplate, Attribute } from "@/app/request/page"
 import { cn } from "@/lib/utils"
 
 interface RequestSummaryProps {
   pdm: PDMTemplate | null
+  attributes: Attribute[]
   attrValues: Record<string, string>
   quantity: string
   requesterName: string
@@ -17,70 +18,75 @@ interface RequestSummaryProps {
 }
 
 const urgencyLabels: Record<string, { label: string; className: string }> = {
-  low: { label: "Baixa", className: "bg-success/10 text-success border-success/20" },
-  medium: { label: "Media", className: "bg-warning/10 text-warning-foreground border-warning/20" },
-  high: { label: "Alta", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  low:    { label: "Baixa",  className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  medium: { label: "Média",  className: "bg-amber-50 text-amber-700 border-amber-200" },
+  high:   { label: "Alta",   className: "bg-red-50 text-red-700 border-red-200" },
 }
 
 export function RequestSummary({
   pdm,
+  attributes,
   attrValues,
   quantity,
   requesterName,
   costCenter,
   urgency,
 }: RequestSummaryProps) {
+
+  // Build description preview using abbreviations from LOV or raw value
   const generatePreview = () => {
-    if (!pdm) return "Selecione um material..."
+    if (!pdm) return "Selecione um PDM..."
     const parts: string[] = [pdm.name.toUpperCase()]
-    pdm.attributes.forEach((attr) => {
-      const val = attrValues[attr.id]
-      if (val) {
-        parts.push(val.toUpperCase())
-      } else {
-        parts.push(`[${attr.abbreviation}]`)
-      }
-    })
+    attributes
+      .filter((a) => a.includeInDescription)
+      .forEach((attr) => {
+        const val = attrValues[attr.id]
+        if (val) {
+          const lov = attr.allowedValues?.find((av) => av.value === val)
+          parts.push((lov?.abbreviation || val).toUpperCase())
+        } else {
+          parts.push(`[${attr.abbreviation}]`)
+        }
+      })
     return parts.join(" ")
   }
 
-  const filledCount = pdm
-    ? pdm.attributes.filter((a) => attrValues[a.id] && attrValues[a.id].trim() !== "").length
-    : 0
-  const totalCount = pdm ? pdm.attributes.length : 0
+  const filledCount = attributes.filter((a) => (attrValues[a.id] ?? '').trim() !== '').length
+  const totalCount = attributes.length
   const progress = totalCount > 0 ? Math.round((filledCount / totalCount) * 100) : 0
 
   return (
-    <Card className="border-border/60 shadow-sm sticky top-6">
+    <Card className="border-[#B4B9BE]/60 shadow-sm sticky top-6">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Eye className="size-4 text-primary" />
-          Preview da Requisicao
+          <Eye className="size-4 text-[#0F1C38]" />
+          Preview da Descrição
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+
         {/* Generated description */}
-        <div className="rounded-lg bg-preview-bg p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/70 mb-1.5">
-            Descricao Gerada
+        <div className="rounded-lg border border-[#B4B9BE]/40 bg-slate-50 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-[#0F1C38]/60 mb-1.5">
+            Descrição Gerada
           </p>
-          <code className="text-xs font-mono font-bold text-preview-foreground leading-relaxed block break-words">
+          <code className="text-xs font-mono font-bold text-[#0F1C38] leading-relaxed block break-words">
             {generatePreview()}
           </code>
         </div>
 
         {/* Fill progress */}
-        {pdm && (
-          <div className="space-y-2">
+        {pdm && totalCount > 0 && (
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">Preenchimento</span>
-              <span className="font-semibold text-foreground">{progress}%</span>
+              <span className="font-semibold text-foreground">{filledCount}/{totalCount} · {progress}%</span>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
               <div
                 className={cn(
                   "h-full rounded-full transition-all duration-500",
-                  progress === 100 ? "bg-success" : "bg-primary"
+                  progress === 100 ? "bg-emerald-500" : "bg-[#0F1C38]"
                 )}
                 style={{ width: `${progress}%` }}
               />
@@ -88,27 +94,23 @@ export function RequestSummary({
           </div>
         )}
 
-        <Separator />
+        <Separator className="bg-[#B4B9BE]/40" />
 
         {/* Summary details */}
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-xs">
             <Package className="size-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground">Material:</span>
-            <span className="font-medium text-foreground truncate">
-              {pdm ? pdm.name : "—"}
-            </span>
+            <span className="font-medium text-foreground truncate">{pdm ? pdm.name : "—"}</span>
           </div>
           <div className="flex items-center gap-2 text-xs">
             <FileText className="size-3.5 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground">Codigo:</span>
-            <span className="font-mono font-medium text-foreground">
-              {pdm ? pdm.code : "—"}
-            </span>
+            <span className="text-muted-foreground">Código:</span>
+            <span className="font-mono font-medium text-foreground">{pdm ? pdm.internal_code : "—"}</span>
           </div>
           {quantity && (
             <div className="flex items-center gap-2 text-xs">
-              <span className="size-3.5 shrink-0 text-center text-muted-foreground font-bold">#</span>
+              <Hash className="size-3.5 text-muted-foreground shrink-0" />
               <span className="text-muted-foreground">Qtd:</span>
               <span className="font-semibold text-foreground">{quantity}</span>
             </div>
@@ -122,8 +124,8 @@ export function RequestSummary({
           )}
           {costCenter && (
             <div className="flex items-center gap-2 text-xs">
-              <span className="size-3.5 shrink-0 text-center text-muted-foreground font-bold text-[10px]">C</span>
-              <span className="text-muted-foreground">CC:</span>
+              <span className="size-3.5 shrink-0 text-center text-muted-foreground font-bold text-[10px]">CC</span>
+              <span className="text-muted-foreground">Centro:</span>
               <span className="font-mono font-medium text-foreground">{costCenter}</span>
             </div>
           )}
@@ -131,31 +133,26 @@ export function RequestSummary({
 
         {/* Urgency badge */}
         <div className="flex items-center justify-between pt-1">
-          <span className="text-xs text-muted-foreground">Urgencia</span>
-          <Badge
-            variant="outline"
-            className={cn("text-[10px]", urgencyLabels[urgency]?.className)}
-          >
+          <span className="text-xs text-muted-foreground">Urgência</span>
+          <Badge variant="outline" className={cn("text-[10px]", urgencyLabels[urgency]?.className)}>
             {urgencyLabels[urgency]?.label}
           </Badge>
         </div>
 
-        {/* Attribute values filled */}
-        {pdm && filledCount > 0 && (
+        {/* Filled attributes */}
+        {filledCount > 0 && (
           <>
-            <Separator />
+            <Separator className="bg-[#B4B9BE]/40" />
             <div className="space-y-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Atributos Preenchidos
               </p>
-              {pdm.attributes
-                .filter((a) => attrValues[a.id] && attrValues[a.id].trim() !== "")
+              {attributes
+                .filter((a) => (attrValues[a.id] ?? '').trim() !== '')
                 .map((attr) => (
                   <div key={attr.id} className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">{attr.name}</span>
-                    <span className="font-mono font-medium text-foreground">
-                      {attrValues[attr.id]}
-                    </span>
+                    <span className="text-muted-foreground truncate mr-2">{attr.name}</span>
+                    <span className="font-mono font-medium text-foreground shrink-0">{attrValues[attr.id]}</span>
                   </div>
                 ))}
             </div>

@@ -15,10 +15,9 @@ import {
   Calendar,
   ClipboardEdit,
   Clock,
-  User,
   ChevronRight,
-  Package,
 } from "lucide-react"
+
 
 export interface EnrichmentStep {
   label: string
@@ -41,6 +40,7 @@ export interface MaterialRequest {
   enrichment: EnrichmentStep[]
   pendingAction?: string
   description: string
+  generated_description?: string
 }
 
 const urgencyConfig = {
@@ -85,20 +85,13 @@ function MiniProgress({ label, percent }: { label: string; percent: number }) {
         <TooltipTrigger asChild>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-600 truncate dark:text-muted-foreground">{label}</span>
-              <span className="text-[10px] font-bold text-foreground ml-1">{percent}%</span>
+              <span className="text-[10px] truncate" style={{ color: 'var(--kanban-card-sub)' }}>{label}</span>
+              <span className="text-[10px] font-bold ml-1" style={{ color: 'var(--kanban-card-title)' }}>{percent}%</span>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'var(--kanban-card-separator)' }}>
               <div
-                className={cn(
-                  "h-full rounded-full transition-all duration-500",
-                  percent === 100
-                    ? "bg-success"
-                    : percent > 0
-                    ? "bg-primary"
-                    : "bg-muted-foreground/20"
-                )}
-                style={{ width: `${percent}%` }}
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${percent}%`, backgroundColor: 'var(--kanban-card-accent)' }}
               />
             </div>
           </div>
@@ -218,9 +211,9 @@ export function RequestCard({
 
         {/* Overall progress for smaller screens */}
         <div className="xl:hidden flex items-center gap-2 w-20 shrink-0">
-          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+          <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden dark:bg-slate-700">
             <div
-              className={cn("h-full rounded-full", totalProgress === 100 ? "bg-success" : "bg-primary")}
+              className="h-full rounded-full bg-slate-600 transition-all duration-500 dark:bg-slate-300"
               style={{ width: `${totalProgress}%` }}
             />
           </div>
@@ -261,95 +254,63 @@ export function RequestCard({
   }
 
   // Kanban card
+  const descriptionText = request.generated_description || request.description || '—'
+
   return (
-    <Card className="group border-slate-200/60 !bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] hover:border-primary/20 hover:shadow-md transition-all cursor-pointer dark:!bg-zinc-400/25 dark:border-zinc-400/40 dark:shadow-none">
-      <CardContent className="p-4 space-y-3">
-        {/* Top row: ID + Urgency + Invalid status badge */}
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="text-xs font-mono font-bold text-primary">
+    <Card
+      className="group shadow-sm hover:shadow-md transition-all cursor-pointer"
+      style={{ backgroundColor: 'var(--kanban-card-bg)', borderColor: 'var(--kanban-col-border)' }}
+      onClick={() => onViewDetails?.(request.id)}
+    >
+      <CardContent className="p-3 space-y-2.5">
+        {/* Top row: ID + urgency badge */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--kanban-card-accent)' }}>
             {request.requestId}
           </span>
-          <div className="flex items-center gap-1 flex-wrap justify-end">
+          <div className="flex items-center gap-1">
             {invalidStatus && (
               <Badge variant="outline" className="text-[10px] bg-destructive/10 text-destructive border-destructive/30">
-                Status Inválido
+                Inválido
               </Badge>
             )}
-            <Badge variant="outline" className={cn("text-[10px]", urg.badgeClass)}>
-              <div className={cn("size-1.5 rounded-full mr-0.5", urg.dotClass)} />
+            <Badge variant="outline" className={cn("text-[10px] gap-1", urg.badgeClass)}>
+              <div className={cn("size-1.5 rounded-full shrink-0", urg.dotClass)} />
               {urg.label}
             </Badge>
           </div>
         </div>
 
-        {/* Material name */}
-        <div>
-          <h4 className="text-sm font-semibold text-foreground leading-tight line-clamp-1">
-            {request.materialName}
-          </h4>
-          <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">
-            {request.pdmCode}
-          </p>
-        </div>
+        {/* PDM name */}
+        <h4 className="text-sm font-semibold leading-tight line-clamp-1" style={{ color: 'var(--kanban-card-title)' }}>
+          {request.materialName}
+        </h4>
 
-        {/* Description preview */}
-        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-          {request.description}
+        {/* Generated description — the key field */}
+        <p className="text-[11px] font-mono leading-relaxed line-clamp-2 break-words" style={{ color: 'var(--kanban-card-sub)' }}>
+          {descriptionText}
         </p>
 
-        <Separator />
+        <Separator style={{ backgroundColor: 'var(--kanban-card-separator)' }} />
 
-        {/* Progress steps */}
-        <div className="flex items-center gap-2">
-          {request.enrichment.map((step) => (
-            <MiniProgress key={step.key} label={step.label} percent={step.percent} />
-          ))}
-        </div>
-
-        <Separator />
-
-        {/* Bottom row: Requester + Date */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="size-6 rounded-full bg-accent flex items-center justify-center text-[10px] font-bold text-accent-foreground">
+        {/* Bottom row: requester avatar + name + date */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <div
+              className="size-5 shrink-0 rounded-full flex items-center justify-center text-[9px] font-bold"
+              style={{ backgroundColor: 'var(--kanban-card-accent)', color: 'var(--kanban-card-bg)' }}
+            >
               {request.requesterAvatar}
             </div>
-            <span className="text-xs text-foreground">{request.requester}</span>
+            <span className="text-[11px] truncate" style={{ color: 'var(--kanban-card-title)' }}>
+              {request.requester}
+            </span>
           </div>
-          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1 shrink-0 text-[10px]" style={{ color: 'var(--kanban-card-sub)' }}>
             <Clock className="size-3" />
             {request.date}
           </div>
         </div>
-
-        {/* Action button */}
-        {needsAction && onCompleteData && (
-          <Button
-            size="sm"
-            className="w-full gap-1.5 h-8 text-xs"
-            onClick={(e) => {
-              e.stopPropagation()
-              onCompleteData(request.id)
-            }}
-          >
-            <ClipboardEdit className="size-3.5" />
-            Completar Dados
-          </Button>
-        )}
-        {onViewDetails && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full gap-1.5 h-8 text-xs border-[#C69A46]/50 text-[#0F1C38] transition-colors duration-200 hover:bg-[#0F1C38] hover:text-white hover:border-[#0F1C38] dark:border-[#C69A46]/50 dark:text-foreground dark:hover:bg-[#0F1C38] dark:hover:text-white dark:hover:border-[#0F1C38]"
-            onClick={(e) => {
-              e.stopPropagation()
-              onViewDetails(request.id)
-            }}
-          >
-            <ChevronRight className="size-3.5" />
-            Ver Detalhes
-          </Button>
-        )}
       </CardContent>
     </Card>
   )
@@ -357,9 +318,8 @@ export function RequestCard({
 
 export function EmptyColumn({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200/60 !bg-white py-10 px-4 text-center dark:!bg-zinc-400/30 dark:border-zinc-400/40">
-      <Package className="size-8 text-muted-foreground/30 mb-2" />
-      <p className="text-sm text-muted-foreground">{message}</p>
+    <div className="flex items-center justify-center rounded-lg border border-dashed py-4 px-3 text-center" style={{ borderColor: 'var(--kanban-col-border)' }}>
+      <p className="text-xs" style={{ color: 'var(--kanban-card-sub)' }}>{message}</p>
     </div>
   )
 }

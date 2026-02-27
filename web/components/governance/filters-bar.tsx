@@ -59,14 +59,15 @@ export function FiltersBar({
             placeholder="Buscar por PDM ou ID..."
             value={search}
             onChange={(e) => onSearchChange(e.target.value.toUpperCase())}
-            className="pl-10 h-10 uppercase bg-white text-[#0F1C38] placeholder:text-slate-500 border-slate-200/80 dark:bg-card dark:text-foreground dark:border-zinc-400/40"
+            className="pl-10 h-10 uppercase border-slate-200 focus-visible:ring-0"
+            style={{ backgroundColor: 'var(--filter-input-bg)', color: 'var(--kanban-col-text)', borderColor: 'var(--kanban-col-border)' }}
           />
         </div>
 
         {/* Filters */}
         <div className="flex items-center gap-2">
           <Select value={category} onValueChange={onCategoryChange}>
-            <SelectTrigger className="h-10 w-[150px] uppercase bg-white text-[#0F1C38] border-slate-200/80 dark:bg-card dark:text-foreground dark:border-zinc-400/40">
+            <SelectTrigger className="h-10 w-[150px] uppercase" style={{ backgroundColor: 'var(--filter-input-bg)', color: 'var(--kanban-col-text)', borderColor: 'var(--kanban-col-border)' }}>
               <SlidersHorizontal className="size-3.5 text-muted-foreground mr-1.5" />
               <SelectValue placeholder="Categoria" />
             </SelectTrigger>
@@ -80,7 +81,7 @@ export function FiltersBar({
           </Select>
 
           <Select value={dateRange} onValueChange={onDateRangeChange}>
-            <SelectTrigger className="h-10 w-[140px] uppercase bg-white text-[#0F1C38] border-slate-200/80 dark:bg-card dark:text-foreground dark:border-zinc-400/40">
+            <SelectTrigger className="h-10 w-[140px] uppercase" style={{ backgroundColor: 'var(--filter-input-bg)', color: 'var(--kanban-col-text)', borderColor: 'var(--kanban-col-border)' }}>
               <SelectValue placeholder="Periodo" />
             </SelectTrigger>
             <SelectContent>
@@ -93,7 +94,7 @@ export function FiltersBar({
           </Select>
 
           {/* View toggle */}
-          <div className="flex items-center rounded-lg border border-slate-200/80 bg-white p-0.5 dark:border-zinc-400/40 dark:bg-card">
+          <div className="flex items-center rounded-lg border p-0.5" style={{ backgroundColor: 'var(--filter-input-bg)', borderColor: 'var(--kanban-col-border)' }}>
             <Button
               variant="ghost"
               size="icon"

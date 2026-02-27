@@ -30,20 +30,22 @@ function NavLink({
   href,
   label,
   icon: Icon,
-}: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }) {
+}: { href: string; label: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }> }) {
   const pathname = usePathname()
   const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))
   return (
     <Link
       href={href}
-      className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors text-[#0F1C38]',
-        isActive
-          ? 'font-semibold bg-slate-100 dark:bg-slate-100/80'
-          : 'font-medium hover:bg-slate-100'
-      )}
+      className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+      style={{
+        color: 'var(--sidebar-text)',
+        fontWeight: isActive ? 600 : 500,
+        backgroundColor: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
+      }}
+      onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)' }}
+      onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
     >
-      <Icon className="size-4 shrink-0 text-[#0F1C38]" />
+      <Icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
       {label}
     </Link>
   )
@@ -67,17 +69,23 @@ export function AppSidebar() {
 
   const isDark = mounted && resolvedTheme === "dark"
 
+  const sidebarStyle = {
+    '--nav-width': NAV_WIDTH,
+    backgroundColor: 'var(--sidebar-bg)',
+    borderColor: 'var(--sidebar-border)',
+  } as React.CSSProperties
+
   return (
     <aside
-      className="fixed left-0 top-0 z-40 hidden h-screen w-[--nav-width] flex-col border-r border-slate-200 bg-white dark:border-zinc-700/50 dark:bg-white md:flex"
-      style={{ '--nav-width': NAV_WIDTH } as React.CSSProperties}
+      className="fixed left-0 top-0 z-40 hidden h-screen w-[--nav-width] flex-col border-r md:flex"
+      style={sidebarStyle}
     >
       {/* Logo */}
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 px-4 dark:border-zinc-700/50">
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4" style={{ borderColor: 'var(--sidebar-border)' }}>
         <div className="flex size-8 items-center justify-center rounded-lg bg-[#0F1C38] text-white">
           <Database className="size-4" />
         </div>
-        <span className="text-sm font-bold text-[#0F1C38]">
+        <span className="text-sm font-bold" style={{ color: 'var(--sidebar-text)' }}>
           MDM Platform
         </span>
       </div>
@@ -94,15 +102,20 @@ export function AppSidebar() {
           onOpenChange={setConfigExpanded}
           className="mt-2"
         >
-          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-[#0F1C38] transition-colors hover:bg-slate-100">
+          <CollapsibleTrigger
+            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+            style={{ color: 'var(--sidebar-text)' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+          >
             <div className="flex items-center gap-3">
-              <Settings className="size-4 shrink-0 text-[#0F1C38]" />
+              <Settings className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
               Configurações
             </div>
             {configExpanded ? (
-              <ChevronDown className="size-4 shrink-0 text-[#0F1C38]" />
+              <ChevronDown className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
             ) : (
-              <ChevronRight className="size-4 shrink-0 text-[#0F1C38]" />
+              <ChevronRight className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
             )}
           </CollapsibleTrigger>
           <CollapsibleContent>
@@ -115,14 +128,16 @@ export function AppSidebar() {
                   <Link
                     key={item.href + item.label}
                     href={item.href}
-                    className={cn(
-                      'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors text-[#0F1C38]',
-                      isActive
-                        ? 'font-semibold bg-slate-100 dark:bg-slate-100/80'
-                        : 'font-medium hover:bg-slate-100'
-                    )}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors"
+                    style={{
+                      color: 'var(--sidebar-text)',
+                      fontWeight: isActive ? 600 : 500,
+                      backgroundColor: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
+                    }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)' }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
                   >
-                    <item.icon className="size-4 shrink-0 text-[#0F1C38]" />
+                    <item.icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
                     {item.label}
                   </Link>
                 )
@@ -133,25 +148,28 @@ export function AppSidebar() {
       </nav>
 
       {/* Theme Toggle - bottom of sidebar */}
-      <div className="shrink-0 border-t border-slate-200 p-3 dark:border-zinc-700/50">
+      <div className="shrink-0 border-t p-3" style={{ borderColor: 'var(--sidebar-border)' }}>
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start gap-3 text-[#0F1C38] hover:bg-slate-100 hover:text-[#0F1C38]"
+          className="w-full justify-start gap-3 transition-colors"
+          style={{ color: 'var(--sidebar-text)' }}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
           onClick={() => setTheme(isDark ? "light" : "dark")}
           aria-label={isDark ? "Mudar para modo claro" : "Mudar para modo escuro"}
         >
           {mounted ? (
             isDark ? (
-              <Sun className="size-4 shrink-0 text-[#0F1C38]" />
+              <Sun className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
             ) : (
-              <Moon className="size-4 shrink-0 text-[#0F1C38]" />
+              <Moon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
             )
           ) : (
-            <Moon className="size-4 shrink-0 text-[#0F1C38] opacity-50" />
+            <Moon className="size-4 shrink-0 opacity-50" style={{ color: 'var(--sidebar-icon)' }} />
           )}
           <span className="text-sm font-medium">
-            {mounted ? (isDark ? "Modo Claro" : "Modo Escuro") : "Tema"}
+            {mounted ? (isDark ? "Modo Escuro" : "Modo Claro") : "Tema"}
           </span>
         </Button>
       </div>

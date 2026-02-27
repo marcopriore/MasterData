@@ -160,6 +160,52 @@ body {
   min-height: 100vh;
 }
 
+/* Sidebar */
+:root {
+  --sidebar-bg:          #ffffff;
+  --sidebar-border:      #e2e8f0;
+  --sidebar-text:        #0F1C38;
+  --sidebar-icon:        #0F1C38;
+  --sidebar-hover-bg:    #f1f5f9;
+  --sidebar-active-bg:   #f1f5f9;
+}
+.dark {
+  --sidebar-bg:          #1e3a5f;
+  --sidebar-border:      rgba(255,255,255,0.08);
+  --sidebar-text:        #e2e8f0;
+  --sidebar-icon:        #93c5fd;
+  --sidebar-hover-bg:    rgba(255,255,255,0.07);
+  --sidebar-active-bg:   rgba(255,255,255,0.12);
+}
+
+/* Governance Kanban / FiltersBar – light mode uses slate grays, dark mode uses navy blues */
+:root {
+  --kanban-col-header-bg:   #f1f5f9;  /* slate-100 */
+  --kanban-col-body-bg:     #f8fafc;  /* slate-50  */
+  --kanban-col-border:      #e2e8f0;  /* slate-200 */
+  --kanban-col-text:        #334155;  /* slate-700 */
+  --kanban-col-badge-empty: #cbd5e1;  /* slate-300 */
+  --filter-input-bg:        #f1f5f9;  /* slate-100 */
+  --kanban-card-bg:         #f1f5f9;  /* slate-100 – card background */
+  --kanban-card-title:      #0F1C38;  /* navy – primary text */
+  --kanban-card-sub:        #475569;  /* slate-600 – secondary text */
+  --kanban-card-accent:     #0F1C38;  /* navy – ID, progress fill */
+  --kanban-card-separator:  #cbd5e1;  /* slate-300 – dividers & progress track */
+}
+.dark {
+  --kanban-col-header-bg:   #162d4a;
+  --kanban-col-body-bg:     #122540;
+  --kanban-col-border:      rgba(255,255,255,0.15);
+  --kanban-col-text:        #f1f5f9;
+  --kanban-col-badge-empty: rgba(255,255,255,0.15);
+  --filter-input-bg:        #162d4a;
+  --kanban-card-bg:         #1a3356;
+  --kanban-card-title:      #f1f5f9;
+  --kanban-card-sub:        rgba(255,255,255,0.55);
+  --kanban-card-accent:     #C69A46;
+  --kanban-card-separator:  rgba(255,255,255,0.1);
+}
+
 /* Section containers - rounded-2xl corners */
 [data-slot="card"],
 [data-slot="section"] {

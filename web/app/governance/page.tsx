@@ -10,6 +10,7 @@ import { StatsSummary } from '@/components/governance/stats-summary'
 import { EmptyColumn } from '@/components/governance/request-card'
 import type { MaterialRequest } from '@/components/governance/request-card'
 import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -31,9 +32,17 @@ type RequestValue = { label: string; value: string }
 
 type ApiRequest = {
   id: number
+  pdm_id: number
   pdm_name: string | null
   status: string
-  workflow_id?: number
+  workflow_id: number
+  requester: string
+  cost_center: string | null
+  urgency: 'low' | 'medium' | 'high'
+  justification: string | null
+  generated_description: string | null
+  technical_attributes: Record<string, string> | null
+  attachments: string[] | null
   date: string | null
   values: RequestValue[]
 }
@@ -47,46 +56,34 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
     '/' +
     isoDate.getFullYear()
 
-  const statusMap: Record<string, MaterialRequest['status']> = {
-    Pending: 'pending_technical',
-    pending: 'pending_technical',
-    Approved: 'completed',
-    approved: 'completed',
-    Rejected: 'draft',
-    rejected: 'draft',
-    draft: 'draft',
-    pending_technical: 'pending_technical',
-    pending_fiscal: 'pending_fiscal',
-    pending_mrp: 'pending_mrp',
-    completed: 'completed',
-    Completed: 'completed',
-  }
-  // Use raw API status when not in map so dynamic WorkflowConfig columns can match
-  const status = (statusMap[r.status] ?? r.status) as MaterialRequest['status']
-  const statusLabel = r.status || 'Pending'
-
-  // If request has saved values (TEXTO, NUMERO, LISTA etc), Técnico is 100%
-  const hasTechnicalValues = !!(r.values && r.values.length > 0)
-  const technicalPercent = hasTechnicalValues ? 100 : 0
+  // Derive initials for the avatar from the requester name
+  const initials = (r.requester || '?')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join('')
 
   return {
     id: String(r.id),
-    requestId: `REQ-${r.id}`,
+    requestId: `REQ-${String(r.id).padStart(4, '0')}`,
     materialName: r.pdm_name ?? '—',
-    pdmCode: '',
-    category: '',
-    requester: '',
-    requesterAvatar: '—',
+    pdmCode: r.pdm_name ?? '',
+    category: r.cost_center ?? '',
+    requester: r.requester || '—',
+    requesterAvatar: initials || '?',
     date: dateStr,
-    urgency: 'low',
-    status,
-    statusLabel,
+    urgency: r.urgency ?? 'low',
+    // Use the raw API status — Kanban columns match by status_key directly
+    status: r.status as MaterialRequest['status'],
+    statusLabel: r.status,
+    generated_description: r.generated_description ?? '',
     enrichment: [
-      { label: 'Técnico', key: 'technical', percent: technicalPercent },
+      { label: 'Técnico', key: 'technical', percent: r.values?.length > 0 ? 100 : 0 },
       { label: 'Fiscal', key: 'fiscal', percent: 0 },
       { label: 'MRP', key: 'mrp', percent: 0 },
     ],
-    description: '',
+    description: r.generated_description ?? '',
   }
 }
 
@@ -217,10 +214,10 @@ export default function GovernancePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F1F5F9] dark:bg-transparent">
+    <div className="min-h-screen">
       {/* Header – dark bar with white title in light mode */}
-      <header className="mx-auto max-w-7xl px-4 py-4 md:px-8">
-        <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/60 bg-[#0F1C38] px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.08),0_4px_12px_-2px_rgba(0,0,0,0.06)] dark:rounded-none dark:border-0 dark:border-b dark:border-zinc-700/50 dark:shadow-[0_2px_8px_rgba(0,0,0,0.2)] sm:flex-row sm:items-center sm:justify-between">
+      <header className="mx-auto max-w-7xl">
+        <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/60 bg-[#0F1C38] px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.08),0_4px_12px_-2px_rgba(0,0,0,0.06)] dark:rounded-2xl dark:border-slate-200/10 dark:bg-[#0F1C38] dark:shadow-[0_2px_8px_rgba(0,0,0,0.2)] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <Link href="/">
               <Button
@@ -233,7 +230,7 @@ export default function GovernancePage() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-2xl font-semibold text-white">
+              <h1 className="text-2xl font-semibold !text-white">
                 Governança de Dados
               </h1>
               <p className="text-sm text-white/80">
@@ -252,19 +249,17 @@ export default function GovernancePage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl p-6 md:p-8">
+      <div className="mx-auto max-w-7xl mt-4">
 
         <div className="space-y-6">
-          {/* Stats Summary – white container */}
-          <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] dark:rounded-2xl dark:border-zinc-400/40 dark:bg-zinc-400/30 dark:shadow-none">
-            <StatsSummary requests={materialRequests} variant="governance" />
-          </div>
+          {/* Stats Summary – cards carry their own dark background */}
+          <StatsSummary requests={materialRequests} variant="governance" />
 
-          {/* Card container – white with subtle gray border and shadow */}
-          <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white pt-0 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] dark:bg-zinc-400/30 dark:border-zinc-400/40 dark:shadow-none">
-            {/* Section header bar – no workflow selector */}
-            <div className="flex h-8 min-h-8 items-center justify-between gap-4 px-6 py-1 rounded-t-2xl bg-[#192D50] dark:bg-transparent dark:rounded-none">
-              <h2 className="text-base font-semibold uppercase text-white dark:text-foreground dark:text-[#C69A46]">
+          {/* Card container - same as AttributesTable Card */}
+          <Card className="gap-0 rounded-2xl border pt-0 dark:border-zinc-700/50">
+            {/* Section header bar */}
+            <div className="flex h-8 min-h-8 items-center justify-between gap-4 px-6 py-1 rounded-t-2xl bg-[#192D50]">
+              <h2 className="text-base font-semibold uppercase !text-white">
                 Solicitações de Cadastro
               </h2>
             </div>
@@ -281,7 +276,7 @@ export default function GovernancePage() {
               resultCount={filteredRequests.length}
             />
 
-            <div className="mt-6">
+            <div className="mt-6 overflow-x-auto pb-2">
               {loading ? (
                 <p className="uppercase text-muted-foreground">Carregando solicitações...</p>
               ) : filteredRequests.length === 0 ? (
@@ -291,6 +286,7 @@ export default function GovernancePage() {
                   requests={filteredRequests}
                   workflowId={selectedWorkflowId}
                   onViewDetails={handleViewDetails}
+                  onStatusChanged={() => { fetchRequests() }}
                 />
               ) : (
                 <ListView
@@ -300,7 +296,7 @@ export default function GovernancePage() {
               )}
             </div>
             </div>
-          </div>
+          </Card>
         </div>
       </div>
 
@@ -309,14 +305,49 @@ export default function GovernancePage() {
         <DialogContent className="max-w-2xl border-slate-200 bg-white text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
           <DialogHeader>
             <DialogTitle className="text-slate-900 dark:text-[#C69A46]">
-              Detalhes — REQ-{selectedRequest?.id} ({selectedRequest?.pdm_name ?? '—'})
+              REQ-{String(selectedRequest?.id).padStart(4, '0')} — {selectedRequest?.pdm_name ?? '—'}
             </DialogTitle>
           </DialogHeader>
           {selectedRequest && (
             <>
-              <p className="mb-3 text-sm text-slate-600 dark:text-muted-foreground">
-                Atributos técnicos (TEXTO, NUMERO, LISTA, etc.)
-              </p>
+              {/* Generated description */}
+              {selectedRequest.generated_description && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-zinc-700/50 dark:bg-muted/20">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-1">Descrição Gerada</p>
+                  <code className="text-sm font-mono font-bold text-[#0F1C38] dark:text-[#C69A46] break-words">{selectedRequest.generated_description}</code>
+                </div>
+              )}
+
+              {/* Admin info */}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Solicitante</p>
+                  <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">{selectedRequest.requester || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Centro de Custo</p>
+                  <p className="mt-0.5 font-mono font-medium text-slate-800 dark:text-foreground">{selectedRequest.cost_center || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Urgência</p>
+                  <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground capitalize">{selectedRequest.urgency === 'low' ? 'Baixa' : selectedRequest.urgency === 'medium' ? 'Média' : 'Alta'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Status</p>
+                  <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">{selectedRequest.status}</p>
+                </div>
+              </div>
+
+              {/* Justification */}
+              {selectedRequest.justification && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-1">Justificativa</p>
+                  <p className="text-sm text-slate-700 dark:text-muted-foreground whitespace-pre-wrap">{selectedRequest.justification}</p>
+                </div>
+              )}
+
+              {/* Technical attributes */}
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Atributos Técnicos</p>
               {selectedRequest.values && selectedRequest.values.length > 0 ? (
                 <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-700/50">
                   <table className="w-full text-sm">
@@ -369,6 +400,6 @@ export default function GovernancePage() {
       </Dialog>
 
       <Toaster position="top-right" richColors />
-    </main>
+    </div>
   )
 }

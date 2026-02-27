@@ -30,7 +30,7 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <ThemeProvider defaultTheme="dark" attribute="class">
+        <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false}>
           <AppSidebar />
           <main className="min-h-screen p-8 ml-0 md:ml-[14rem]">
             {children}

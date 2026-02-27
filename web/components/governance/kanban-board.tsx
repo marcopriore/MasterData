@@ -1,73 +1,115 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCorners,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
-import { apiGet } from "@/lib/api"
+import { apiGet, apiPatch } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import {
-  FileEdit,
-  Microscope,
-  Receipt,
-  CheckCircle2,
-  FileQuestion,
-} from "lucide-react"
+import { toast } from "sonner"
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type WorkflowStep = {
   id: number
   step_name: string
-  status_key?: string
+  status_key: string
   order: number
   is_active: boolean
 }
 
 interface KanbanColumn {
-  id: string
+  id: string          // status_key
   label: string
-  icon: React.ReactNode
   colorClass: string
   dotClass: string
-  statuses: string[]
 }
 
-const ICON_MAP: Record<string, React.ReactNode> = {
-  draft: <FileQuestion className="size-4" />,
-  pending_technical: <Microscope className="size-4" />,
-  pending_fiscal: <Receipt className="size-4" />,
-  pending_mrp: <FileEdit className="size-4" />,
-  completed: <CheckCircle2 className="size-4" />,
-}
-const COLOR_MAP: Record<string, { colorClass: string; dotClass: string }> = {
-  draft: { colorClass: "text-muted-foreground", dotClass: "bg-muted-foreground" },
-  pending_technical: { colorClass: "text-primary", dotClass: "bg-primary" },
-  pending_fiscal: { colorClass: "text-warning-foreground", dotClass: "bg-warning" },
-  pending_mrp: { colorClass: "text-chart-2", dotClass: "bg-chart-2" },
-  completed: { colorClass: "text-success", dotClass: "bg-success" },
+// ─── Colour palette cycling for dynamic workflow steps ────────────────────────
+
+const PALETTE: Array<{ colorClass: string; dotClass: string }> = [
+  { colorClass: "text-primary",              dotClass: "bg-primary" },
+  { colorClass: "text-warning-foreground",   dotClass: "bg-warning" },
+  { colorClass: "text-chart-2",              dotClass: "bg-chart-2" },
+  { colorClass: "text-success",              dotClass: "bg-success" },
+  { colorClass: "text-destructive",          dotClass: "bg-destructive" },
+]
+
+const FIXED_COLORS: Record<string, { colorClass: string; dotClass: string }> = {
+  draft:             { colorClass: "text-muted-foreground", dotClass: "bg-muted-foreground" },
+  completed:         { colorClass: "text-success",          dotClass: "bg-success" },
+  rejected:          { colorClass: "text-destructive",      dotClass: "bg-destructive" },
 }
 
 function workflowToColumns(steps: WorkflowStep[]): KanbanColumn[] {
-  return steps.map((s) => {
-    const key = s.status_key ?? `step_${s.id}`
-    const { colorClass, dotClass } = COLOR_MAP[key] ?? {
-      colorClass: "text-primary",
-      dotClass: "bg-primary",
-    }
-    return {
-      id: String(s.id),
-      label: s.step_name,
-      icon: ICON_MAP[key] ?? <FileEdit className="size-4" />,
-      colorClass,
-      dotClass,
-      statuses: [key],
-    }
+  return steps.map((s, i) => {
+    const key = s.status_key
+    const colors = FIXED_COLORS[key] ?? PALETTE[i % PALETTE.length]
+    return { id: key, label: s.step_name, ...colors }
   })
 }
+
+// ─── Sortable card wrapper ─────────────────────────────────────────────────────
+
+function SortableCard({
+  request,
+  allValidStatuses,
+  onCompleteData,
+  onViewDetails,
+}: {
+  request: MaterialRequest
+  allValidStatuses: Set<string>
+  onCompleteData?: (id: string) => void
+  onViewDetails?: (id: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: request.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.35 : 1,
+    touchAction: "none",
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <RequestCard
+        request={request}
+        variant="kanban"
+        invalidStatus={!allValidStatuses.has(request.status)}
+        onCompleteData={onCompleteData}
+        onViewDetails={onViewDetails}
+      />
+    </div>
+  )
+}
+
+// ─── Main board ───────────────────────────────────────────────────────────────
 
 interface KanbanBoardProps {
   requests: MaterialRequest[]
   workflowId?: number | null
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
+  /** Called after a successful drag-and-drop status update so the parent can refresh */
+  onStatusChanged?: (requestId: string, newStatus: string) => void
 }
 
 export function KanbanBoard({
@@ -75,80 +117,222 @@ export function KanbanBoard({
   workflowId,
   onCompleteData,
   onViewDetails,
+  onStatusChanged,
 }: KanbanBoardProps) {
   const [columns, setColumns] = useState<KanbanColumn[]>([])
+  const [columnsLoading, setColumnsLoading] = useState(true)
+
+  // Local copy of requests for optimistic updates
+  const [localRequests, setLocalRequests] = useState<MaterialRequest[]>(requests)
+  // Track which card is being dragged
+  const [activeCard, setActiveCard] = useState<MaterialRequest | null>(null)
+  // Track which column the dragged card is hovering over
+  const [overColumnId, setOverColumnId] = useState<string | null>(null)
+
+  // Sync local copy when parent prop changes (e.g. after a refetch)
+  useEffect(() => { setLocalRequests(requests) }, [requests])
 
   useEffect(() => {
+    setColumnsLoading(true)
     const url = workflowId
       ? `/api/workflow/config?workflow_id=${workflowId}`
       : "/api/workflow/config"
     apiGet<WorkflowStep[]>(url)
-      .then((steps) => setColumns(workflowToColumns(steps)))
+      .then((steps) => setColumns(workflowToColumns(steps.filter((s) => s.is_active))))
       .catch(() => setColumns([]))
+      .finally(() => setColumnsLoading(false))
   }, [workflowId])
 
-  if (columns.length === 0) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      // Require 8px movement before drag starts — prevents accidental drags on click
+      activationConstraint: { distance: 8 },
+    })
+  )
+
+  const allValidStatuses = new Set(columns.map((c) => c.id))
+
+  // Build a lookup: status_key → column id (same thing here, but explicit)
+  const cardsByColumn = useCallback(
+    (colId: string) => {
+      const matched = localRequests.filter((r) => r.status === colId)
+      // Orphaned cards (unknown status) fall into the first column
+      const orphans =
+        columns.length > 0 && colId === columns[0].id
+          ? localRequests.filter((r) => !allValidStatuses.has(r.status))
+          : []
+      return [...matched, ...orphans]
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localRequests, columns]
+  )
+
+  // ── Drag handlers ────────────────────────────────────────────────────────────
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const card = localRequests.find((r) => r.id === event.active.id)
+    setActiveCard(card ?? null)
+  }
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { over } = event
+    if (!over) { setOverColumnId(null); return }
+
+    // `over.id` is either a column id (status_key) or a card id
+    const isColumn = columns.some((c) => c.id === over.id)
+    if (isColumn) {
+      setOverColumnId(String(over.id))
+    } else {
+      // Find which column the hovered card belongs to
+      const targetCard = localRequests.find((r) => r.id === over.id)
+      setOverColumnId(targetCard?.status ?? null)
+    }
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveCard(null)
+    setOverColumnId(null)
+
+    if (!over) return
+
+    const draggedCard = localRequests.find((r) => r.id === active.id)
+    if (!draggedCard) return
+
+    // Resolve the target column
+    const isColumn = columns.some((c) => c.id === over.id)
+    const targetColumnId = isColumn
+      ? String(over.id)
+      : localRequests.find((r) => r.id === over.id)?.status ?? null
+
+    if (!targetColumnId || targetColumnId === draggedCard.status) return
+
+    // ── Optimistic update ─────────────────────────────────────────────────────
+    setLocalRequests((prev) =>
+      prev.map((r) => r.id === draggedCard.id ? { ...r, status: targetColumnId } : r)
+    )
+
+    // ── Persist to backend ────────────────────────────────────────────────────
+    try {
+      await apiPatch(`/api/requests/${draggedCard.id}/move-to`, {
+        status_key: targetColumnId,
+      })
+      onStatusChanged?.(draggedCard.id, targetColumnId)
+    } catch (err: unknown) {
+      // Roll back optimistic update
+      setLocalRequests((prev) =>
+        prev.map((r) => r.id === draggedCard.id ? { ...r, status: draggedCard.status } : r)
+      )
+      const msg = err instanceof Error ? err.message : "Erro desconhecido"
+      toast.error("Falha ao mover solicitação", { description: msg })
+    }
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+
+  if (columnsLoading) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-200/60 py-12 text-center text-sm text-slate-500 dark:border-zinc-400/40 dark:text-muted-foreground">
-        Carregando colunas do Kanban...
+      <div className="rounded-lg border border-dashed py-12 text-center text-sm" style={{ borderColor: 'var(--kanban-col-border)', color: 'var(--kanban-col-text)' }}>
+        Carregando colunas do Kanban…
       </div>
     )
   }
 
-  const allValidStatuses = new Set(columns.flatMap((c) => c.statuses))
+  if (columns.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed py-12 text-center text-sm" style={{ borderColor: 'var(--kanban-col-border)', color: 'var(--kanban-col-text)' }}>
+        Nenhuma etapa de workflow configurada.
+      </div>
+    )
+  }
 
   return (
-    <ScrollArea className="w-full">
-      <div className="flex gap-4 pb-4 min-w-[1000px]">
-        {columns.map((col, colIndex) => {
-          const matchedItems = requests.filter((r) => col.statuses.includes(r.status))
-          const orphanItems =
-            colIndex === 0
-              ? requests.filter((r) => !allValidStatuses.has(r.status))
-              : []
-          const items = [...matchedItems, ...orphanItems]
-          return (
-            <div key={col.id} className="flex w-[260px] shrink-0 flex-col">
-              {/* Column header */}
-              <div className="flex items-center gap-2 rounded-lg border border-slate-200/60 !bg-white px-3 py-2.5 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] dark:!bg-zinc-400/30 dark:border-zinc-400/40 dark:shadow-none mb-3">
-                <div className={cn("shrink-0", col.colorClass)}>{col.icon}</div>
-                <span className="text-sm font-semibold text-foreground truncate">
-                  {col.label}
-                </span>
-                <span
-                  className={cn(
-                    "ml-auto flex size-5 items-center justify-center rounded-full text-[10px] font-bold",
-                    items.length > 0
-                      ? `${col.dotClass} text-white`
-                      : "bg-muted text-muted-foreground"
-                  )}
-                >
-                  {items.length}
-                </span>
-              </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      <ScrollArea className="w-full">
+        <div className="flex gap-4 pb-4 min-w-[900px]">
+          {columns.map((col) => {
+            const items = cardsByColumn(col.id)
+            const isOver = overColumnId === col.id && activeCard?.status !== col.id
 
-              {/* Column body */}
-              <div className="flex-1 space-y-3 rounded-lg border border-slate-200/60 !bg-white p-2 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] min-h-[400px] dark:!bg-zinc-400/30 dark:border-zinc-400/40 dark:shadow-none">
-                {items.length === 0 ? (
-                  <EmptyColumn message="Nenhuma requisicao" />
-                ) : (
-                  items.map((req) => (
-                    <RequestCard
-                      key={req.id}
-                      request={req}
-                      variant="kanban"
-                      invalidStatus={!allValidStatuses.has(req.status)}
-                      onCompleteData={onCompleteData}
-                      onViewDetails={onViewDetails}
-                    />
-                  ))
-                )}
+            return (
+              <div key={col.id} className="flex w-[260px] shrink-0 flex-col">
+                {/* Column header */}
+                <div
+                  className="mb-3 flex items-center gap-2 rounded-lg border px-3 py-2.5 shadow-sm"
+                  style={{ backgroundColor: 'var(--kanban-col-header-bg)', borderColor: 'var(--kanban-col-border)' }}
+                >
+                  <span className="text-sm font-semibold uppercase truncate" style={{ color: 'var(--kanban-col-text)' }}>
+                    {col.label}
+                  </span>
+                  <span
+                    className={cn(
+                      "ml-auto flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+                      items.length > 0 ? `${col.dotClass} text-white` : ""
+                    )}
+                    style={items.length === 0
+                      ? { backgroundColor: 'var(--kanban-col-badge-empty)', color: 'var(--kanban-col-text)' }
+                      : undefined}
+                  >
+                    {items.length}
+                  </span>
+                </div>
+
+                {/* Column body — droppable zone */}
+                <SortableContext
+                  id={col.id}
+                  items={items.map((r) => r.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div
+                    className={cn(
+                      "flex-1 min-h-[200px] max-h-[560px] space-y-2.5 overflow-y-auto rounded-lg border p-2 shadow-sm transition-colors duration-150",
+                      isOver && "ring-2 ring-primary/40"
+                    )}
+                    style={{
+                      backgroundColor: isOver ? 'var(--kanban-col-header-bg)' : 'var(--kanban-col-body-bg)',
+                      borderColor: isOver ? 'var(--kanban-col-border)' : 'var(--kanban-col-border)',
+                    }}
+                  >
+                    {items.length === 0 ? (
+                      <EmptyColumn message="Arraste um card aqui" />
+                    ) : (
+                      items.map((req) => (
+                        <SortableCard
+                          key={req.id}
+                          request={req}
+                          allValidStatuses={allValidStatuses}
+                          onCompleteData={onCompleteData}
+                          onViewDetails={onViewDetails}
+                        />
+                      ))
+                    )}
+                  </div>
+                </SortableContext>
               </div>
-            </div>
-          )
-        })}
-      </div>
-      <ScrollBar orientation="horizontal" />
-    </ScrollArea>
+            )
+          })}
+        </div>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
+
+      {/* Drag overlay — the floating ghost card */}
+      <DragOverlay dropAnimation={{ duration: 180, easing: "ease" }}>
+        {activeCard ? (
+          <div className="rotate-1 scale-105 opacity-95 shadow-xl">
+            <RequestCard
+              request={activeCard}
+              variant="kanban"
+              invalidStatus={!allValidStatuses.has(activeCard.status)}
+            />
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   )
 }
