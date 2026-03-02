@@ -76,6 +76,13 @@ class RequestCreate(BaseModel):
     workflow_id: Optional[int] = None             # defaults to active workflow if omitted
 
 
+class RequestValueOut(BaseModel):
+    """One attribute value row as returned inside RequestOut.values."""
+    attribute_id: str
+    label: str
+    value: str
+
+
 class RequestOut(BaseModel):
     """Full response shape returned by GET /api/requests and POST /api/requests."""
     id: int
@@ -91,7 +98,7 @@ class RequestOut(BaseModel):
     technical_attributes: Optional[dict] = None
     attachments: Optional[list] = None
     date: Optional[str] = None
-    values: list[dict] = Field(default_factory=list)
+    values: list[RequestValueOut] = Field(default_factory=list)
 
 
 class WorkflowConfig(BaseModel):

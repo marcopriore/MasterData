@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { apiGet, apiPost } from '@/lib/api'
+import { apiGet, apiPost, apiUpload } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { Stepper, type StepItem } from '@/components/request/stepper'
 import { PhaseAdmin } from '@/components/request/phase-admin'
@@ -89,12 +89,34 @@ export default function NewMaterialRequestPage() {
       .finally(() => setPdmsLoading(false))
   }, [])
 
-  // Fetch attributes when PDM is selected (entering Phase 2)
+  // Fetch full PDM template + attributes when a PDM is selected (entering Phase 2)
   useEffect(() => {
     if (selectedPdm == null) { setAttributes([]); return }
     setAttributesLoading(true)
-    apiGet<Attribute[]>(`/api/pdm/${selectedPdm}/attributes`)
-      .then((data) => setAttributes([...data].sort((a, b) => a.order - b.order)))
+    apiGet<{ id: number; name: string; internal_code: string; attributes: Attribute[] }>(
+      `/api/pdm/${selectedPdm}`
+    )
+      .then((pdm) => {
+        const sorted = [...pdm.attributes].sort((a, b) => a.order - b.order)
+        setAttributes(sorted)
+
+        // Development aid — log the full schema so the team can see all fields
+        console.group(`[PDM] ${pdm.name} (${pdm.internal_code})`)
+        console.log('id:', pdm.id)
+        console.log('attributes (%d fields):', sorted.length)
+        sorted.forEach((attr, i) => {
+          const type = attr.dataType === 'lov'
+            ? `LOV [${(attr.allowedValues ?? []).map(v => v.value).join(' | ')}]`
+            : attr.dataType
+          console.log(
+            `  ${i + 1}. [${attr.id}] ${attr.name}` +
+            ` — ${type}` +
+            (attr.isRequired ? ' *required*' : '') +
+            (attr.includeInDescription ? ' 📋' : '')
+          )
+        })
+        console.groupEnd()
+      })
       .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar atributos'))
       .finally(() => setAttributesLoading(false))
   }, [selectedPdm])
@@ -166,13 +188,38 @@ export default function NewMaterialRequestPage() {
         justificativa,
         generated_description: generatedDescription,
         values: formData,
+        // Pass filenames for the legacy JSON column; the real files are
+        // uploaded individually after the request row is created.
         attachments: uploadedFiles.map((f) => f.file.name),
       }
 
       setIsSubmitting(true)
       try {
+        // Step 1 — create the request record
         const result = await apiPost<{ id: number }>('/api/requests', payload)
-        toast.success(`Solicitação #${result.id} criada com sucesso!`, {
+        const requestId = result.id
+
+        // Step 2 — upload each file to the new request_attachments table
+        if (uploadedFiles.length > 0) {
+          const uploadResults = await Promise.allSettled(
+            uploadedFiles.map((uf) =>
+              apiUpload(`/api/requests/${requestId}/attachments`, uf.file)
+            )
+          )
+          const failed = uploadResults.filter((r) => r.status === 'rejected')
+          if (failed.length > 0) {
+            const reasons = failed
+              .map((r) => (r as PromiseRejectedResult).reason?.message ?? 'erro')
+              .join('; ')
+            // Non-fatal: request was saved, but warn about partial upload
+            toast.warning(
+              `Solicitação #${requestId} criada, mas ${failed.length} arquivo(s) falharam: ${reasons}`,
+              { duration: 8000 }
+            )
+          }
+        }
+
+        toast.success(`Solicitação #${requestId} criada com sucesso!`, {
           description: 'Redirecionando para Governança…',
           duration: 3000,
         })

@@ -1,65 +1,489 @@
 'use client'
 
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Database, FilePlus, GitBranch, ShieldCheck } from 'lucide-react'
+import { apiGet } from '@/lib/api'
+import { useUser } from '@/contexts/user-context'
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts'
+import {
+  Database,
+  FilePlus,
+  GitBranch,
+  ShieldCheck,
+  ClipboardList,
+  Users,
+  LayoutDashboard,
+  ArrowRight,
+  Loader2,
+  AlertCircle,
+} from 'lucide-react'
 
-export default function Dashboard() {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type DashboardStats = {
+  total_requests: number
+  by_status: { name: string; value: number }[]
+  by_urgency: { name: string; value: number }[]
+  recent_activities: {
+    id: number
+    requester: string
+    cost_center: string | null
+    urgency: string
+    status: string
+    generated_description: string | null
+    pdm_id: number
+    created_at: string | null
+  }[]
+}
+
+type ExtraStats = {
+  pdm_count: number
+  user_count: number
+}
+
+// ─── Palette ──────────────────────────────────────────────────────────────────
+
+// Cycles through navy → gold → slate tones for dynamic status slices
+const SLICE_COLORS = [
+  '#0F1C38',
+  '#C69A46',
+  '#3B82F6',
+  '#10B981',
+  '#8B5CF6',
+  '#F59E0B',
+  '#EF4444',
+  '#6366F1',
+]
+
+const URGENCY_COLORS: Record<string, string> = {
+  Baixa:  '#10B981',
+  Média:  '#F59E0B',
+  Alta:   '#EF4444',
+}
+
+// ─── Small helpers ────────────────────────────────────────────────────────────
+
+function formatDate(iso: string | null) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('pt-BR', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
+}
+
+function urgencyLabel(raw: string) {
+  return { low: 'Baixa', medium: 'Média', high: 'Alta' }[raw] ?? raw
+}
+
+function urgencyColor(raw: string) {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8">
-      <div className="mb-12 text-center">
-        <h1 className="text-3xl font-bold text-foreground">MDM Platform</h1>
-        <p className="mt-2 text-muted-foreground">Master Data Management</p>
+    { low: '#10B981', medium: '#F59E0B', high: '#EF4444' }[raw] ?? '#94A3B8'
+  )
+}
+
+// ─── KPI card ─────────────────────────────────────────────────────────────────
+
+function KpiCard({
+  icon: Icon,
+  label,
+  value,
+  accent,
+  loading,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  value: number | string
+  accent?: string
+  loading?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-5 py-5 shadow-[var(--shadow-card-float)]">
+      <div
+        className="flex size-11 shrink-0 items-center justify-center rounded-xl"
+        style={{ backgroundColor: accent ? `${accent}18` : '#0F1C3818' }}
+      >
+        <Icon className="size-5" style={{ color: accent ?? '#0F1C38' }} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        {loading ? (
+          <div className="mt-1 h-6 w-12 animate-pulse rounded bg-slate-200" />
+        ) : (
+          <p className="text-2xl font-bold text-foreground">{value}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Custom pie tooltip ───────────────────────────────────────────────────────
+
+function PieTooltip({ active, payload }: { active?: boolean; payload?: { name: string; value: number }[] }) {
+  if (!active || !payload?.length) return null
+  const { name, value } = payload[0]
+  return (
+    <div className="rounded-xl border border-[#B4B9BE] bg-white px-3 py-2 shadow-lg text-sm">
+      <p className="font-semibold text-foreground">{name}</p>
+      <p className="text-muted-foreground">{value} solicitação{value !== 1 ? 'ões' : ''}</p>
+    </div>
+  )
+}
+
+// ─── Quick-access nav card ────────────────────────────────────────────────────
+
+function NavCard({
+  href,
+  icon: Icon,
+  label,
+  description,
+  gold,
+}: {
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  description: string
+  gold?: boolean
+}) {
+  return (
+    <Link href={href} className="group">
+      <div
+        className={[
+          'flex h-full flex-col items-center justify-center gap-3 rounded-2xl border px-6 py-8',
+          'shadow-[var(--shadow-card-float)] transition-all hover:-translate-y-0.5 hover:shadow-md',
+          gold
+            ? 'border-[#C69A46] bg-white hover:bg-[#C69A46]/5'
+            : 'border-[#B4B9BE] bg-white hover:border-[#C69A46]/50 hover:bg-primary/5',
+        ].join(' ')}
+      >
+        <div
+          className={[
+            'flex size-12 items-center justify-center rounded-xl text-white transition-transform group-hover:scale-105',
+            gold ? 'bg-[#C69A46]' : 'bg-[#0F1C38]',
+          ].join(' ')}
+        >
+          <Icon className="size-6" />
+        </div>
+        <div className="text-center">
+          <p className="text-sm font-semibold text-foreground">{label}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{description}</p>
+        </div>
+      </div>
+    </Link>
+  )
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function DashboardPage() {
+  const router = useRouter()
+  const { user } = useUser()
+
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [extra, setExtra] = useState<ExtraStats>({ pdm_count: 0, user_count: 0 })
+  const [statsLoading, setStatsLoading] = useState(true)
+  const [statsError, setStatsError] = useState<string | null>(null)
+
+  // Hydration guard — recharts must only render on the client
+  const [isClient, setIsClient] = useState(false)
+  useEffect(() => setIsClient(true), [])
+
+  useEffect(() => {
+    async function load() {
+      setStatsLoading(true)
+      setStatsError(null)
+      try {
+        const [s, pdms, users] = await Promise.all([
+          apiGet<DashboardStats>('/api/dashboard/stats'),
+          apiGet<{ id: number }[]>('/api/pdm'),
+          apiGet<{ id: number }[]>('/admin/users').catch(() => [] as { id: number }[]),
+        ])
+        setStats(s)
+        setExtra({ pdm_count: pdms.length, user_count: users.length })
+      } catch (err) {
+        setStatsError((err as Error).message)
+      } finally {
+        setStatsLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  function handleSliceClick(entry: { name: string }) {
+    router.push(`/governance?status=${encodeURIComponent(entry.name)}`)
+  }
+
+  const greeting = user
+    ? `Olá, ${user.name.split(' ')[0]}.`
+    : 'Bem-vindo ao MDM Platform.'
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-8 pb-10">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 items-center justify-center rounded-xl bg-[#0F1C38]/8">
+          <LayoutDashboard className="size-5 text-[#0F1C38]" />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-foreground">{greeting}</h1>
+          <p className="text-sm text-muted-foreground">
+            Visão geral do sistema · MDM Platform v1.9
+          </p>
+        </div>
       </div>
 
-      <div className="grid w-full max-w-4xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <Link href="/admin-pdm" className="group">
-          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46]/50 hover:bg-primary/5 dark:border-zinc-700/50 dark:bg-card dark:hover:border-[#C69A46]/50">
-            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#0F1C38] text-white transition-transform group-hover:scale-105">
-              <Database className="size-8" />
-            </div>
-            <h2 className="text-xl font-semibold text-foreground">Gestão de PDMs</h2>
-            <p className="text-center text-sm text-muted-foreground">
-              Configure padrões de descrição de material
-            </p>
-          </div>
-        </Link>
-
-        <Link href="/governance" className="group">
-          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46]/50 hover:bg-primary/5 dark:border-zinc-700/50 dark:bg-card dark:hover:border-[#C69A46]/50">
-            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#0F1C38] text-white transition-transform group-hover:scale-105">
-              <ShieldCheck className="size-8" />
-            </div>
-            <h2 className="text-xl font-semibold text-foreground">Governança de Dados</h2>
-            <p className="text-center text-sm text-muted-foreground">
-              Políticas e controle de qualidade dos dados
-            </p>
-          </div>
-        </Link>
-
-        <Link href="/settings/workflow" className="group">
-          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border border-[#B4B9BE] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46]/50 hover:bg-primary/5 dark:border-zinc-700/50 dark:bg-card dark:hover:border-[#C69A46]/50">
-            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#0F1C38] text-white transition-transform group-hover:scale-105">
-              <GitBranch className="size-8" />
-            </div>
-            <h2 className="text-xl font-semibold text-foreground">Fluxos de Trabalho</h2>
-            <p className="text-center text-sm text-muted-foreground">
-              Gerencie as etapas de aprovação e governança de dados.
-            </p>
-          </div>
-        </Link>
-
-        <Link href="/request" className="group">
-          <div className="flex h-full flex-col items-center justify-center gap-4 rounded-2xl border-2 border-[#C69A46] bg-white px-8 py-12 shadow-[var(--shadow-card-float)] transition-colors hover:border-[#C69A46] hover:bg-[#C69A46]/5 dark:bg-card dark:hover:bg-[#C69A46]/10">
-            <div className="flex size-16 items-center justify-center rounded-2xl bg-[#C69A46] text-white transition-transform group-hover:scale-105">
-              <FilePlus className="size-8" />
-            </div>
-            <h2 className="text-xl font-semibold text-foreground">Nova Requisição</h2>
-            <p className="text-center text-sm text-muted-foreground">
-              Criar nova requisição de descrição de material
-            </p>
-          </div>
-        </Link>
+      {/* ── KPI cards ──────────────────────────────────────────────────────── */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <KpiCard
+          icon={ClipboardList}
+          label="Total de Solicitações"
+          value={stats?.total_requests ?? 0}
+          loading={statsLoading}
+        />
+        <KpiCard
+          icon={Database}
+          label="PDMs Cadastrados"
+          value={extra.pdm_count}
+          accent="#C69A46"
+          loading={statsLoading}
+        />
+        <KpiCard
+          icon={Users}
+          label="Usuários Ativos"
+          value={extra.user_count}
+          accent="#3B82F6"
+          loading={statsLoading}
+        />
       </div>
-    </main>
+
+      {/* ── Charts row ─────────────────────────────────────────────────────── */}
+      {statsError ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
+          <AlertCircle className="size-4 shrink-0" />
+          Não foi possível carregar os dados: {statsError}
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+
+          {/* Status pie */}
+          <div className="rounded-2xl border border-[#B4B9BE] bg-white p-6 shadow-[var(--shadow-card-float)]">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Solicitações por Status</h2>
+                <p className="text-xs text-muted-foreground">Clique em uma fatia para filtrar</p>
+              </div>
+              <Link
+                href="/governance"
+                className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
+              >
+                Ver todas <ArrowRight className="size-3" />
+              </Link>
+            </div>
+
+            {statsLoading ? (
+              <div className="flex h-56 items-center justify-center text-muted-foreground">
+                <Loader2 className="size-5 animate-spin mr-2" />
+                Carregando…
+              </div>
+            ) : !isClient || !stats?.by_status?.length ? (
+              <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                Nenhuma solicitação ainda.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={stats.by_status}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={3}
+                    dataKey="value"
+                    onClick={handleSliceClick}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {stats.by_status.map((entry, i) => (
+                      <Cell
+                        key={entry.name}
+                        fill={SLICE_COLORS[i % SLICE_COLORS.length]}
+                        stroke="white"
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<PieTooltip />} />
+                  <Legend
+                    iconType="circle"
+                    iconSize={8}
+                    formatter={(value) => (
+                      <span className="text-xs text-foreground">{value}</span>
+                    )}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Urgency pie */}
+          <div className="rounded-2xl border border-[#B4B9BE] bg-white p-6 shadow-[var(--shadow-card-float)]">
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold text-foreground">Solicitações por Urgência</h2>
+              <p className="text-xs text-muted-foreground">Distribuição de prioridade</p>
+            </div>
+
+            {statsLoading ? (
+              <div className="flex h-56 items-center justify-center text-muted-foreground">
+                <Loader2 className="size-5 animate-spin mr-2" />
+                Carregando…
+              </div>
+            ) : !isClient || !stats?.by_urgency?.length ? (
+              <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+                Nenhuma solicitação ainda.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={stats.by_urgency}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {stats.by_urgency.map((entry) => (
+                      <Cell
+                        key={entry.name}
+                        fill={URGENCY_COLORS[entry.name] ?? '#94A3B8'}
+                        stroke="white"
+                        strokeWidth={2}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<PieTooltip />} />
+                  <Legend
+                    iconType="circle"
+                    iconSize={8}
+                    formatter={(value) => (
+                      <span className="text-xs text-foreground">{value}</span>
+                    )}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Recent activity ─────────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-[#B4B9BE] bg-white shadow-[var(--shadow-card-float)]">
+        <div className="flex items-center justify-between border-b border-[#B4B9BE] px-6 py-4">
+          <h2 className="text-sm font-semibold text-foreground">Atividade Recente</h2>
+          <Link
+            href="/governance"
+            className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
+          >
+            Ver todas <ArrowRight className="size-3" />
+          </Link>
+        </div>
+
+        {statsLoading ? (
+          <div className="flex items-center justify-center py-10 text-muted-foreground">
+            <Loader2 className="size-4 animate-spin mr-2" />
+            Carregando…
+          </div>
+        ) : !stats?.recent_activities?.length ? (
+          <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
+            Nenhuma atividade recente.
+          </div>
+        ) : (
+          <div className="divide-y divide-[#B4B9BE]/40">
+            {stats.recent_activities.map((req) => (
+              <div
+                key={req.id}
+                className="flex items-center gap-4 px-6 py-3.5 hover:bg-slate-50/60 transition-colors"
+              >
+                {/* ID */}
+                <span className="w-16 shrink-0 font-mono text-xs font-semibold text-muted-foreground">
+                  REQ-{String(req.id).padStart(4, '0')}
+                </span>
+
+                {/* Description / requester */}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground font-mono">
+                    {req.generated_description ?? '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{req.requester}</p>
+                </div>
+
+                {/* Urgency badge */}
+                <span
+                  className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold"
+                  style={{
+                    backgroundColor: `${urgencyColor(req.urgency)}18`,
+                    color: urgencyColor(req.urgency),
+                  }}
+                >
+                  {urgencyLabel(req.urgency)}
+                </span>
+
+                {/* Status badge */}
+                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                  {req.status}
+                </span>
+
+                {/* Date */}
+                <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
+                  {formatDate(req.created_at)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Quick-access nav ────────────────────────────────────────────────── */}
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          Acesso Rápido
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <NavCard
+            href="/admin-pdm"
+            icon={Database}
+            label="Gestão de PDMs"
+            description="Configure padrões de descrição"
+          />
+          <NavCard
+            href="/governance"
+            icon={ShieldCheck}
+            label="Governança"
+            description="Políticas e controle de qualidade"
+          />
+          <NavCard
+            href="/settings/workflow"
+            icon={GitBranch}
+            label="Workflows"
+            description="Etapas de aprovação"
+          />
+          <NavCard
+            href="/request"
+            icon={FilePlus}
+            label="Nova Requisição"
+            description="Criar nova solicitação"
+            gold
+          />
+        </div>
+      </div>
+    </div>
   )
 }

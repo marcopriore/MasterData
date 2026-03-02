@@ -56,3 +56,28 @@ export async function apiPatch<T, B = unknown>(path: string, body: B): Promise<T
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return (await res.json()) as T
 }
+
+/**
+ * Upload a single File as multipart/form-data.
+ * The file must be sent under the field name "file" — matches FastAPI's
+ * `file: UploadFile = File(...)` parameter in the uploads router.
+ */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    body: form,
+    // Do NOT set Content-Type — the browser sets it automatically with the
+    // correct boundary when using FormData.
+  })
+  if (!res.ok) {
+    let detail: string | undefined
+    try {
+      const json = await res.json()
+      detail = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json?.detail)
+    } catch { /* ignore */ }
+    throw new Error(detail ?? `HTTP ${res.status}`)
+  }
+  return (await res.json()) as T
+}

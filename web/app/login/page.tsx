@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { login, user, ready } = useUser()
+  const { login, clearUser } = useUser()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -17,13 +17,20 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // If already logged in, redirect immediately
+  // On mount: wipe any stale localStorage session whose cookie has already
+  // expired. Without this, a returning user with stale storage but no cookie
+  // would be stuck — the middleware blocks every page, but the old user object
+  // in localStorage would make the app think they're logged in.
   useEffect(() => {
-    if (ready && user) {
-      const from = searchParams.get('from') ?? '/'
-      router.replace(from)
+    const hasCookie = document.cookie
+      .split(';')
+      .some((c) => c.trim().startsWith('mdm_session='))
+
+    if (!hasCookie) {
+      clearUser()
     }
-  }, [ready, user, router, searchParams])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -44,12 +51,10 @@ export default function LoginPage() {
       return
     }
 
+    // Login succeeded — cookie is now set, navigate to the intended destination
     const from = searchParams.get('from') ?? '/'
     router.replace(from)
   }
-
-  // While hydrating, show nothing to avoid flash
-  if (!ready) return null
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0F1C38] via-[#162444] to-[#0a1225] p-4">

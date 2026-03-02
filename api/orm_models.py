@@ -101,6 +101,8 @@ class MaterialRequestORM(Base):
 
     # JSON blobs — store attribute values and attachment metadata
     technical_attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Legacy JSON list of filenames — kept for backwards compat; new uploads use
+    # the request_attachments relational table instead.
     attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -109,6 +111,9 @@ class MaterialRequestORM(Base):
     user: Mapped["UserORM | None"] = relationship("UserORM", back_populates="material_requests")
     request_values: Mapped[list["RequestValueORM"]] = relationship(
         "RequestValueORM", back_populates="request", cascade="all, delete-orphan"
+    )
+    request_attachments: Mapped[list["RequestAttachmentORM"]] = relationship(
+        "RequestAttachmentORM", back_populates="request", cascade="all, delete-orphan"
     )
 
 
@@ -124,6 +129,29 @@ class RequestValueORM(Base):
 
     request: Mapped["MaterialRequestORM"] = relationship(
         "MaterialRequestORM", back_populates="request_values"
+    )
+
+
+class RequestAttachmentORM(Base):
+    """Stores one uploaded file per row, linked to a material_request."""
+    __tablename__ = "request_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("material_requests.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Relative path under the uploads root, e.g. "uploads/42/invoice.pdf"
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    # MIME type detected at upload time, e.g. "application/pdf" or "image/png"
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)  # bytes
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    request: Mapped["MaterialRequestORM"] = relationship(
+        "MaterialRequestORM", back_populates="request_attachments"
     )
 
 

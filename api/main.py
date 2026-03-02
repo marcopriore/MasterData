@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
 load_dotenv()
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from fastapi import Depends, HTTPException, Query
@@ -142,7 +144,18 @@ from models import (
 )
 
 from routes.admin import router as admin_router
+from routes.dashboard import router as dashboard_router
+from routes.uploads import router as uploads_router
+from orm_models import RequestAttachmentORM  # noqa: F401 — ensures table is registered
+
 app.include_router(admin_router)
+app.include_router(dashboard_router)
+app.include_router(uploads_router)
+
+# Serve uploaded files at  GET /uploads/<request_id>/<filename>
+_UPLOADS_DIR = Path(__file__).parent / "uploads"
+_UPLOADS_DIR.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 
 #products: list[Product] = []
 
@@ -232,16 +245,36 @@ def _attr_id_to_name(pdm) -> dict:
     return {str(a.get("id", "")): a.get("name", "") for a in attrs if isinstance(a, dict)}
 
 
+def _attr_id_to_order(pdm) -> dict:
+    """Build attribute_id -> order lookup so values are returned in field order."""
+    attrs = pdm.attributes if pdm else None
+    if not isinstance(attrs, list):
+        return {}
+    return {str(a.get("id", "")): a.get("order", 999) for a in attrs if isinstance(a, dict)}
+
+
 def _request_to_dict(r) -> dict:
-    """Serialize a MaterialRequestORM row to the full response dict."""
-    attr_names = _attr_id_to_name(r.pdm)
-    values = [
-        {
-            "label": attr_names.get(rv.attribute_id, rv.attribute_id),
-            "value": rv.value,
-        }
-        for rv in (r.request_values or [])
-    ]
+    """Serialize a MaterialRequestORM row to the full response dict.
+
+    ``values`` is a list of ``{attribute_id, label, value}`` dicts sorted by
+    the PDM-defined field order.  The ``attribute_id`` key lets the frontend
+    pre-fill edit forms without having to re-fetch the PDM schema.
+    """
+    attr_names  = _attr_id_to_name(r.pdm)
+    attr_orders = _attr_id_to_order(r.pdm)
+
+    values = sorted(
+        [
+            {
+                "attribute_id": rv.attribute_id,
+                "label": attr_names.get(rv.attribute_id, rv.attribute_id),
+                "value": rv.value,
+            }
+            for rv in (r.request_values or [])
+        ],
+        key=lambda v: attr_orders.get(v["attribute_id"], 999),
+    )
+
     return {
         "id": r.id,
         "pdm_id": r.pdm_id,
@@ -831,6 +864,21 @@ def bulk_update_workflow_config(
 
 # -------------------------------
 # OBTER ATRIBUTOS DO PDM
+@app.get("/api/pdm/{pdm_id}")
+def get_pdm(pdm_id: int, db: Session = Depends(get_db)):
+    """Return a single PDM template together with its full attribute list."""
+    row = db.query(PDMOrm).filter(PDMOrm.id == pdm_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="PDM not found")
+    return {
+        "id": row.id,
+        "name": row.name,
+        "internal_code": row.internal_code,
+        "is_active": row.is_active,
+        "attributes": row.attributes or [],
+    }
+
+
 @app.get("/api/pdm/{pdm_id}/attributes")
 def get_pdm_attributes(pdm_id: int, db: Session = Depends(get_db)):
     row = db.query(PDMOrm).filter(PDMOrm.id == pdm_id).first()
