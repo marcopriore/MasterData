@@ -180,6 +180,16 @@ class MoveToPayload(BaseModel):
     status_key: str
 
 
+class AtenderPayload(BaseModel):
+    """Body for POST /api/requests/{id}/atender — user who is taking the request."""
+    user_id: int
+
+
+class RejectPayload(BaseModel):
+    """Body for PATCH /api/requests/{id}/reject — motivo obrigatório ao reprovar."""
+    motivo: str
+
+
 # ─── Roles ────────────────────────────────────────────────────────────────────
 
 class RolePermissions(BaseModel):

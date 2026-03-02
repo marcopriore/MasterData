@@ -1,11 +1,13 @@
 from dotenv import load_dotenv
 load_dotenv()
+import logging
+import os
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import Depends, HTTPException, Query
 from datetime import datetime
 
@@ -21,13 +23,33 @@ from orm_models import (
     UserORM,
 )
 from security import hash_password
+from notifications import send_workflow_notification
 
 app = FastAPI(title="MasterData API", version="1.8.0")
 
+# CORS: libera origens para evitar bloqueio no navegador
+# CORS_ORIGINS=* libera todas (allow_credentials=False); ou lista separada por vírgula
+_cors_env = os.getenv("CORS_ORIGINS", "").strip()
+if _cors_env == "*":
+    _cors_origins = ["*"]
+    _cors_credentials = False
+else:
+    _cors_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://[::1]:3000",
+        "http://[::1]:3001",
+    ]
+    if _cors_env:
+        _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    _cors_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -141,6 +163,8 @@ from models import (
     WorkflowHeaderCreate,
     RequestOut,
     MoveToPayload,
+    AtenderPayload,
+    RejectPayload,
 )
 
 from routes.admin import router as admin_router
@@ -290,6 +314,11 @@ def _request_to_dict(r) -> dict:
         "attachments": r.attachments,
         "date": r.created_at.isoformat() if r.created_at else None,
         "values": values,
+        # Governança v2.0
+        "assigned_to": r.assigned_to,
+        "assignee_name": r.assignee.name if r.assignee else None,
+        "atendimento_status": getattr(r, "atendimento_status", None) or "aberto",
+        "last_action_at": r.last_action_at.isoformat() if r.last_action_at else None,
     }
 
 
@@ -304,7 +333,9 @@ def list_requests(
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
-            joinedload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_attachments),
+            joinedload(MaterialRequestORM.assignee),
         )
         .order_by(MaterialRequestORM.created_at.desc())
     )
@@ -323,10 +354,24 @@ def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
     if not pdm:
         raise HTTPException(status_code=404, detail="PDM not found")
 
-    # Resolve workflow — explicit or active
-    wf_id = payload.workflow_id or _get_active_workflow_id(db)
-    if not wf_id:
-        raise HTTPException(status_code=400, detail="No active workflow configured")
+    # Resolve workflow — explicit or active. If workflow_id is sent, validate it exists.
+    if payload.workflow_id is not None:
+        wf = db.query(WorkflowHeaderORM).filter(
+            WorkflowHeaderORM.id == payload.workflow_id
+        ).first()
+        if not wf:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Workflow {payload.workflow_id} not found",
+            )
+        wf_id = payload.workflow_id
+    else:
+        wf_id = _get_active_workflow_id(db)
+        if not wf_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No active workflow configured. Set workflow_id or activate a workflow.",
+            )
 
     # Initial status = first step of the workflow (not a hardcoded "Pending")
     initial_status = _get_first_step_status_key(wf_id, db)
@@ -387,7 +432,8 @@ def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
-            joinedload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_attachments),
         )
         .filter(MaterialRequestORM.id == row.id)
         .one()
@@ -461,7 +507,8 @@ def update_request_status(
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
-            joinedload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_attachments),
         )
         .filter(MaterialRequestORM.id == request_id)
         .first()
@@ -477,32 +524,61 @@ def update_request_status(
             detail=f"Request already at final status: {row.status}",
         )
     row.status = next_status
+    # Se avançou para Concluído, marcar atendimento como concluído e liberar o card
+    if (next_status or "").strip().lower() in ("completed", "approved", "concluído"):
+        row.atendimento_status = "concluido"
+        row.assigned_to = None
+    row.last_action_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    try:
+        send_workflow_notification(request_id, db)
+    except Exception as e:
+        logging.getLogger(__name__).exception("Falha ao enviar notificação: %s", e)
     return _request_to_dict(row)
 
 
 # -------------------------------
-# REJEITAR REQUISIÇÃO
+# REPROVAR REQUISIÇÃO (volta para status inicial + motivo)
 @app.patch("/api/requests/{request_id}/reject")
 def reject_request(
     request_id: int,
+    payload: RejectPayload,
     db: Session = Depends(get_db),
 ):
+    """
+    Reprova a solicitação: move para o status inicial do workflow,
+    seta atendimento_status='reprovado', grava o motivo e libera o card.
+    """
     row = (
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
-            joinedload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_attachments),
         )
         .filter(MaterialRequestORM.id == request_id)
         .first()
     )
     if not row:
         raise HTTPException(status_code=404, detail="Request not found")
-    row.status = "Rejected"
+    if (row.status or "").strip().lower() in ("completed", "approved", "concluído"):
+        raise HTTPException(
+            status_code=400,
+            detail="Solicitação já concluída; não é possível reprovar",
+        )
+    initial_status = _get_first_step_status_key(row.workflow_id, db)
+    row.status = initial_status
+    row.atendimento_status = "reprovado"
+    row.rejection_reason = (payload.motivo or "").strip() or None
+    row.assigned_to = None
+    row.last_action_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    try:
+        send_workflow_notification(request_id, db)
+    except Exception as e:
+        logging.getLogger(__name__).exception("Falha ao enviar notificação: %s", e)
     return _request_to_dict(row)
 
 
@@ -522,13 +598,21 @@ def move_request_to_status(
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
-            joinedload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_attachments),
         )
         .filter(MaterialRequestORM.id == request_id)
         .first()
     )
     if not row:
         raise HTTPException(status_code=404, detail="Request not found")
+
+    # Impede edição de cards com status Concluído
+    if (row.status or "").strip().lower() in ("completed", "approved", "concluído"):
+        raise HTTPException(
+            status_code=400,
+            detail="Não é possível mover uma solicitação já concluída",
+        )
 
     # Validate that the target status_key exists in the request's workflow
     valid_keys = {
@@ -544,6 +628,96 @@ def move_request_to_status(
         )
 
     row.status = payload.status_key
+    row.last_action_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    try:
+        send_workflow_notification(request_id, db)
+    except Exception as e:
+        logging.getLogger(__name__).exception("Falha ao enviar notificação: %s", e)
+    return _request_to_dict(row)
+
+
+# -------------------------------
+# ATENDER REQUISIÇÃO (Governança v2.0)
+@app.post("/api/requests/{request_id}/atender")
+def atender_request(
+    request_id: int,
+    payload: AtenderPayload,
+    db: Session = Depends(get_db),
+):
+    """
+    Assumes the request for atendimento. Verifies the user has the role permitted
+    for the current workflow stage; if so, sets assigned_to=user_id and
+    atendimento_status='em_andamento'.
+    """
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.assignee),
+            selectinload(MaterialRequestORM.request_values),
+            selectinload(MaterialRequestORM.request_attachments),
+        )
+        .filter(MaterialRequestORM.id == request_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    user = (
+        db.query(UserORM)
+        .options(joinedload(UserORM.role))
+        .filter(UserORM.id == payload.user_id)
+        .first()
+    )
+    if not user or not user.is_active:
+        raise HTTPException(status_code=404, detail="User not found or inactive")
+
+    # Impede iniciar/assumir atendimento em cards já Concluídos
+    if (row.status or "").strip().lower() in ("completed", "approved", "concluído"):
+        raise HTTPException(
+            status_code=400,
+            detail="Solicitação já concluída; não é possível iniciar atendimento",
+        )
+
+    perms = user.role.permissions if user.role else {}
+    if not perms.get("can_approve", False):
+        raise HTTPException(
+            status_code=403,
+            detail=f"User role '{user.role.name if user.role else '?'}' does not have permission to atender this stage",
+        )
+
+    steps = (
+        db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == row.workflow_id)
+        .all()
+    )
+    current_lower = (row.status or "").strip().lower()
+    current_step = None
+    for s in steps or []:
+        if ((s.status_key or "").strip().lower() == current_lower
+                or (s.step_name or "").strip().lower() == current_lower):
+            current_step = s
+            break
+
+    if not current_step:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request status '{row.status}' is not a valid workflow stage",
+        )
+
+    # Se required_role_id está definido, o usuário deve ter esse role
+    if current_step.required_role_id is not None:
+        if user.role_id != current_step.required_role_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Esta etapa requer o papel específico configurado; seu papel atual não está autorizado",
+            )
+
+    row.assigned_to = payload.user_id
+    row.atendimento_status = "em_andamento"
+    row.last_action_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
     return _request_to_dict(row)

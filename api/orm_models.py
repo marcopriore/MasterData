@@ -41,8 +41,17 @@ class UserORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     role: Mapped["RoleORM"] = relationship("RoleORM", back_populates="users")
+    # Solicitações criadas por este usuário (user_id)
     material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
-        "MaterialRequestORM", back_populates="user"
+        "MaterialRequestORM",
+        back_populates="user",
+        foreign_keys="[MaterialRequestORM.user_id]",
+    )
+    # Atendimentos designados a este usuário (assigned_to)
+    assigned_requests: Mapped[list["MaterialRequestORM"]] = relationship(
+        "MaterialRequestORM",
+        back_populates="assignee",
+        foreign_keys="[MaterialRequestORM.assigned_to]",
     )
 
 
@@ -70,9 +79,35 @@ class WorkflowConfigORM(Base):
     status_key: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. pending_technical, completed
     order: Mapped[int] = mapped_column(Integer, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    required_role_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True
+    )
 
     workflow: Mapped["WorkflowHeaderORM"] = relationship(
         "WorkflowHeaderORM", back_populates="steps"
+    )
+    notification_settings: Mapped["NotificationSettingsORM | None"] = relationship(
+        "NotificationSettingsORM", back_populates="step", uselist=False
+    )
+
+
+class NotificationSettingsORM(Base):
+    """
+    Mapeia step_id -> user_ids/role_ids para envio de notificações.
+    Um registro por etapa de workflow.
+    """
+    __tablename__ = "notification_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    step_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workflow_config.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    # Arrays de IDs: [1, 2, 3]
+    user_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=lambda: [])
+    role_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=lambda: [])
+
+    step: Mapped["WorkflowConfigORM"] = relationship(
+        "WorkflowConfigORM", back_populates="notification_settings"
     )
 
 
@@ -80,11 +115,15 @@ class MaterialRequestORM(Base):
     __tablename__ = "material_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pdm_id: Mapped[int] = mapped_column(Integer, ForeignKey("pdm_templates.id"), nullable=False)
+    pdm_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("pdm_templates.id"), nullable=False, index=True
+    )
     workflow_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("workflow_header.id", ondelete="RESTRICT"), nullable=False
     )
-    status: Mapped[str] = mapped_column(String(50), default="Pending", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(50), default="Pending", nullable=False, index=True
+    )
 
     # Requester info — user_id links to the User table when auth is active;
     # requester string is kept for backwards-compat and anonymous submissions
@@ -99,6 +138,16 @@ class MaterialRequestORM(Base):
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ── Governança v2.0 ───────────────────────────────────────────────────────
+    assigned_to: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    atendimento_status: Mapped[str] = mapped_column(
+        String(20), default="aberto", nullable=False
+    )  # 'aberto' | 'em_andamento' | 'reprovado' | 'concluido'
+    last_action_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # JSON blobs — store attribute values and attachment metadata
     technical_attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Legacy JSON list of filenames — kept for backwards compat; new uploads use
@@ -108,7 +157,19 @@ class MaterialRequestORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     pdm: Mapped["PDMOrm"] = relationship("PDMOrm", back_populates="material_requests")
-    user: Mapped["UserORM | None"] = relationship("UserORM", back_populates="material_requests")
+    # Solicitante (user_id)
+    user: Mapped["UserORM | None"] = relationship(
+        "UserORM",
+        back_populates="material_requests",
+        foreign_keys=[user_id],
+    )
+    # Responsável pelo atendimento (assigned_to)
+    assignee: Mapped["UserORM | None"] = relationship(
+        "UserORM",
+        back_populates="assigned_requests",
+        foreign_keys=[assigned_to],
+        lazy="selectin",
+    )
     request_values: Mapped[list["RequestValueORM"]] = relationship(
         "RequestValueORM", back_populates="request", cascade="all, delete-orphan"
     )
@@ -122,9 +183,11 @@ class RequestValueORM(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     request_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("material_requests.id"), nullable=False
+        Integer, ForeignKey("material_requests.id", ondelete="CASCADE"), nullable=False
     )
-    attribute_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    attribute_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )
     value: Mapped[str] = mapped_column(Text, nullable=False)
 
     request: Mapped["MaterialRequestORM"] = relationship(

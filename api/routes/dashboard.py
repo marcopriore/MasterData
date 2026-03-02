@@ -1,5 +1,5 @@
 """
-Dashboard router — v1.9
+Dashboard router — v1.9 / v2.0
 
 Prefix : /api/dashboard
 Tags   : ["Dashboard"]
@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from deps import get_db
-from orm_models import MaterialRequestORM
+from orm_models import MaterialRequestORM, WorkflowConfigORM
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -29,30 +29,45 @@ _URGENCY_LABELS = {
     "high":   "Alta",
 }
 
-# Canonical display name for any status that might exist in legacy data.
-# Keys are lower-cased for case-insensitive lookup.
-_STATUS_CANONICAL: dict[str, str] = {
-    # English legacy → Portuguese canonical
+# Fallback for legacy/unknown statuses not in WorkflowConfig
+_LEGACY_CANONICAL: dict[str, str] = {
     "pending":    "Triagem",
     "approved":   "Finalizado",
     "rejected":   "Finalizado",
-    # Lowercase variants of workflow step names
-    "triagem":    "Triagem",
-    "fiscal":     "Fiscal",
-    "master":     "Master",
-    "pendente":   "Pendente",
-    "finalizado": "Finalizado",
     "compras":    "Triagem",
 }
 
 
-def _canonical_status(raw: str) -> str:
-    """Return the canonical display name for a status value.
-
-    Falls back to title-casing the raw value so at least capitalisation is
-    consistent for any new steps added to the workflow later.
+def _build_status_canonical_map(db: Session) -> dict[str, str]:
     """
-    return _STATUS_CANONICAL.get((raw or "").strip().lower(), (raw or "").strip().title())
+    Build a case-insensitive map from raw status → canonical display name
+    using WorkflowConfig. Uses step_name as the canonical form (e.g. 'Fiscal')
+    so the pie chart never shows duplicate slices for 'fiscal', 'FISCAL', etc.
+    """
+    rows = (
+        db.query(WorkflowConfigORM.step_name, WorkflowConfigORM.status_key)
+        .filter(WorkflowConfigORM.is_active == True)
+        .distinct()
+        .all()
+    )
+    m: dict[str, str] = dict(_LEGACY_CANONICAL)
+    for step_name, status_key in rows:
+        display = (step_name or "").strip() or (status_key or "").strip().title()
+        if not display:
+            continue
+        for raw in (step_name, status_key):
+            if raw is None:
+                continue
+            s = (raw or "").strip()
+            if s:
+                m[s.lower()] = display
+    return m
+
+
+def _canonical_status(raw: str, canonical_map: dict[str, str]) -> str:
+    """Return the canonical display name for a status value."""
+    key = (raw or "").strip().lower()
+    return canonical_map.get(key, (raw or "").strip().title())
 
 
 def _recent_activity(row: MaterialRequestORM) -> dict:
@@ -90,7 +105,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     # ── By status ──────────────────────────────────────────────────────────────
     # Fetch raw counts from the DB, then merge any case/spelling variants into
-    # their canonical name so the chart never shows duplicate slices.
+    # their canonical name (from WorkflowConfig) so the chart never shows
+    # duplicate slices for 'fiscal', 'FISCAL', 'Fiscal', etc.
+    canonical_map = _build_status_canonical_map(db)
     status_rows = (
         db.query(MaterialRequestORM.status, func.count(MaterialRequestORM.id))
         .group_by(MaterialRequestORM.status)
@@ -98,10 +115,10 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     )
     merged: dict[str, int] = defaultdict(int)
     for raw_status, count in status_rows:
-        merged[_canonical_status(raw_status)] += count
+        merged[_canonical_status(raw_status, canonical_map)] += count
     by_status = [
-        {"name": name, "value": total}
-        for name, total in sorted(merged.items())
+        {"name": name, "value": cnt}
+        for name, cnt in sorted(merged.items())
     ]
 
     # ── By urgency ─────────────────────────────────────────────────────────────

@@ -27,10 +27,14 @@ Auth
   POST   /admin/auth/login             Credential check → user + role payload
 """
 
+import logging
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+_log = logging.getLogger(__name__)
+_log.setLevel(logging.INFO)
 from sqlalchemy.orm import Session, joinedload
 
 from deps import get_db
@@ -394,7 +398,13 @@ def update_preferences(
     row = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
-    row.preferences = payload.model_dump()
+    # Merge so that sending only `theme` does not wipe out `language` and
+    # vice-versa.  Start from safe defaults, layer existing DB values, then
+    # apply only the non-None fields from the payload.
+    merged = {"theme": "light", "language": "pt"}
+    merged.update(row.preferences or {})
+    merged.update({k: v for k, v in payload.model_dump().items() if v is not None})
+    row.preferences = merged
     db.commit()
     return {"ok": True, "preferences": row.preferences}
 
@@ -434,22 +444,38 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     > **Nota:** JWT será adicionado na v1.9. Por ora o frontend deve
     > armazenar o objeto `user` em contexto/sessão.
     """
+    email = payload.email.lower().strip() if payload.email else ""
+    _log.info("[login] Recebimento: email=%s", email[:3] + "***" if len(email) > 3 else email)
+
     row = (
         db.query(UserORM)
         .options(joinedload(UserORM.role))
-        .filter(UserORM.email == payload.email.lower().strip())
+        .filter(UserORM.email == email)
         .first()
     )
-    if not row or not verify_password(payload.password, row.hashed_password):
+    _log.info("[login] Busca no banco: found=%s, user_id=%s", row is not None, getattr(row, "id", None))
+
+    if not row:
+        _log.warning("[login] Usuário não encontrado: %s", email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="E-mail ou senha inválidos",
         )
+    if not verify_password(payload.password, row.hashed_password):
+        _log.warning("[login] Senha inválida para: %s", email)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="E-mail ou senha inválidos",
+        )
+    _log.info("[login] Verificação de senha: OK")
+
     if not row.is_active:
+        _log.warning("[login] Conta desativada: %s", email)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Conta desativada. Entre em contato com o administrador.",
         )
+    _log.info("[login] Geração de token/resposta: user_id=%s, role=%s", row.id, row.role.name if row.role else None)
     return {
         "ok": True,
         "user": _user_to_dict(row),
