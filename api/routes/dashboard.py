@@ -6,17 +6,16 @@ Tags   : ["Dashboard"]
 
 Endpoints
 ─────────────────────────────────────────────────────────────────────────────
-  GET  /api/dashboard/stats   Aggregated KPIs for the home screen
+  GET  /api/dashboard/stats   Aggregated KPIs for the home screen (role-filtered)
 """
 
 from collections import defaultdict
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from deps import get_db
-from orm_models import MaterialRequestORM
+from deps import get_current_user_optional, get_db
+from orm_models import MaterialRequestORM, PDMOrm, UserORM
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -40,7 +39,8 @@ _STATUS_CANONICAL: dict[str, str] = {
     "triagem":    "Triagem",
     "fiscal":     "Fiscal",
     "master":     "Master",
-    "pendente":   "Pendente",
+    "mrp":        "MRP",
+    "pendente":   "MRP",
     "finalizado": "Finalizado",
     "compras":    "Triagem",
 }
@@ -68,31 +68,48 @@ def _recent_activity(row: MaterialRequestORM) -> dict:
     }
 
 
-# ─── Endpoint ─────────────────────────────────────────────────────────────────
+# ─── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.get(
     "/stats",
     summary="KPIs agregados para a tela de Início",
     response_description="Totais, agrupamentos por status/urgência e atividade recente",
 )
-def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: UserORM | None = Depends(get_current_user_optional),
+):
     """
-    Returns four aggregated datasets consumed by the home dashboard:
+    Returns aggregated datasets for the home dashboard.
 
-    - **total_requests** – total row count in `material_requests`
-    - **by_status**      – `[{ name, value }]` grouped by `status`
-    - **by_urgency**     – `[{ name, value }]` grouped by `urgency`
-    - **recent_activities** – last 5 requests ordered by `created_at DESC`
+    When authenticated, data is filtered by role:
+    - **ADMIN**       : all data
+    - **SOLICITANTE** : requests created by the user (user_id match)
+    - **TRIAGEM/FISCAL/MASTER/MRP** (role_type=etapa): status == role name
+
+    When unauthenticated, returns all data (legacy behavior).
+
+    Response includes: total_requests, by_status, by_urgency, recent_activities,
+    pdm_count, user_count, section_title ("Atividade Recente" or "Minhas Solicitações").
     """
+    # Build base query with optional role-based filter
+    base = db.query(MaterialRequestORM)
+    role_name = current_user.role.name.upper() if (current_user and current_user.role) else None
+    role_type = current_user.role.role_type if (current_user and current_user.role) else None
+
+    if role_name == "ADMIN":
+        pass  # no filter
+    elif role_name == "SOLICITANTE" and current_user:
+        base = base.filter(MaterialRequestORM.user_id == current_user.id)
+    elif role_type == "etapa" and current_user and current_user.role:
+        base = base.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
 
     # ── Total ──────────────────────────────────────────────────────────────────
-    total: int = db.query(func.count(MaterialRequestORM.id)).scalar() or 0
+    total: int = base.with_entities(func.count(MaterialRequestORM.id)).scalar() or 0
 
     # ── By status ──────────────────────────────────────────────────────────────
-    # Fetch raw counts from the DB, then merge any case/spelling variants into
-    # their canonical name so the chart never shows duplicate slices.
     status_rows = (
-        db.query(MaterialRequestORM.status, func.count(MaterialRequestORM.id))
+        base.with_entities(MaterialRequestORM.status, func.count(MaterialRequestORM.id))
         .group_by(MaterialRequestORM.status)
         .all()
     )
@@ -100,13 +117,13 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     for raw_status, count in status_rows:
         merged[_canonical_status(raw_status)] += count
     by_status = [
-        {"name": name, "value": total}
-        for name, total in sorted(merged.items())
+        {"name": name, "value": val}
+        for name, val in sorted(merged.items())
     ]
 
     # ── By urgency ─────────────────────────────────────────────────────────────
     urgency_rows = (
-        db.query(MaterialRequestORM.urgency, func.count(MaterialRequestORM.id))
+        base.with_entities(MaterialRequestORM.urgency, func.count(MaterialRequestORM.id))
         .group_by(MaterialRequestORM.urgency)
         .order_by(MaterialRequestORM.urgency)
         .all()
@@ -118,16 +135,32 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     # ── Recent activities ──────────────────────────────────────────────────────
     recent_rows = (
-        db.query(MaterialRequestORM)
-        .order_by(MaterialRequestORM.created_at.desc())
+        base.order_by(MaterialRequestORM.created_at.desc())
         .limit(5)
         .all()
     )
     recent_activities = [_recent_activity(r) for r in recent_rows]
+
+    # ── PDMs and users (always total) ──────────────────────────────────────────
+    pdm_count: int = db.query(func.count(PDMOrm.id)).scalar() or 0
+    user_count: int = (
+        db.query(func.count(UserORM.id)).filter(UserORM.is_active == True).scalar() or 0
+    )
+
+    section_title = (
+        "Minha Fila" if role_type == "etapa"
+        else "Minhas Solicitações" if role_name == "SOLICITANTE"
+        else "Atividade Recente"
+    )
+    show_user_count = role_name == "ADMIN" if role_name else True  # unauthenticated: legacy (show all)
 
     return {
         "total_requests": total,
         "by_status": by_status,
         "by_urgency": by_urgency,
         "recent_activities": recent_activities,
+        "pdm_count": pdm_count,
+        "user_count": user_count,
+        "section_title": section_title,
+        "show_user_count": show_user_count,
     }

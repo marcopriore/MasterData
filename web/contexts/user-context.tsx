@@ -43,6 +43,7 @@ export type CurrentUser = {
   email: string
   role_id: number
   role_name: string
+  role_type?: 'sistema' | 'etapa'  // default 'sistema' when absent (legacy)
   role_permissions: RolePermissions
   is_active: boolean
   preferences: UserPreferences
@@ -55,6 +56,8 @@ type LoginResult =
 
 type UserContextValue = {
   user: CurrentUser | null
+  /** JWT for API auth (Authorization: Bearer) */
+  accessToken: string | null
   /** True after the initial localStorage read has completed (avoids SSR flash) */
   ready: boolean
   /** Calls the API, persists the session and returns the result */
@@ -71,6 +74,7 @@ type UserContextValue = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'mdm_user'
+const TOKEN_KEY = 'mdm_access_token'
 /** Cookie name read by the middleware — value is always "1" */
 const SESSION_COOKIE = 'mdm_session'
 
@@ -90,6 +94,7 @@ function clearSessionCookie() {
 
 const UserContext = createContext<UserContextValue>({
   user: null,
+  accessToken: null,
   ready: false,
   login: async () => ({ ok: false, error: 'Provider not mounted' }),
   logout: () => {},
@@ -103,14 +108,19 @@ const UserContext = createContext<UserContextValue>({
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<CurrentUser | null>(null)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
   // Hydrate from localStorage on mount
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
+      const token = localStorage.getItem(TOKEN_KEY)
       if (raw) {
         setUserState(JSON.parse(raw) as CurrentUser)
+      }
+      if (token) {
+        setAccessToken(token)
       }
     } catch {
       // corrupted — ignore
@@ -121,8 +131,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   // ── Persist helpers ────────────────────────────────────────────────────────
 
-  const persistUser = useCallback((u: CurrentUser) => {
+  const persistUser = useCallback((u: CurrentUser, token?: string) => {
     setUserState(u)
+    if (token) {
+      setAccessToken(token)
+      try { localStorage.setItem(TOKEN_KEY, token) } catch {}
+    }
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(u)) } catch {}
     setSessionCookie()
   }, [])
@@ -133,7 +147,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const clearUser = useCallback(() => {
     setUserState(null)
-    try { localStorage.removeItem(STORAGE_KEY) } catch {}
+    setAccessToken(null)
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(TOKEN_KEY)
+    } catch {}
     clearSessionCookie()
   }, [])
 
@@ -169,8 +187,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, error: detail }
       }
 
-      const data = await res.json() as { ok: boolean; user: CurrentUser }
-      persistUser(data.user)
+      const data = await res.json() as { ok: boolean; user: CurrentUser; access_token?: string }
+      persistUser(data.user, data.access_token)
       return { ok: true, user: data.user }
     } catch (err) {
       return {
@@ -199,7 +217,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider
-      value={{ user, ready, login, logout, setUser, clearUser, isAdmin, can }}
+      value={{ user, accessToken, ready, login, logout, setUser, clearUser, isAdmin, can }}
     >
       {children}
     </UserContext.Provider>

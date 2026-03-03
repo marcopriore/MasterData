@@ -20,7 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
-import { apiGet, apiPatch } from "@/lib/api"
+import { apiGet, apiPatch, apiPatchWithAuth } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -72,11 +72,17 @@ function SortableCard({
   allValidStatuses,
   onCompleteData,
   onViewDetails,
+  showActionButtons,
+  currentUserId,
+  onIniciarAtendimentoClick,
 }: {
   request: MaterialRequest
   allValidStatuses: Set<string>
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
+  showActionButtons?: boolean
+  currentUserId?: number | null
+  onIniciarAtendimentoClick?: (request: MaterialRequest) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: request.id })
@@ -96,6 +102,9 @@ function SortableCard({
         invalidStatus={!allValidStatuses.has(request.status)}
         onCompleteData={onCompleteData}
         onViewDetails={onViewDetails}
+        showActionButtons={showActionButtons}
+        currentUserId={currentUserId}
+        onIniciarAtendimentoClick={onIniciarAtendimentoClick ? () => onIniciarAtendimentoClick(request) : undefined}
       />
     </div>
   )
@@ -108,8 +117,10 @@ interface KanbanBoardProps {
   workflowId?: number | null
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
-  /** Called after a successful drag-and-drop status update so the parent can refresh */
-  onStatusChanged?: (requestId: string, newStatus: string) => void
+  onStatusChanged?: (requestId: string, newStatus?: string) => void
+  showActionButtons?: boolean
+  currentUserId?: number | null
+  accessToken?: string | null
 }
 
 export function KanbanBoard({
@@ -118,6 +129,9 @@ export function KanbanBoard({
   onCompleteData,
   onViewDetails,
   onStatusChanged,
+  showActionButtons = false,
+  currentUserId = null,
+  accessToken = null,
 }: KanbanBoardProps) {
   const [columns, setColumns] = useState<KanbanColumn[]>([])
   const [columnsLoading, setColumnsLoading] = useState(true)
@@ -128,9 +142,23 @@ export function KanbanBoard({
   const [activeCard, setActiveCard] = useState<MaterialRequest | null>(null)
   // Track which column the dragged card is hovering over
   const [overColumnId, setOverColumnId] = useState<string | null>(null)
-
   // Sync local copy when parent prop changes (e.g. after a refetch)
   useEffect(() => { setLocalRequests(requests) }, [requests])
+
+  const handleIniciarAtendimento = async (req: MaterialRequest) => {
+    if (!accessToken) {
+      toast.error("Autenticação necessária para iniciar atendimento.")
+      return
+    }
+    try {
+      await apiPatchWithAuth(`/api/requests/${req.id}/assign`, {}, accessToken)
+      toast.success("Atendimento iniciado com sucesso!")
+      onStatusChanged?.(req.id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao iniciar atendimento"
+      toast.error(msg)
+    }
+  }
 
   useEffect(() => {
     setColumnsLoading(true)
@@ -246,6 +274,10 @@ export function KanbanBoard({
     )
   }
 
+  const columnsToRender = showActionButtons
+    ? columns.filter((col) => cardsByColumn(col.id).length > 0)
+    : columns
+
   return (
     <DndContext
       sensors={sensors}
@@ -256,7 +288,7 @@ export function KanbanBoard({
     >
       <ScrollArea className="w-full">
         <div className="flex gap-4 pb-4 min-w-[900px]">
-          {columns.map((col) => {
+          {columnsToRender.map((col) => {
             const items = cardsByColumn(col.id)
             const isOver = overColumnId === col.id && activeCard?.status !== col.id
 
@@ -309,6 +341,9 @@ export function KanbanBoard({
                           allValidStatuses={allValidStatuses}
                           onCompleteData={onCompleteData}
                           onViewDetails={onViewDetails}
+                          showActionButtons={showActionButtons}
+                          currentUserId={currentUserId}
+                          onIniciarAtendimentoClick={showActionButtons ? handleIniciarAtendimento : undefined}
                         />
                       ))
                     )}

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { apiGet, apiPost, apiUpload } from '@/lib/api'
+import { apiGet, apiPostWithAuth, apiUpload } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { Stepper, type StepItem } from '@/components/request/stepper'
 import { PhaseAdmin } from '@/components/request/phase-admin'
@@ -48,7 +48,7 @@ export type UploadedFile = {
 
 export default function NewMaterialRequestPage() {
   const router = useRouter()
-  const { user } = useUser()
+  const { user, accessToken } = useUser()
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -196,7 +196,7 @@ export default function NewMaterialRequestPage() {
       setIsSubmitting(true)
       try {
         // Step 1 — create the request record
-        const result = await apiPost<{ id: number }>('/api/requests', payload)
+        const result = await apiPostWithAuth<{ id: number }>('/api/requests', payload, accessToken)
         const requestId = result.id
 
         // Step 2 — upload each file to the new request_attachments table

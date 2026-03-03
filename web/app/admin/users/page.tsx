@@ -50,14 +50,13 @@ function initials(name: string) {
 
 function roleBadgeStyle(name: string | null) {
   switch (name) {
-    case 'ADMIN':
-      return { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' }
-    case 'GOVERNANCA':
-      return { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' }
-    case 'SOLICITANTE':
-      return { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' }
-    default:
-      return { bg: '#F8FAFC', text: '#475569', border: '#E2E8F0' }
+    case 'ADMIN':       return { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' }
+    case 'SOLICITANTE': return { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' }
+    case 'TRIAGEM':     return { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' }
+    case 'FISCAL':      return { bg: '#F5F3FF', text: '#5B21B6', border: '#DDD6FE' }
+    case 'MASTER':      return { bg: '#FEF3C7', text: '#B45309', border: '#FDE68A' }
+    case 'MRP':         return { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0' }
+    default:            return { bg: '#F8FAFC', text: '#475569', border: '#E2E8F0' }
   }
 }
 

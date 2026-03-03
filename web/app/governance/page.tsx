@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
-import { apiGet, apiPatch } from '@/lib/api'
+import { apiGet, apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { KanbanBoard } from '@/components/governance/kanban-board'
 import { ListView } from '@/components/governance/list-view'
 import { FiltersBar } from '@/components/governance/filters-bar'
@@ -19,6 +19,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
+import { useUser } from '@/contexts/user-context'
 import { ChevronLeft, FilePlus, Check, X } from 'lucide-react'
 
 type WorkflowHeader = {
@@ -45,6 +46,8 @@ type ApiRequest = {
   attachments: string[] | null
   date: string | null
   values: RequestValue[]
+  assigned_to_id?: number | null
+  assigned_to_name?: string | null
 }
 
 function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
@@ -74,10 +77,11 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
     requesterAvatar: initials || '?',
     date: dateStr,
     urgency: r.urgency ?? 'low',
-    // Use the raw API status — Kanban columns match by status_key directly
     status: r.status as MaterialRequest['status'],
     statusLabel: r.status,
     generated_description: r.generated_description ?? '',
+    assigned_to_id: r.assigned_to_id ?? null,
+    assigned_to_name: r.assigned_to_name ?? null,
     enrichment: [
       { label: 'Técnico', key: 'technical', percent: r.values?.length > 0 ? 100 : 0 },
       { label: 'Fiscal', key: 'fiscal', percent: 0 },
@@ -126,6 +130,7 @@ function filterRequests(
 }
 
 export default function GovernancePage() {
+  const { user, accessToken, ready } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [requests, setRequests] = useState<ApiRequest[]>([])
@@ -155,15 +160,18 @@ export default function GovernancePage() {
     const url = selectedWorkflowId
       ? `/api/requests?workflow_id=${selectedWorkflowId}`
       : '/api/requests'
-    return apiGet<ApiRequest[]>(url)
+    return apiGetWithAuth<ApiRequest[]>(url, accessToken)
       .then(setRequests)
       .catch(() => setRequests([]))
       .finally(() => setLoading(false))
-  }, [selectedWorkflowId])
+  }, [selectedWorkflowId, accessToken])
 
   useEffect(() => {
-    if (selectedWorkflowId !== null) fetchRequests()
-  }, [selectedWorkflowId, fetchRequests])
+    if (ready && selectedWorkflowId !== null) fetchRequests()
+  }, [ready, selectedWorkflowId, fetchRequests])
+
+  const showActionButtons =
+    (user?.role_type ?? 'sistema') === 'etapa' && user?.role_name !== 'ADMIN'
 
   const materialRequests = useMemo(
     () => requests.map(mapToMaterialRequest),
@@ -181,11 +189,16 @@ export default function GovernancePage() {
     setDetailsOpen(true)
   }
 
+  const [rejectModalOpen, setRejectModalOpen] = useState(false)
+  const [rejectJustification, setRejectJustification] = useState('')
+  const [rejectError, setRejectError] = useState<string | null>(null)
+
   const handleAprovar = async (id: number) => {
+    if (!window.confirm('Deseja aprovar esta solicitação?')) return
     if (approveRejectLoading) return
     setApproveRejectLoading(true)
     try {
-      await apiPatch(`/api/requests/${id}/status`, { action: 'approve' })
+      await apiPatchWithAuth(`/api/requests/${id}/status`, { action: 'approve' }, accessToken)
       toast.success('Solicitação aprovada com sucesso!')
       setDetailsOpen(false)
       setSelectedRequest(null)
@@ -197,17 +210,33 @@ export default function GovernancePage() {
     }
   }
 
-  const handleRejeitar = async (id: number) => {
-    if (approveRejectLoading) return
+  const openRejectModal = () => {
+    setRejectJustification('')
+    setRejectError(null)
+    setRejectModalOpen(true)
+  }
+
+  const handleRejectConfirm = async () => {
+    if (!selectedRequest) return
+    if (!rejectJustification.trim()) {
+      setRejectError('Justificativa é obrigatória.')
+      return
+    }
     setApproveRejectLoading(true)
+    setRejectError(null)
     try {
-      await apiPatch(`/api/requests/${id}/reject`, {})
+      await apiPatchWithAuth(
+        `/api/requests/${selectedRequest.id}/reject`,
+        { justification: rejectJustification.trim() },
+        accessToken
+      )
       toast.success('Solicitação rejeitada com sucesso!')
+      setRejectModalOpen(false)
       setDetailsOpen(false)
       setSelectedRequest(null)
       await fetchRequests()
     } catch {
-      toast.error('Falha ao rejeitar solicitação')
+      setRejectError('Falha ao rejeitar solicitação')
     } finally {
       setApproveRejectLoading(false)
     }
@@ -287,6 +316,9 @@ export default function GovernancePage() {
                   workflowId={selectedWorkflowId}
                   onViewDetails={handleViewDetails}
                   onStatusChanged={() => { fetchRequests() }}
+                  showActionButtons={showActionButtons}
+                  currentUserId={user?.id ?? null}
+                  accessToken={accessToken}
                 />
               ) : (
                 <ListView
@@ -374,28 +406,90 @@ export default function GovernancePage() {
                 </p>
               )}
               <DialogFooter>
-                <Button
-                  size="sm"
-                  disabled={approveRejectLoading}
-                  className="gap-2 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:text-white dark:hover:bg-green-700"
-                  onClick={() => handleAprovar(selectedRequest.id)}
-                >
-                  <Check className="size-4" />
-                  Aprovar
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  disabled={approveRejectLoading}
-                  className="gap-2 bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700"
-                  onClick={() => handleRejeitar(selectedRequest.id)}
-                >
-                  <X className="size-4" />
-                  Rejeitar
-                </Button>
+                {showActionButtons &&
+                  selectedRequest.assigned_to_id != null &&
+                  selectedRequest.assigned_to_id === user?.id && (
+                    <>
+                      <Button
+                        size="sm"
+                        disabled={approveRejectLoading}
+                        className="gap-2 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:text-white dark:hover:bg-green-700"
+                        onClick={() => handleAprovar(selectedRequest.id)}
+                      >
+                        <Check className="size-4" />
+                        Aprovar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={approveRejectLoading}
+                        className="gap-2 bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700"
+                        onClick={openRejectModal}
+                      >
+                        <X className="size-4" />
+                        Rejeitar
+                      </Button>
+                    </>
+                  )}
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Rejeição com justificativa obrigatória */}
+      <Dialog
+        open={rejectModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectModalOpen(false)
+            setRejectError(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md border-slate-200 bg-white text-slate-900 shadow-xl dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
+          <DialogHeader>
+            <DialogTitle>
+              Confirmar Rejeição — REQ-{String(selectedRequest?.id ?? '').padStart(4, '0')}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Informe a justificativa da reprovação para a solicitação REQ-
+              {String(selectedRequest?.id ?? '').padStart(4, '0')}.
+            </p>
+            <div>
+              <label className="text-sm font-medium block mb-2">
+                Justificativa da reprovação (obrigatória)
+              </label>
+              <textarea
+                value={rejectJustification}
+                onChange={(e) => setRejectJustification(e.target.value)}
+                className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                placeholder="Informe a justificativa..."
+                disabled={approveRejectLoading}
+              />
+            </div>
+            {rejectError && (
+              <p className="text-sm text-destructive">{rejectError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRejectModalOpen(false)}
+              disabled={approveRejectLoading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleRejectConfirm}
+              disabled={approveRejectLoading || !rejectJustification.trim()}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {approveRejectLoading ? 'Processando…' : 'Confirmar Rejeição'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

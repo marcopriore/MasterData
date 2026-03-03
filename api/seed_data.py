@@ -40,9 +40,15 @@ from security import hash_password
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
 
-ADMIN_EMAIL    = "admin@masterdata.com"
-ADMIN_PASSWORD = "Admin@1234"
-ADMIN_NAME     = "Administrador"
+# Usuários e senhas para cada perfil
+_USER_CREDENTIALS = [
+    ("admin@masterdata.com",        "Admin@1234",       "ADMIN",        "Administrador"),
+    ("solicitante@masterdata.com",  "Solicitante@1234", "SOLICITANTE",  "Solicitante"),
+    ("triagem@masterdata.com",      "Triagem@1234",     "TRIAGEM",      "Usuário Triagem"),
+    ("fiscal@masterdata.com",       "Fiscal@1234",      "FISCAL",       "Usuário Fiscal"),
+    ("master@masterdata.com",       "Master@1234",      "MASTER",       "Usuário Master"),
+    ("mrp@masterdata.com",          "Mrp@1234",         "MRP",          "Usuário MRP"),
+]
 
 PDM_NAME          = "Rolamento Industrial"
 PDM_INTERNAL_CODE = "PDM-ROL-001"
@@ -54,7 +60,7 @@ WORKFLOW_STEPS = [
     {"step_name": "Triagem",    "status_key": "Triagem",    "order": 1},
     {"step_name": "Fiscal",     "status_key": "Fiscal",     "order": 2},
     {"step_name": "Master",     "status_key": "Master",     "order": 3},
-    {"step_name": "Pendente",   "status_key": "Pendente",   "order": 4},
+    {"step_name": "MRP",        "status_key": "MRP",        "order": 4},
     {"step_name": "Finalizado", "status_key": "Finalizado", "order": 5},
 ]
 
@@ -95,7 +101,7 @@ _REQUESTS: list[dict] = [
         "requester": "FERNANDA COSTA",
         "cost_center": "CC-4500-MNT",
         "urgency": "low",
-        "status": "Pendente",
+        "status": "MRP",
         "justification": "Manutenção preventiva semestral.",
         "generated_description": "ROLAMENTO [ESFERAS] [6306] [2RS] [72MM]",
         "technical_attributes": {"tipo": "ESFERAS", "modelo": "6306", "vedacao": "2RS", "diametro": "72MM"},
@@ -145,7 +151,7 @@ _REQUESTS: list[dict] = [
         "requester": "THIAGO RODRIGUES",
         "cost_center": "CC-2200-LOG",
         "urgency": "medium",
-        "status": "Pendente",
+        "status": "MRP",
         "justification": "Ampliação de frota de empilhadeiras.",
         "generated_description": "ROLAMENTO [ESFERAS] [6001] [ZZ] [28MM]",
         "technical_attributes": {"tipo": "ESFERAS", "modelo": "6001", "vedacao": "ZZ", "diametro": "28MM"},
@@ -195,7 +201,7 @@ _REQUESTS: list[dict] = [
         "requester": "PATRICIA MENDES",
         "cost_center": "CC-3200-PRD",
         "urgency": "high",
-        "status": "Pendente",
+        "status": "MRP",
         "justification": "Substituição emergencial — vibração excessiva.",
         "generated_description": "ROLAMENTO [ROLOS CILÍNDRICOS] [NJ308] [ABERTO] [90MM]",
         "technical_attributes": {"tipo": "ROLOS CILÍNDRICOS", "modelo": "NJ308", "vedacao": "ABERTO", "diametro": "90MM"},
@@ -230,28 +236,28 @@ def _skip(msg: str) -> None:
 # ─── Seed functions ───────────────────────────────────────────────────────────
 
 def ensure_roles(db) -> dict[str, RoleORM]:
-    """Returns a name→ORM map for ADMIN, GOVERNANCA, SOLICITANTE."""
+    """Returns a name→ORM map for ADMIN, SOLICITANTE, TRIAGEM, FISCAL, MASTER, MRP."""
     role_defs = [
-        ("ADMIN", {
+        ("ADMIN", "sistema", {
             "can_approve": True, "can_reject": True, "can_edit_pdm": True,
             "can_manage_users": True, "can_manage_workflows": True, "can_submit_request": True,
         }),
-        ("GOVERNANCA", {
-            "can_approve": True, "can_reject": True, "can_edit_pdm": True,
-            "can_manage_users": False, "can_manage_workflows": True, "can_submit_request": True,
-        }),
-        ("SOLICITANTE", {
+        ("SOLICITANTE", "sistema", {
             "can_approve": False, "can_reject": False, "can_edit_pdm": False,
             "can_manage_users": False, "can_manage_workflows": False, "can_submit_request": True,
         }),
+        ("TRIAGEM", "etapa", {"can_approve": True, "can_reject": True}),
+        ("FISCAL", "etapa", {"can_approve": True, "can_reject": True}),
+        ("MASTER", "etapa", {"can_approve": True, "can_reject": True}),
+        ("MRP", "etapa", {"can_approve": True, "can_reject": True}),
     ]
     role_map: dict[str, RoleORM] = {}
-    for name, perms in role_defs:
+    for name, role_type, perms in role_defs:
         row = db.query(RoleORM).filter(RoleORM.name == name).first()
         if row:
             _skip(f"Role {name}")
         else:
-            row = RoleORM(name=name, permissions=perms)
+            row = RoleORM(name=name, role_type=role_type, permissions=perms)
             db.add(row)
             db.flush()
             _ok(f"Role {name} criado")
@@ -259,30 +265,31 @@ def ensure_roles(db) -> dict[str, RoleORM]:
     return role_map
 
 
-def ensure_admin_user(db, role_map: dict[str, RoleORM]) -> UserORM:
-    """Creates admin@masterdata.com if it doesn't exist."""
-    row = db.query(UserORM).filter(UserORM.email == ADMIN_EMAIL).first()
-    if row:
-        _skip(f"Usuário {ADMIN_EMAIL}")
-        return row
-
-    admin_role = role_map.get("ADMIN")
-    if admin_role is None:
-        raise RuntimeError("Role ADMIN não encontrada — execute ensure_roles primeiro.")
-
-    row = UserORM(
-        name=ADMIN_NAME,
-        email=ADMIN_EMAIL,
-        hashed_password=hash_password(ADMIN_PASSWORD),
-        role_id=admin_role.id,
-        is_active=True,
-        preferences={"theme": "light", "language": "pt"},
-        created_at=datetime.utcnow(),
-    )
-    db.add(row)
-    db.flush()
-    _ok(f"Usuário {ADMIN_EMAIL} criado (senha: {ADMIN_PASSWORD})")
-    return row
+def ensure_users(db, role_map: dict[str, RoleORM]) -> dict[str, UserORM]:
+    """Creates one user per profile if they don't exist. Returns email→UserORM map."""
+    user_map: dict[str, UserORM] = {}
+    for email, password, role_name, display_name in _USER_CREDENTIALS:
+        row = db.query(UserORM).filter(UserORM.email == email).first()
+        if row:
+            _skip(f"Usuário {email}")
+        else:
+            role = role_map.get(role_name)
+            if role is None:
+                raise RuntimeError(f"Role {role_name} não encontrada — execute ensure_roles primeiro.")
+            row = UserORM(
+                name=display_name,
+                email=email,
+                hashed_password=hash_password(password),
+                role_id=role.id,
+                is_active=True,
+                preferences={"theme": "light", "language": "pt"},
+                created_at=datetime.utcnow(),
+            )
+            db.add(row)
+            db.flush()
+            _ok(f"Usuário {email} criado (senha: {password})")
+        user_map[email] = row
+    return user_map
 
 
 def ensure_pdm(db) -> PDMOrm:
@@ -426,8 +433,9 @@ def main() -> None:
         print("1. Roles")
         role_map = ensure_roles(db)
 
-        print("\n2. Usuário admin")
-        admin_user = ensure_admin_user(db, role_map)
+        print("\n2. Usuários")
+        user_map = ensure_users(db, role_map)
+        admin_user = user_map["admin@masterdata.com"]
 
         print("\n3. PDM Template")
         pdm = ensure_pdm(db)

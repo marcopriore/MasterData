@@ -16,6 +16,7 @@ import {
   ClipboardEdit,
   Clock,
   ChevronRight,
+  Play,
 } from "lucide-react"
 
 
@@ -41,6 +42,8 @@ export interface MaterialRequest {
   pendingAction?: string
   description: string
   generated_description?: string
+  assigned_to_id?: number | null
+  assigned_to_name?: string | null
 }
 
 const urgencyConfig = {
@@ -76,6 +79,11 @@ interface RequestCardProps {
   invalidStatus?: boolean
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
+  /** Show Iniciar Atendimento e badges (role_type=etapa, excl. ADMIN). Aprovar/Rejeitar só no modal. */
+  showActionButtons?: boolean
+  /** Current user id — used for assign / own-attendance logic */
+  currentUserId?: number | null
+  onIniciarAtendimentoClick?: () => void
 }
 
 function MiniProgress({ label, percent }: { label: string; percent: number }) {
@@ -110,6 +118,9 @@ export function RequestCard({
   invalidStatus = false,
   onCompleteData,
   onViewDetails,
+  showActionButtons = false,
+  currentUserId = null,
+  onIniciarAtendimentoClick,
 }: RequestCardProps) {
   const urg = urgencyConfig[request.urgency]
   const needsAction =
@@ -255,10 +266,17 @@ export function RequestCard({
 
   // Kanban card
   const descriptionText = request.generated_description || request.description || '—'
+  const assignedToId = request.assigned_to_id ?? null
+  const isAssignedToMe = assignedToId !== null && currentUserId !== null && assignedToId === currentUserId
+  const isAssignedToOther = assignedToId !== null && (currentUserId === null || assignedToId !== currentUserId)
+  const isUnassigned = assignedToId === null
 
   return (
     <Card
-      className="group shadow-sm hover:shadow-md transition-all cursor-pointer"
+      className={cn(
+        "group shadow-sm hover:shadow-md transition-all cursor-pointer",
+        isAssignedToOther && "opacity-60 border-slate-300 dark:border-zinc-600"
+      )}
       style={{ backgroundColor: 'var(--kanban-card-bg)', borderColor: 'var(--kanban-col-border)' }}
       onClick={() => onViewDetails?.(request.id)}
     >
@@ -311,6 +329,30 @@ export function RequestCard({
             {request.date}
           </div>
         </div>
+
+        {/* Assignment badge and Iniciar Atendimento — Aprovar/Rejeitar só no modal de detalhes */}
+        {showActionButtons && (
+          <div className="pt-2" onClick={(e) => e.stopPropagation()}>
+            {isAssignedToMe && (
+              <div className="text-[10px] font-medium text-primary/90">Você está atendendo</div>
+            )}
+            {isAssignedToOther && (
+              <div className="text-[10px] text-muted-foreground">
+                Em atendimento por {request.assigned_to_name ?? "outro usuário"}
+              </div>
+            )}
+            {isUnassigned && onIniciarAtendimentoClick && (
+              <Button
+                size="sm"
+                className="w-full h-7 text-[10px] gap-1 bg-green-600 hover:bg-green-700 text-white"
+                onClick={(e) => { e.stopPropagation(); onIniciarAtendimentoClick() }}
+              >
+                <Play className="size-3 fill-current" />
+                Iniciar Atendimento
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

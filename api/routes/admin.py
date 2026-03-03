@@ -27,7 +27,7 @@ Auth
   POST   /admin/auth/login             Credential check → user + role payload
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from deps import get_db
 from orm_models import RoleORM, UserORM
-from security import hash_password, verify_password
+from security import create_access_token, hash_password, verify_password
 from models import (
     LoginRequest,
     RoleCreate,
@@ -55,6 +55,7 @@ def _role_to_dict(r: RoleORM) -> dict:
     return {
         "id": r.id,
         "name": r.name,
+        "role_type": getattr(r, "role_type", "sistema"),
         "permissions": r.permissions or {},
         "user_count": len(r.users) if r.users is not None else 0,
     }
@@ -67,6 +68,7 @@ def _user_to_dict(u: UserORM) -> dict:
         "email": u.email,
         "role_id": u.role_id,
         "role_name": u.role.name if u.role else None,
+        "role_type": getattr(u.role, "role_type", "sistema") if u.role else "sistema",
         "role_permissions": u.role.permissions if u.role else {},
         "is_active": u.is_active,
         "preferences": u.preferences or {"theme": "light", "language": "pt"},
@@ -110,7 +112,7 @@ def _load_role(role_id: int, db: Session) -> RoleORM:
 )
 def list_roles(db: Session = Depends(get_db)):
     """
-    Retorna todos os perfis cadastrados (ADMIN, GOVERNANCA, SOLICITANTE, …)
+    Retorna todos os perfis cadastrados (ADMIN, SOLICITANTE, TRIAGEM, FISCAL, MASTER, MRP, …)
     com o conjunto de flags de permissão e o número de usuários vinculados.
     """
     rows = (
@@ -147,7 +149,11 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Perfil '{name_upper}' já existe",
         )
-    row = RoleORM(name=name_upper, permissions=payload.permissions.model_dump())
+    row = RoleORM(
+        name=name_upper,
+        role_type=payload.role_type,
+        permissions=payload.permissions.model_dump(),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -160,6 +166,8 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
 )
 def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)):
     row = _load_role(role_id, db)
+    if payload.role_type is not None:
+        row.role_type = payload.role_type
     if payload.name is not None:
         new_name = payload.name.strip().upper()
         conflict = (
@@ -266,7 +274,7 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
         role_id=payload.role_id,
         is_active=True,
         preferences=payload.preferences.model_dump(),
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
     db.add(row)
     db.commit()
@@ -450,7 +458,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Conta desativada. Entre em contato com o administrador.",
         )
+    role_name = row.role.name if row.role else "SOLICITANTE"
+    role_type = getattr(row.role, "role_type", "sistema") if row.role else "sistema"
     return {
         "ok": True,
         "user": _user_to_dict(row),
+        "access_token": create_access_token(row.id, role_name, role_type),
     }

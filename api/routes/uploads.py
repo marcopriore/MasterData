@@ -25,7 +25,7 @@ from __future__ import annotations
 import mimetypes
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -149,7 +149,7 @@ async def upload_attachment(
         file_path=relative_path,
         mime_type=mime,
         file_size=file_size,
-        uploaded_at=datetime.utcnow(),
+        uploaded_at=datetime.now(timezone.utc),
     )
     db.add(attachment)
     db.commit()

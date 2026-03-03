@@ -1,7 +1,8 @@
+from typing import Optional
 from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4, UUID
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
@@ -15,6 +16,9 @@ class RoleORM(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    role_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="sistema"
+    )  # "sistema" | "etapa"
     # JSON flags: { "can_approve": true, "can_edit_pdm": true, "can_manage_users": true, ... }
     permissions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
@@ -38,11 +42,16 @@ class UserORM(Base):
         JSONB, nullable=False, default=lambda: {"theme": "light", "language": "pt"}
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     role: Mapped["RoleORM"] = relationship("RoleORM", back_populates="users")
     material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
-        "MaterialRequestORM", back_populates="user"
+        "MaterialRequestORM", back_populates="user", foreign_keys="MaterialRequestORM.user_id"
+    )
+    assigned_requests: Mapped[list["MaterialRequestORM"]] = relationship(
+        "MaterialRequestORM", back_populates="assigned_to", foreign_keys="MaterialRequestORM.assigned_to_id"
     )
 
 
@@ -56,6 +65,9 @@ class WorkflowHeaderORM(Base):
 
     steps: Mapped[list["WorkflowConfigORM"]] = relationship(
         "WorkflowConfigORM", back_populates="workflow", cascade="all, delete-orphan"
+    )
+    material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
+        "MaterialRequestORM", back_populates="workflow"
     )
 
 
@@ -80,7 +92,9 @@ class MaterialRequestORM(Base):
     __tablename__ = "material_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pdm_id: Mapped[int] = mapped_column(Integer, ForeignKey("pdm_templates.id"), nullable=False)
+    pdm_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("pdm_templates.id", ondelete="RESTRICT"), nullable=False
+    )
     workflow_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("workflow_header.id", ondelete="RESTRICT"), nullable=False
     )
@@ -105,10 +119,27 @@ class MaterialRequestORM(Base):
     # the request_attachments relational table instead.
     attachments: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    assigned_to_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, default=None
+    )
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, default=None
+    )
 
     pdm: Mapped["PDMOrm"] = relationship("PDMOrm", back_populates="material_requests")
-    user: Mapped["UserORM | None"] = relationship("UserORM", back_populates="material_requests")
+    workflow: Mapped["WorkflowHeaderORM"] = relationship(
+        "WorkflowHeaderORM", back_populates="material_requests"
+    )
+    user: Mapped["UserORM | None"] = relationship(
+        "UserORM", back_populates="material_requests", foreign_keys="MaterialRequestORM.user_id"
+    )
+    assigned_to: Mapped["UserORM | None"] = relationship(
+        "UserORM", foreign_keys=[assigned_to_id], back_populates="assigned_requests"
+    )
     request_values: Mapped[list["RequestValueORM"]] = relationship(
         "RequestValueORM", back_populates="request", cascade="all, delete-orphan"
     )
@@ -122,7 +153,7 @@ class RequestValueORM(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     request_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("material_requests.id"), nullable=False
+        Integer, ForeignKey("material_requests.id", ondelete="CASCADE"), nullable=False
     )
     attribute_id: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
@@ -147,7 +178,7 @@ class RequestAttachmentORM(Base):
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)  # bytes
     uploaded_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
     request: Mapped["MaterialRequestORM"] = relationship(

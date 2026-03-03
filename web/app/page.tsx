@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { apiGet } from '@/lib/api'
+import { apiGetWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import {
   PieChart,
@@ -42,11 +42,10 @@ type DashboardStats = {
     pdm_id: number
     created_at: string | null
   }[]
-}
-
-type ExtraStats = {
-  pdm_count: number
-  user_count: number
+  pdm_count?: number
+  user_count?: number
+  section_title?: string
+  show_user_count?: boolean
 }
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -183,10 +182,9 @@ function NavCard({
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user } = useUser()
+  const { user, accessToken, ready } = useUser()
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [extra, setExtra] = useState<ExtraStats>({ pdm_count: 0, user_count: 0 })
   const [statsLoading, setStatsLoading] = useState(true)
   const [statsError, setStatsError] = useState<string | null>(null)
 
@@ -195,17 +193,13 @@ export default function DashboardPage() {
   useEffect(() => setIsClient(true), [])
 
   useEffect(() => {
+    if (!ready) return
     async function load() {
       setStatsLoading(true)
       setStatsError(null)
       try {
-        const [s, pdms, users] = await Promise.all([
-          apiGet<DashboardStats>('/api/dashboard/stats'),
-          apiGet<{ id: number }[]>('/api/pdm'),
-          apiGet<{ id: number }[]>('/admin/users').catch(() => [] as { id: number }[]),
-        ])
+        const s = await apiGetWithAuth<DashboardStats>('/api/dashboard/stats', accessToken ?? null)
         setStats(s)
-        setExtra({ pdm_count: pdms.length, user_count: users.length })
       } catch (err) {
         setStatsError((err as Error).message)
       } finally {
@@ -213,7 +207,7 @@ export default function DashboardPage() {
       }
     }
     load()
-  }, [])
+  }, [ready, accessToken])
 
   function handleSliceClick(entry: { name: string }) {
     router.push(`/governance?status=${encodeURIComponent(entry.name)}`)
@@ -239,8 +233,42 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* ── Acesso Rápido (primeiro após header) ───────────────────────────── */}
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+          Acesso Rápido
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <NavCard
+            href="/admin-pdm"
+            icon={Database}
+            label="Gestão de PDMs"
+            description="Configure padrões de descrição"
+          />
+          <NavCard
+            href="/governance"
+            icon={ShieldCheck}
+            label="Governança"
+            description="Políticas e controle de qualidade"
+          />
+          <NavCard
+            href="/settings/workflow"
+            icon={GitBranch}
+            label="Workflows"
+            description="Etapas de aprovação"
+          />
+          <NavCard
+            href="/request"
+            icon={FilePlus}
+            label="Nova Requisição"
+            description="Criar nova solicitação"
+            gold
+          />
+        </div>
+      </div>
+
       {/* ── KPI cards ──────────────────────────────────────────────────────── */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className={`grid gap-4 ${stats?.show_user_count === false ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
         <KpiCard
           icon={ClipboardList}
           label="Total de Solicitações"
@@ -250,17 +278,19 @@ export default function DashboardPage() {
         <KpiCard
           icon={Database}
           label="PDMs Cadastrados"
-          value={extra.pdm_count}
+          value={stats?.pdm_count ?? 0}
           accent="#C69A46"
           loading={statsLoading}
         />
-        <KpiCard
-          icon={Users}
-          label="Usuários Ativos"
-          value={extra.user_count}
-          accent="#3B82F6"
-          loading={statsLoading}
-        />
+        {stats?.show_user_count !== false && (
+          <KpiCard
+            icon={Users}
+            label="Usuários Ativos"
+            value={stats?.user_count ?? 0}
+            accent="#3B82F6"
+            loading={statsLoading}
+          />
+        )}
       </div>
 
       {/* ── Charts row ─────────────────────────────────────────────────────── */}
@@ -384,10 +414,12 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Recent activity ─────────────────────────────────────────────────── */}
+      {/* ── Atividade Recente / Minhas Solicitações ─────────────────────────── */}
       <div className="rounded-2xl border border-[#B4B9BE] bg-white shadow-[var(--shadow-card-float)]">
         <div className="flex items-center justify-between border-b border-[#B4B9BE] px-6 py-4">
-          <h2 className="text-sm font-semibold text-foreground">Atividade Recente</h2>
+          <h2 className="text-sm font-semibold text-foreground">
+            {stats?.section_title ?? 'Atividade Recente'}
+          </h2>
           <Link
             href="/governance"
             className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
@@ -449,40 +481,6 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
-      </div>
-
-      {/* ── Quick-access nav ────────────────────────────────────────────────── */}
-      <div>
-        <h2 className="mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-          Acesso Rápido
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <NavCard
-            href="/admin-pdm"
-            icon={Database}
-            label="Gestão de PDMs"
-            description="Configure padrões de descrição"
-          />
-          <NavCard
-            href="/governance"
-            icon={ShieldCheck}
-            label="Governança"
-            description="Políticas e controle de qualidade"
-          />
-          <NavCard
-            href="/settings/workflow"
-            icon={GitBranch}
-            label="Workflows"
-            description="Etapas de aprovação"
-          />
-          <NavCard
-            href="/request"
-            icon={FilePlus}
-            label="Nova Requisição"
-            description="Criar nova solicitação"
-            gold
-          />
-        </div>
       </div>
     </div>
   )

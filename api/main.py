@@ -4,12 +4,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
-from fastapi import Depends, HTTPException, Query
-from datetime import datetime
+from sqlalchemy.exc import IntegrityError
+from fastapi import Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+from datetime import datetime, timezone
 
-from deps import get_db
+from deps import get_current_user, get_current_user_optional, get_db
 from orm_models import (
     ProductORM,
     PDMOrm,
@@ -24,9 +26,22 @@ from security import hash_password
 
 app = FastAPI(title="MasterData API", version="1.8.0")
 
+
+@app.exception_handler(IntegrityError)
+def handle_integrity_error(_request, exc: IntegrityError):
+    """Convert DB integrity errors to HTTP 400 with a safe message."""
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "Conflito de dados ou violação de restrição de integridade."},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,90 +49,61 @@ app.add_middleware(
 
 # ─── Seed ─────────────────────────────────────────────────────────────────────
 
-# Default role definitions
+# Default role definitions (role_type: "sistema" | "etapa")
 _DEFAULT_ROLES: list[dict] = [
-    {
-        "name": "ADMIN",
-        "permissions": {
-            "can_approve": True,
-            "can_reject": True,
-            "can_edit_pdm": True,
-            "can_manage_users": True,
-            "can_manage_workflows": True,
-            "can_submit_request": True,
-        },
-    },
-    {
-        "name": "GOVERNANCA",
-        "permissions": {
-            "can_approve": True,
-            "can_reject": True,
-            "can_edit_pdm": True,
-            "can_manage_users": False,
-            "can_manage_workflows": True,
-            "can_submit_request": True,
-        },
-    },
-    {
-        "name": "SOLICITANTE",
-        "permissions": {
-            "can_approve": False,
-            "can_reject": False,
-            "can_edit_pdm": False,
-            "can_manage_users": False,
-            "can_manage_workflows": False,
-            "can_submit_request": True,
-        },
-    },
+    {"name": "ADMIN", "role_type": "sistema", "permissions": {
+        "can_approve": True, "can_reject": True, "can_edit_pdm": True,
+        "can_manage_users": True, "can_manage_workflows": True, "can_submit_request": True,
+    }},
+    {"name": "SOLICITANTE", "role_type": "sistema", "permissions": {
+        "can_approve": False, "can_reject": False, "can_edit_pdm": False,
+        "can_manage_users": False, "can_manage_workflows": False, "can_submit_request": True,
+    }},
+    {"name": "TRIAGEM", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
+    {"name": "FISCAL", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
+    {"name": "MASTER", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
+    {"name": "MRP", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
 ]
 
-_DEFAULT_ADMIN = {
-    "name": "Administrador",
-    "email": "admin@masterdata.com",
-    "password": "Admin@1234",   # changed on first login in production
-}
+_DEFAULT_USERS = [
+    ("admin@masterdata.com", "Admin@1234", "ADMIN", "Administrador"),
+    ("solicitante@masterdata.com", "Solicitante@1234", "SOLICITANTE", "Solicitante"),
+    ("triagem@masterdata.com", "Triagem@1234", "TRIAGEM", "Usuário Triagem"),
+    ("fiscal@masterdata.com", "Fiscal@1234", "FISCAL", "Usuário Fiscal"),
+    ("master@masterdata.com", "Master@1234", "MASTER", "Usuário Master"),
+    ("mrp@masterdata.com", "Mrp@1234", "MRP", "Usuário MRP"),
+]
 
 
 def seed_database(db: Session) -> None:
-    """Populate roles and default admin user if the tables are empty."""
+    """Populate roles and default users if the tables are empty."""
     if db.query(RoleORM).count() > 0:
         return  # already seeded
 
-    # Create roles
     role_map: dict[str, RoleORM] = {}
     for r in _DEFAULT_ROLES:
-        orm = RoleORM(name=r["name"], permissions=r["permissions"])
+        orm = RoleORM(name=r["name"], role_type=r["role_type"], permissions=r["permissions"])
         db.add(orm)
         role_map[r["name"]] = orm
-    db.flush()  # get IDs without committing
+    db.flush()
 
-    # Create default admin user
-    admin_role = role_map["ADMIN"]
-    admin = UserORM(
-        name=_DEFAULT_ADMIN["name"],
-        email=_DEFAULT_ADMIN["email"],
-        hashed_password=hash_password(_DEFAULT_ADMIN["password"]),
-        role_id=admin_role.id,
-        is_active=True,
-        preferences={"theme": "light", "language": "pt"},
-        created_at=datetime.utcnow(),
-    )
-    db.add(admin)
+    for email, password, role_name, display_name in _DEFAULT_USERS:
+        role = role_map[role_name]
+        u = UserORM(
+            name=display_name,
+            email=email,
+            hashed_password=hash_password(password),
+            role_id=role.id,
+            is_active=True,
+            preferences={"theme": "light", "language": "pt"},
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(u)
     db.commit()
     print(
-        f"[seed] Created {len(_DEFAULT_ROLES)} roles and default admin "
-        f"({_DEFAULT_ADMIN['email']} / {_DEFAULT_ADMIN['password']})"
+        f"[seed] Created {len(_DEFAULT_ROLES)} roles and {len(_DEFAULT_USERS)} users "
+        f"(admin@masterdata.com / Admin@1234)"
     )
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    from db import SessionLocal
-    db = SessionLocal()
-    try:
-        seed_database(db)
-    finally:
-        db.close()
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────
@@ -132,6 +118,8 @@ from models import (
     ProductCreate,
     PDMCreate,
     RequestCreate,
+    RejectPayload,
+    StatusUpdatePayload,
     WorkflowConfigUpdate,
     WorkflowConfigCreate,
     WorkflowConfigStepUpdate,
@@ -157,9 +145,7 @@ _UPLOADS_DIR = Path(__file__).parent / "uploads"
 _UPLOADS_DIR.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 
-#products: list[Product] = []
-
-#-------------------------------
+# ─── Products ─────────────────────────────────────────────────────────────────
 # CARREGAR PRODUTO
 @app.get("/products")
 def list_products(db: Session = Depends(get_db)):
@@ -290,6 +276,8 @@ def _request_to_dict(r) -> dict:
         "attachments": r.attachments,
         "date": r.created_at.isoformat() if r.created_at else None,
         "values": values,
+        "assigned_to_id": r.assigned_to_id,
+        "assigned_to_name": r.assigned_to.name if r.assigned_to else None,
     }
 
 
@@ -299,25 +287,81 @@ def _request_to_dict(r) -> dict:
 def list_requests(
     workflow_id: int | None = Query(None, description="Filter by workflow (default: active)"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
 ):
     q = (
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
             joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
         )
         .order_by(MaterialRequestORM.created_at.desc())
     )
     wf_id = workflow_id or _get_active_workflow_id(db)
     if wf_id is not None:
         q = q.filter(MaterialRequestORM.workflow_id == wf_id)
+
+    role_name = current_user.role.name.upper() if (current_user and current_user.role) else None
+    role_type = current_user.role.role_type if (current_user and current_user.role) else None
+
+    if role_name == "ADMIN":
+        pass  # no filter — return all
+    elif role_name == "SOLICITANTE" and current_user:
+        q = q.filter(MaterialRequestORM.user_id == current_user.id)
+    elif role_type == "etapa" and current_user and current_user.role:
+        q = q.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
+
     return [_request_to_dict(r) for r in q.all()]
+
+
+# -------------------------------
+# INICIAR ATENDIMENTO (atribui a solicitação ao usuário logado)
+@app.patch("/api/requests/{request_id}/assign")
+def assign_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """
+    Atribui a solicitação ao usuário logado. Bloqueia concorrência: se já estiver
+    atribuída a outro usuário, retorna 409.
+    """
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
+        )
+        .filter(MaterialRequestORM.id == request_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+
+    if row.assigned_to_id is not None and row.assigned_to_id != current_user.id:
+        assignee_name = row.assigned_to.name if row.assigned_to else "outro usuário"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Solicitação já está sendo atendida por {assignee_name}",
+        )
+
+    row.assigned_to_id = current_user.id
+    row.assigned_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return _request_to_dict(row)
 
 
 # -------------------------------
 # CRIAR REQUISIÇÃO DE MATERIAL
 @app.post("/api/requests")
-def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
+def create_request(
+    payload: RequestCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
     # Validate PDM exists
     pdm = db.query(PDMOrm).filter(PDMOrm.id == payload.pdm_id).first()
     if not pdm:
@@ -364,6 +408,7 @@ def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
         urgency=payload.urgency,
         justification=payload.justificativa,
         generated_description=generated_description,
+        user_id=current_user.id if current_user else None,
         # Store full attribute dict for quick access without joining request_values
         technical_attributes=payload.values,
         attachments=payload.attachments or [],
@@ -388,6 +433,7 @@ def create_request(payload: RequestCreate, db: Session = Depends(get_db)):
         .options(
             joinedload(MaterialRequestORM.pdm),
             joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
         )
         .filter(MaterialRequestORM.id == row.id)
         .one()
@@ -410,8 +456,8 @@ def get_next_status(current_status: str, workflow_id: int, db: Session) -> str |
     if not current:
         current = "Pending"
 
-    # Terminal statuses
-    if current.lower() in ("completed", "approved", "concluído", "rejected"):
+    # Terminal statuses (incl. synonyms in PT/EN)
+    if current.lower() in ("completed", "approved", "concluído", "finalizado", "rejected"):
         return None
 
     rows = (
@@ -455,6 +501,7 @@ def get_next_status(current_status: str, workflow_id: int, db: Session) -> str |
 @app.patch("/api/requests/{request_id}/status")
 def update_request_status(
     request_id: int,
+    payload: StatusUpdatePayload | None = Body(None),
     db: Session = Depends(get_db),
 ):
     row = (
@@ -462,6 +509,7 @@ def update_request_status(
         .options(
             joinedload(MaterialRequestORM.pdm),
             joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
         )
         .filter(MaterialRequestORM.id == request_id)
         .first()
@@ -487,6 +535,7 @@ def update_request_status(
 @app.patch("/api/requests/{request_id}/reject")
 def reject_request(
     request_id: int,
+    payload: RejectPayload | None = Body(None),
     db: Session = Depends(get_db),
 ):
     row = (
@@ -494,6 +543,7 @@ def reject_request(
         .options(
             joinedload(MaterialRequestORM.pdm),
             joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
         )
         .filter(MaterialRequestORM.id == request_id)
         .first()
@@ -523,6 +573,7 @@ def move_request_to_status(
         .options(
             joinedload(MaterialRequestORM.pdm),
             joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
         )
         .filter(MaterialRequestORM.id == request_id)
         .first()
@@ -728,9 +779,16 @@ def _slugify_status_key(name: str) -> str:
 
 @app.post("/api/workflow/config")
 def add_workflow_step(payload: WorkflowConfigCreate, db: Session = Depends(get_db)):
+    wf_id = payload.workflow_id or _get_active_workflow_id(db)
+    if not wf_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum workflow ativo. Configure um workflow ativo ou informe workflow_id.",
+        )
     status_key = payload.status_key or _slugify_status_key(payload.step_name)
     rows = (
         db.query(WorkflowConfigORM)
+        .filter(WorkflowConfigORM.workflow_id == wf_id)
         .order_by(WorkflowConfigORM.order.asc())
         .all()
     )
@@ -745,6 +803,7 @@ def add_workflow_step(payload: WorkflowConfigCreate, db: Session = Depends(get_d
             if r.order >= insert_order:
                 r.order = r.order + 1
     row = WorkflowConfigORM(
+        workflow_id=wf_id,
         step_name=payload.step_name,
         status_key=status_key,
         order=insert_order,

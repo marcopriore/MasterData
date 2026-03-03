@@ -32,6 +32,7 @@ type Permissions = {
 type Role = {
   id: number
   name: string
+  role_type?: 'sistema' | 'etapa'
   permissions: Permissions
   user_count: number
 }
@@ -50,8 +51,11 @@ const PERMISSION_LABELS: { key: keyof Permissions; label: string; description: s
 function roleAccentColor(name: string) {
   switch (name) {
     case 'ADMIN':       return { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A', dot: '#D97706' }
-    case 'GOVERNANCA':  return { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE', dot: '#3B82F6' }
     case 'SOLICITANTE': return { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0', dot: '#16A34A' }
+    case 'TRIAGEM':     return { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE', dot: '#3B82F6' }
+    case 'FISCAL':      return { bg: '#F5F3FF', text: '#5B21B6', border: '#DDD6FE', dot: '#7C3AED' }
+    case 'MASTER':      return { bg: '#FEF3C7', text: '#B45309', border: '#FDE68A', dot: '#F59E0B' }
+    case 'MRP':         return { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0', dot: '#10B981' }
     default:            return { bg: '#F8FAFC', text: '#475569', border: '#E2E8F0', dot: '#94A3B8' }
   }
 }
@@ -122,11 +126,12 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
     try {
       let saved: Role
       if (mode === 'create') {
-        saved = await apiPost<Role>('/admin/roles', { name: name.trim(), permissions: perms })
+        saved = await apiPost<Role>('/admin/roles', { name: name.trim(), role_type: 'sistema', permissions: perms })
         toast.success('Perfil criado com sucesso.')
       } else {
         saved = await apiPatch<Role>(`/admin/roles/${initial!.id}`, {
           name: name.trim(),
+          role_type: initial?.role_type ?? 'sistema',
           permissions: perms,
         })
         toast.success('Perfil atualizado.')

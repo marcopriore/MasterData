@@ -112,6 +112,7 @@ class WorkflowConfig(BaseModel):
 class WorkflowConfigCreate(BaseModel):
     step_name: str
     status_key: Optional[str] = None  # auto-generated from step_name if blank
+    workflow_id: Optional[int] = None  # defaults to active workflow if omitted
     insert_after_id: Optional[int] = None  # 0 = at start, None = at end, else after that id
     is_active: bool = True
 
@@ -180,6 +181,15 @@ class MoveToPayload(BaseModel):
     status_key: str
 
 
+class StatusUpdatePayload(BaseModel):
+    action: Optional[str] = "approve"
+    justification: Optional[str] = None
+
+
+class RejectPayload(BaseModel):
+    justification: Optional[str] = None
+
+
 # ─── Roles ────────────────────────────────────────────────────────────────────
 
 class RolePermissions(BaseModel):
@@ -193,11 +203,13 @@ class RolePermissions(BaseModel):
 
 class RoleCreate(BaseModel):
     name: str
+    role_type: Literal["sistema", "etapa"] = "sistema"
     permissions: RolePermissions = Field(default_factory=RolePermissions)
 
 
 class RoleUpdate(BaseModel):
     name: Optional[str] = None
+    role_type: Optional[Literal["sistema", "etapa"]] = None
     permissions: Optional[RolePermissions] = None
 
 
