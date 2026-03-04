@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Clipboard, Hash, Settings2, Info, AlertCircle } from "lucide-react"
+import { Clipboard, Settings2, Info, AlertCircle } from "lucide-react"
 import type { PDMTemplate, Attribute } from "@/app/request/page"
 
 interface PhaseSpecsProps {
@@ -31,10 +31,6 @@ interface PhaseSpecsProps {
   values: Record<string, string>
   onChange: (attrId: string, value: string) => void
   invalidFieldIds: Set<string>
-  quantity: string
-  onQuantityChange: (v: string) => void
-  descriptionNote: string
-  onDescriptionNoteChange: (v: string) => void
 }
 
 export function PhaseSpecs({
@@ -47,10 +43,6 @@ export function PhaseSpecs({
   values,
   onChange,
   invalidFieldIds,
-  quantity,
-  onQuantityChange,
-  descriptionNote,
-  onDescriptionNoteChange,
 }: PhaseSpecsProps) {
   const selectedPdm = pdms.find((p) => p.id === selectedPdmId)
 
@@ -96,53 +88,23 @@ export function PhaseSpecs({
             </Select>
           </div>
 
-          {/* Quantity + PDM badge */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* PDM selecionado */}
+          {selectedPdm && (
             <div className="space-y-2">
-              <Label htmlFor="quantity" className="text-sm font-medium flex items-center gap-1">
-                <Hash className="size-3.5 text-muted-foreground" />
-                Quantidade
-                <span className="text-[#C69A46]"> *</span>
+              <Label className="text-sm font-medium flex items-center gap-1">
+                <Settings2 className="size-3.5 text-muted-foreground" />
+                PDM Selecionado
               </Label>
-              <Input
-                id="quantity"
-                type="number"
-                min="1"
-                value={quantity}
-                onChange={(e) => onQuantityChange(e.target.value)}
-                placeholder="Ex: 10"
-                className="h-10 border-[#B4B9BE] focus-visible:ring-[#C69A46]/50"
-              />
-            </div>
-            {selectedPdm && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium flex items-center gap-1">
-                  <Settings2 className="size-3.5 text-muted-foreground" />
-                  PDM Selecionado
-                </Label>
-                <div className="flex h-10 items-center rounded-lg border border-[#B4B9BE]/60 bg-slate-50 px-3">
-                  <span className="text-sm font-mono text-muted-foreground truncate">{selectedPdm.internal_code}</span>
-                  <Badge variant="secondary" className="ml-auto text-[10px] shrink-0">
-                    {selectedPdm.name}
-                  </Badge>
-                </div>
+              <div className="flex h-10 items-center rounded-lg border border-[#B4B9BE]/60 bg-slate-50 px-3">
+                <span className="text-sm font-mono text-muted-foreground truncate">
+                  {selectedPdm.internal_code}
+                </span>
+                <Badge variant="secondary" className="ml-auto text-[10px] shrink-0">
+                  {selectedPdm.name}
+                </Badge>
               </div>
-            )}
-          </div>
-
-          {/* Complementary description */}
-          <div className="space-y-2">
-            <Label htmlFor="description-note" className="text-sm font-medium">
-              Observação / Descrição Complementar
-            </Label>
-            <Input
-              id="description-note"
-              value={descriptionNote}
-              onChange={(e) => onDescriptionNoteChange(e.target.value.toUpperCase())}
-              placeholder="INFORMAÇÕES ADICIONAIS RELEVANTES..."
-              className="h-10 uppercase border-[#B4B9BE] focus-visible:ring-[#C69A46]/50"
-            />
-          </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

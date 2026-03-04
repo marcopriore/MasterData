@@ -3,18 +3,20 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { apiGet, apiPostWithAuth, apiUpload } from '@/lib/api'
+import { apiGet, apiGetWithAuth, apiPostWithAuth, apiUpload } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { Stepper, type StepItem } from '@/components/request/stepper'
 import { PhaseAdmin } from '@/components/request/phase-admin'
+import { PhaseSearch } from '@/components/request/phase-search'
 import { PhaseSpecs } from '@/components/request/phase-specs'
 import { PhaseDocs } from '@/components/request/phase-docs'
 import { RequestSummary } from '@/components/request/request-summary'
 import { Button } from '@/components/ui/button'
 import { Toaster, toast } from 'sonner'
-import { Check, ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, FileText, Loader2, Search } from 'lucide-react'
 
 const STEPS: StepItem[] = [
+  { id: 0, label: 'Pesquisa', description: 'Verificar Base de Dados', indicator: <Search className="size-4" /> },
   { id: 1, label: 'Fase 1', description: 'Informações Administrativas' },
   { id: 2, label: 'Fase 2', description: 'Atributos Técnicos' },
   { id: 3, label: 'Fase 3', description: 'Documentação e Justificativa' },
@@ -46,14 +48,43 @@ export type UploadedFile = {
   preview?: string
 }
 
+type MaterialSearchItem = {
+  id: number
+  sap_code: string
+  description: string
+  status: string
+  pdm_code: string | null
+  material_group: string | null
+  unit_of_measure: string | null
+  ncm: string | null
+  material_type: string | null
+  gross_weight: number | null
+  net_weight: number | null
+  cfop: string | null
+  origin: string | null
+  purchase_group: string | null
+  lead_time: number | null
+  mrp_type: string | null
+  min_stock: number | null
+  max_stock: number | null
+  valuation_class: string | null
+  standard_price: number | null
+  profit_center: string | null
+}
+
 export default function NewMaterialRequestPage() {
   const router = useRouter()
   const { user, accessToken } = useUser()
-  const [currentStep, setCurrentStep] = useState(1)
+  const [currentStep, setCurrentStep] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Step 0 – Link de Pesquisa
+  const [hasSearched, setHasSearched] = useState(false)
+  const [searchResults, setSearchResults] = useState<MaterialSearchItem[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+
   // Phase 1 – Admin
-  const [requesterName, setRequesterName] = useState('')
+  const [requesterName, setRequesterName] = useState(user?.name ? user.name.toUpperCase() : '')
   const [costCenter, setCostCenter] = useState('')
   const [urgency, setUrgency] = useState<'low' | 'medium' | 'high'>('low')
 
@@ -72,13 +103,12 @@ export default function NewMaterialRequestPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [justificativa, setJustificativa] = useState('')
 
-  // Auto-fill requester name from the logged-in user (only on first mount)
+  // Auto-fill requester name from the logged-in user when it becomes available
   useEffect(() => {
     if (user?.name) {
       setRequesterName(user.name.toUpperCase())
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [user?.name])
 
   // Fetch PDM templates on mount
   useEffect(() => {
@@ -136,6 +166,26 @@ export default function NewMaterialRequestPage() {
     setSelectedPdm(newId)
   }, [selectedPdm])
 
+  const handleSearch = useCallback((q: string) => {
+    if (!accessToken || !q.trim()) return
+    setSearchLoading(true)
+    const params = new URLSearchParams()
+    params.set('q', q.trim())
+    apiGetWithAuth<MaterialSearchItem[]>(
+      `/api/database/materials/search?${params.toString()}`,
+      accessToken
+    )
+      .then((data) => {
+        setSearchResults(Array.isArray(data) ? data : [])
+        setHasSearched(true)
+      })
+      .catch(() => {
+        setSearchResults([])
+        setHasSearched(true)
+      })
+      .finally(() => setSearchLoading(false))
+  }, [accessToken])
+
   const validateStep = (step: number): boolean => {
     if (step === 1) {
       if (!requesterName.trim()) { toast.error('Informe o nome do solicitante.'); return false }
@@ -143,7 +193,6 @@ export default function NewMaterialRequestPage() {
     }
     if (step === 2) {
       if (!selectedPdm) { toast.error('Selecione um template PDM.'); return false }
-      if (!quantity.trim() || Number(quantity) < 1) { toast.error('Informe uma quantidade válida.'); return false }
       const missing = attributes.filter((a) => a.isRequired && !(formData[a.id] ?? '').trim()).map((a) => a.id)
       if (missing.length > 0) {
         setInvalidFieldIds(new Set(missing))
@@ -154,7 +203,6 @@ export default function NewMaterialRequestPage() {
       return true
     }
     if (step === 3) {
-      if (!justificativa.trim()) { toast.error('A justificativa da solicitação é obrigatória.'); return false }
       return true
     }
     return true
@@ -182,9 +230,6 @@ export default function NewMaterialRequestPage() {
         requester: requesterName,
         cost_center: costCenter,
         urgency,
-        quantity: Number(quantity),
-        description_note: descriptionNote,
-        justificativa,
         generated_description: generatedDescription,
         values: formData,
         // Pass filenames for the legacy JSON column; the real files are
@@ -239,13 +284,16 @@ export default function NewMaterialRequestPage() {
   }
 
   const handleBack = () => {
-    if (currentStep > 1) {
+    if (currentStep > 0 && currentStep !== 1) {
       if (currentStep === 2) setInvalidFieldIds(new Set())
       setCurrentStep((s) => s - 1)
+    } else if (currentStep === 1) {
+      setCurrentStep(0)
     }
   }
 
   const isPhase2 = currentStep === 2
+  const isStep0 = currentStep === 0
   const showSidebar = isPhase2 && selectedPdmTemplate != null
 
   return (
@@ -282,6 +330,19 @@ export default function NewMaterialRequestPage() {
           {/* Form card */}
           <div className="rounded-2xl border border-[#B4B9BE] bg-white px-6 py-6 shadow-[var(--shadow-card-float)]">
 
+            {/* Step 0 – Link de Pesquisa */}
+            {currentStep === 0 && (
+              <PhaseSearch
+                accessToken={accessToken}
+                hasSearched={hasSearched}
+                searchResults={searchResults}
+                searchLoading={searchLoading}
+                onSearch={handleSearch}
+                onFoundGoHome={() => router.push('/')}
+                onNotFoundCreateRequest={() => setCurrentStep(1)}
+              />
+            )}
+
             {/* Phase 1 – Admin */}
             {currentStep === 1 && (
               <PhaseAdmin
@@ -304,10 +365,6 @@ export default function NewMaterialRequestPage() {
                 values={formData}
                 onChange={handleAttrChange}
                 invalidFieldIds={invalidFieldIds}
-                quantity={quantity}
-                onQuantityChange={setQuantity}
-                descriptionNote={descriptionNote}
-                onDescriptionNoteChange={setDescriptionNote}
               />
             )}
 
@@ -316,8 +373,6 @@ export default function NewMaterialRequestPage() {
               <PhaseDocs
                 files={uploadedFiles}
                 onFilesChange={setUploadedFiles}
-                justificativa={justificativa}
-                onJustificativaChange={setJustificativa}
               />
             )}
 
@@ -337,35 +392,37 @@ export default function NewMaterialRequestPage() {
               />
             )}
 
-            {/* Navigation buttons */}
-            <div className="mt-8 flex items-center justify-between gap-4 border-t border-[#B4B9BE]/40 pt-6">
-              {currentStep > 1 ? (
+            {/* Navigation buttons — hidden on Step 0 (has its own buttons) */}
+            {!isStep0 && (
+              <div className="mt-8 flex items-center justify-between gap-4 border-t border-[#B4B9BE]/40 pt-6">
+                {currentStep >= 1 ? (
+                  <Button
+                    variant="outline"
+                    onClick={handleBack}
+                    disabled={isSubmitting}
+                    className="gap-1.5"
+                  >
+                    <ChevronLeft className="size-4" />
+                    Voltar
+                  </Button>
+                ) : <div />}
                 <Button
-                  variant="outline"
-                  onClick={handleBack}
+                  onClick={handleNext}
                   disabled={isSubmitting}
-                  className="gap-1.5"
+                  className="gap-1.5 bg-[#0F1C38] hover:bg-[#0F1C38]/90 focus-visible:ring-[#C69A46]/50 disabled:opacity-60"
                 >
-                  <ChevronLeft className="size-4" />
-                  Voltar
-                </Button>
-              ) : <div />}
-              <Button
-                onClick={handleNext}
-                disabled={isSubmitting}
-                className="gap-1.5 bg-[#0F1C38] hover:bg-[#0F1C38]/90 focus-visible:ring-[#C69A46]/50 disabled:opacity-60"
-              >
-                {currentStep === 4 ? (
-                  isSubmitting ? (
-                    <><Loader2 className="size-4 animate-spin" />Enviando…</>
+                  {currentStep === 4 ? (
+                    isSubmitting ? (
+                      <><Loader2 className="size-4 animate-spin" />Enviando…</>
+                    ) : (
+                      <><Check className="size-4" />Finalizar Solicitação</>
+                    )
                   ) : (
-                    <><Check className="size-4" />Finalizar Solicitação</>
-                  )
-                ) : (
-                  <>Próximo<ChevronRight className="size-4" /></>
-                )}
-              </Button>
-            </div>
+                    <>Próximo<ChevronRight className="size-4" /></>
+                  )}
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Sticky preview sidebar — only on Phase 2 */}
@@ -456,8 +513,6 @@ function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costC
         <ReviewSection title="Informações Administrativas" />
         <div className="rounded-xl border border-[#B4B9BE]/60 bg-white px-4">
           <ReviewRow label="Solicitante" value={requesterName} />
-          <ReviewRow label="Centro de Custo" value={costCenter} mono />
-          <ReviewRow label="Quantidade" value={quantity} />
           <div className="flex items-start justify-between gap-4 py-2">
             <span className="text-sm text-muted-foreground">Urgência</span>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${urgencyClass[urgency]}`}>
@@ -481,14 +536,6 @@ function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costC
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      {/* Justificativa */}
-      <div>
-        <ReviewSection title="Justificativa" />
-        <div className="rounded-xl border border-[#B4B9BE]/60 bg-white px-4 py-3">
-          <p className="text-sm text-foreground whitespace-pre-wrap">{justificativa || '—'}</p>
         </div>
       </div>
 

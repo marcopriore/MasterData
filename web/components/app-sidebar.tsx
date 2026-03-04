@@ -6,7 +6,7 @@ import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
 import {
   ChevronDown, ChevronRight,
-  Home, FileText, ShieldCheck, Database,
+  Home, FileText, ShieldCheck, Database, LayoutGrid,
   Settings, GitBranch, Sun, Moon,
   UserCircle, Users, ShieldHalf, BookOpen, LogOut, ScrollText,
 } from 'lucide-react'
@@ -25,7 +25,8 @@ const navLinks = [
   { href: '/', label: 'Início', icon: Home },
   { href: '/request', label: 'Solicitações', icon: FileText },
   { href: '/governance', label: 'Governança', icon: ShieldCheck },
-  { href: '/admin-pdm', label: 'Gestão PDM', icon: Database },
+  { href: '/database', label: 'Base de Dados', icon: Database },
+  { href: '/admin-pdm', label: 'Gestão PDM', icon: LayoutGrid },
 ] as const
 
 // Items always visible inside Configurações
@@ -77,6 +78,7 @@ export function AppSidebar() {
     if (item.href === '/') return true
     if (item.href === '/request') return can('can_submit_request')
     if (item.href === '/governance') return can('can_approve') || can('can_reject')
+    if (item.href === '/database') return true
     if (item.href === '/admin-pdm') return can('can_view_pdm')
     return true
   })

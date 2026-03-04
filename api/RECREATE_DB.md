@@ -1,6 +1,6 @@
 # Como recriar o banco de dados
 
-Após alterações nos modelos ORM (ex.: adição de `request_history` e `system_logs`),
+Após alterações nos modelos ORM (ex.: adição de `request_history`, `system_logs`, `material_database`),
 recrie o banco para aplicar o novo esquema.
 
 **Atenção:** Apaga todos os dados existentes.

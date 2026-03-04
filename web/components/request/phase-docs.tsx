@@ -3,17 +3,13 @@
 import { useRef, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { Paperclip, X, FileText, ImageIcon, Upload, MessageSquare, Asterisk } from "lucide-react"
+import { Paperclip, X, FileText, ImageIcon, Upload } from "lucide-react"
 import type { UploadedFile } from "@/app/request/page"
 
 interface PhaseDocsProps {
   files: UploadedFile[]
   onFilesChange: (files: UploadedFile[]) => void
-  justificativa: string
-  onJustificativaChange: (v: string) => void
 }
 
 const ACCEPTED = "image/png,image/jpeg,image/webp,image/gif,application/pdf"
@@ -33,8 +29,6 @@ function formatBytes(bytes: number) {
 export function PhaseDocs({
   files,
   onFilesChange,
-  justificativa,
-  onJustificativaChange,
 }: PhaseDocsProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -64,9 +58,9 @@ export function PhaseDocs({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-foreground">Documentação e Justificativa</h2>
+        <h2 className="text-lg font-bold text-foreground">Documentação de Apoio</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Anexe documentos de apoio e informe a justificativa da solicitação.
+          Anexe documentos de apoio à solicitação.
         </p>
       </div>
 
@@ -142,33 +136,6 @@ export function PhaseDocs({
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Justificativa */}
-      <Card className="border-[#B4B9BE]/60 shadow-sm">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <MessageSquare className="size-4 text-[#0F1C38]" />
-            Justificativa da Solicitação
-            <Asterisk className="size-2.5 text-destructive ml-0.5" />
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Label htmlFor="justificativa" className="text-sm text-muted-foreground">
-            Descreva o motivo da solicitação, aplicação do material e qualquer informação relevante para aprovação.
-          </Label>
-          <Textarea
-            id="justificativa"
-            value={justificativa}
-            onChange={(e) => onJustificativaChange(e.target.value)}
-            placeholder="Ex: Material necessário para manutenção preventiva da linha de produção X. Estoque atual zerado, previsão de parada em 15 dias..."
-            rows={5}
-            className="resize-none border-[#B4B9BE] focus-visible:ring-[#C69A46]/50 text-sm leading-relaxed"
-          />
-          <p className="text-right text-xs text-muted-foreground">
-            {justificativa.length} caracteres
-          </p>
         </CardContent>
       </Card>
     </div>

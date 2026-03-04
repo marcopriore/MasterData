@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime
+from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime, Float
 from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
@@ -264,6 +264,56 @@ class FieldDictionaryORM(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class MaterialDatabaseORM(Base):
+    """Base de dados de materiais — cadastro de materiais SAP."""
+    __tablename__ = "material_database"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Identificação SAP
+    sap_code: Mapped[str] = mapped_column(
+        String(50), nullable=False, unique=True, index=True
+    )
+    description: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # Status: "Ativo", "Bloqueado", "Obsoleto"
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="Ativo")
+
+    # PDM
+    pdm_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    pdm_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Dados adicionais (para tela de detalhe)
+    material_group: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    unit_of_measure: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    ncm: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    material_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Campos SAP adicionais
+    gross_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    net_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cfop: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    origin: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    purchase_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    lead_time: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    mrp_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    min_stock: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_stock: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    valuation_class: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    standard_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    profit_center: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Origem: "manual", "erp_sync", "request_approved"
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="manual"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class ProductORM(Base):

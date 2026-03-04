@@ -7,6 +7,8 @@ export interface StepItem {
   id: number
   label: string
   description: string
+  /** Optional custom indicator (e.g. Search icon) instead of step id */
+  indicator?: React.ReactNode
 }
 
 interface StepperProps {
@@ -43,6 +45,8 @@ export function Stepper({ steps, currentStep }: StepperProps) {
                 >
                   {isCompleted ? (
                     <Check className="size-4" strokeWidth={3} />
+                  ) : step.indicator != null ? (
+                    step.indicator
                   ) : (
                     step.id
                   )}

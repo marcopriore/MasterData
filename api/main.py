@@ -9,13 +9,14 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from fastapi import Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from deps import get_admin_user, get_current_user, get_current_user_optional, get_db
 from orm_models import (
     ProductORM,
     PDMOrm,
     MaterialRequestORM,
+    MaterialDatabaseORM,
     RequestValueORM,
     RequestHistoryORM,
     WorkflowConfigORM,
@@ -1414,6 +1415,125 @@ def update_pdm(
         "is_active": row.is_active,
         "attributes": row.attributes,
     }
+
+
+# -------------------------------
+# BASE DE DADOS DE MATERIAIS
+def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
+    return {
+        "id": row.id,
+        "sap_code": row.sap_code,
+        "description": row.description,
+        "status": row.status,
+        "pdm_code": row.pdm_code,
+        "pdm_name": row.pdm_name,
+        "material_group": row.material_group,
+        "unit_of_measure": row.unit_of_measure,
+        "ncm": row.ncm,
+        "material_type": row.material_type,
+        "gross_weight": row.gross_weight,
+        "net_weight": row.net_weight,
+        "cfop": row.cfop,
+        "origin": row.origin,
+        "purchase_group": row.purchase_group,
+        "lead_time": row.lead_time,
+        "mrp_type": row.mrp_type,
+        "min_stock": row.min_stock,
+        "max_stock": row.max_stock,
+        "valuation_class": row.valuation_class,
+        "standard_price": row.standard_price,
+        "profit_center": row.profit_center,
+        "source": row.source,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@app.get("/api/database/materials")
+def list_material_database(
+    q: str | None = Query(None, description="Busca por descrição ou sap_code"),
+    status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
+    pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
+    date_from: str | None = Query(None, description="Filtrar por data de criação (YYYY-MM-DD)"),
+    date_to: str | None = Query(None, description="Filtrar por data de criação até (YYYY-MM-DD)"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
+    """Lista materiais da base com paginação e filtros."""
+    query = db.query(MaterialDatabaseORM)
+    if q:
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                MaterialDatabaseORM.description.ilike(term),
+                MaterialDatabaseORM.sap_code.ilike(term),
+            )
+        )
+    if status:
+        query = query.filter(MaterialDatabaseORM.status == status)
+    if pdm_code:
+        query = query.filter(MaterialDatabaseORM.pdm_code == pdm_code)
+    if date_from:
+        try:
+            dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            query = query.filter(MaterialDatabaseORM.created_at >= dt_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt_to = datetime.strptime(date_to, "%Y-%m-%d")
+            dt_until = (dt_to + timedelta(days=1)).replace(tzinfo=timezone.utc)
+            query = query.filter(MaterialDatabaseORM.created_at < dt_until)
+        except ValueError:
+            pass
+    query = query.order_by(MaterialDatabaseORM.description.asc())
+    total = query.count()
+    offset = (page - 1) * limit
+    rows = query.offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "items": [_material_db_to_dict(r) for r in rows],
+    }
+
+
+@app.get("/api/database/materials/search")
+def search_material_database(
+    q: str = Query(..., description="Termo de busca"),
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
+    """Busca simplificada — retorna top 10 por descrição ou sap_code."""
+    term = f"%{q.strip()}%"
+    rows = (
+        db.query(MaterialDatabaseORM)
+        .filter(
+            or_(
+                MaterialDatabaseORM.description.ilike(term),
+                MaterialDatabaseORM.sap_code.ilike(term),
+            )
+        )
+        .order_by(MaterialDatabaseORM.description.asc())
+        .limit(10)
+        .all()
+    )
+    return [_material_db_to_dict(r) for r in rows]
+
+
+@app.get("/api/database/materials/{material_id}")
+def get_material_database(
+    material_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
+    """Retorna todos os campos de um material."""
+    row = db.query(MaterialDatabaseORM).filter(MaterialDatabaseORM.id == material_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Material não encontrado")
+    return _material_db_to_dict(row)
 
 
 # -------------------------------
