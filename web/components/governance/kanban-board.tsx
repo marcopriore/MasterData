@@ -118,6 +118,8 @@ interface KanbanBoardProps {
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
   onStatusChanged?: (requestId: string, newStatus?: string) => void
+  /** Chamado após sucesso do assign — abre o modal de detalhes com dados atualizados */
+  onAssignSuccess?: (requestId: string) => void
   showActionButtons?: boolean
   currentUserId?: number | null
   accessToken?: string | null
@@ -129,6 +131,7 @@ export function KanbanBoard({
   onCompleteData,
   onViewDetails,
   onStatusChanged,
+  onAssignSuccess,
   showActionButtons = false,
   currentUserId = null,
   accessToken = null,
@@ -153,7 +156,11 @@ export function KanbanBoard({
     try {
       await apiPatchWithAuth(`/api/requests/${req.id}/assign`, {}, accessToken)
       toast.success("Atendimento iniciado com sucesso!")
-      onStatusChanged?.(req.id)
+      if (onAssignSuccess) {
+        onAssignSuccess(req.id)
+      } else {
+        onStatusChanged?.(req.id)
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao iniciar atendimento"
       toast.error(msg)

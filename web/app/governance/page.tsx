@@ -20,7 +20,26 @@ import {
 } from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
-import { ChevronLeft, FilePlus, Check, X } from 'lucide-react'
+import { ChevronLeft, FilePlus, Check, X, Save } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+
+type MyField = {
+  id: number
+  field_name: string
+  field_label: string
+  sap_field: string | null
+  sap_view: string
+  field_type: 'text' | 'number' | 'date' | 'select'
+  options: string[] | Record<string, unknown> | null
+  responsible_role: string
+  is_required: boolean
+  is_active: boolean
+  display_order: number
+  created_at: string | null
+}
+
+type FieldLabelItem = { field_name: string; field_label: string }
 
 type WorkflowHeader = {
   id: number
@@ -142,6 +161,11 @@ export default function GovernancePage() {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState<ApiRequest | null>(null)
   const [approveRejectLoading, setApproveRejectLoading] = useState(false)
+  const [myFields, setMyFields] = useState<MyField[]>([])
+  const [fieldLabels, setFieldLabels] = useState<FieldLabelItem[]>([])
+  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({})
+  const [saveLoading, setSaveLoading] = useState(false)
+  const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     apiGet<WorkflowHeader[]>('/api/workflows')
@@ -155,14 +179,20 @@ export default function GovernancePage() {
       .catch(() => setWorkflows([]))
   }, [])
 
-  const fetchRequests = useCallback((): Promise<void> => {
+  const fetchRequests = useCallback((): Promise<ApiRequest[]> => {
     setLoading(true)
     const url = selectedWorkflowId
       ? `/api/requests?workflow_id=${selectedWorkflowId}`
       : '/api/requests'
     return apiGetWithAuth<ApiRequest[]>(url, accessToken)
-      .then(setRequests)
-      .catch(() => setRequests([]))
+      .then((data) => {
+        setRequests(data)
+        return data
+      })
+      .catch(() => {
+        setRequests([])
+        return []
+      })
       .finally(() => setLoading(false))
   }, [selectedWorkflowId, accessToken])
 
@@ -189,6 +219,58 @@ export default function GovernancePage() {
     setDetailsOpen(true)
   }
 
+  const handleAssignSuccess = useCallback(
+    async (requestId: string) => {
+      const data = await fetchRequests()
+      const req = data.find((r) => String(r.id) === requestId)
+      if (req) {
+        setSelectedRequest(req)
+        setDetailsOpen(true)
+      }
+    },
+    [fetchRequests]
+  )
+
+  const isAssignedToMe =
+    selectedRequest &&
+    user &&
+    selectedRequest.assigned_to_id != null &&
+    selectedRequest.assigned_to_id === user.id
+
+  const hasTechnicalAttributes =
+    selectedRequest?.technical_attributes &&
+    Object.keys(selectedRequest.technical_attributes).length > 0
+
+  useEffect(() => {
+    if (!detailsOpen || !selectedRequest || !accessToken) return
+    setInvalidFields(new Set())
+    const attrs = selectedRequest.technical_attributes ?? {}
+    setAttributeValues(
+      Object.fromEntries(
+        Object.entries(attrs).map(([k, v]) => [k, v != null ? String(v) : ''])
+      )
+    )
+    const assignedToMe =
+      selectedRequest.assigned_to_id != null && selectedRequest.assigned_to_id === user?.id
+    const hasAttrs = Object.keys(attrs).length > 0
+
+    if (assignedToMe) {
+      apiGetWithAuth<MyField[]>('/api/fields/my-fields', accessToken)
+        .then(setMyFields)
+        .catch(() => setMyFields([]))
+    } else {
+      setMyFields([])
+    }
+
+    if (hasAttrs) {
+      apiGetWithAuth<FieldLabelItem[]>('/api/fields/field-labels', accessToken)
+        .then(setFieldLabels)
+        .catch(() => setFieldLabels([]))
+    } else {
+      setFieldLabels([])
+    }
+  }, [detailsOpen, selectedRequest, user?.id, accessToken])
+
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectJustification, setRejectJustification] = useState('')
   const [rejectError, setRejectError] = useState<string | null>(null)
@@ -214,6 +296,98 @@ export default function GovernancePage() {
     setRejectJustification('')
     setRejectError(null)
     setRejectModalOpen(true)
+  }
+
+  function getFieldOptions(f: MyField): string[] {
+    const o = f.options
+    if (Array.isArray(o)) return o.map(String)
+    if (o && typeof o === 'object' && Array.isArray((o as { values?: unknown }).values))
+      return ((o as { values: string[] }).values).map(String)
+    return []
+  }
+
+  const validationError = invalidFields.size > 0
+    ? `Campos obrigatórios: ${[...invalidFields].map((fn) => myFields.find((f) => f.field_name === fn)?.field_label ?? fn).join(', ')}`
+    : null
+
+  function validateRequiredFields(): boolean {
+    const invalid = new Set<string>()
+    for (const f of myFields) {
+      if (!f.is_required) continue
+      const val = attributeValues[f.field_name]?.trim()
+      if (!val) invalid.add(f.field_name)
+    }
+    setInvalidFields(invalid)
+    if (invalid.size > 0) {
+      toast.error('Preencha os campos obrigatórios.')
+      return false
+    }
+    return true
+  }
+
+  function clearInvalidField(fieldName: string) {
+    setInvalidFields((prev) => {
+      const next = new Set(prev)
+      next.delete(fieldName)
+      return next
+    })
+  }
+
+  const handleSalvar = async () => {
+    if (!selectedRequest || !accessToken) return
+    if (!validateRequiredFields()) return
+    setSaveLoading(true)
+    try {
+      await apiPatchWithAuth(
+        `/api/requests/${selectedRequest.id}/attributes`,
+        { attributes: attributeValues },
+        accessToken
+      )
+      toast.success('Dados salvos!')
+      const updated = requests.map((r) =>
+        r.id === selectedRequest.id
+          ? { ...r, technical_attributes: { ...r.technical_attributes, ...attributeValues } }
+          : r
+      )
+      setRequests(updated)
+      setSelectedRequest((prev) =>
+        prev && prev.id === selectedRequest.id
+          ? { ...prev, technical_attributes: { ...prev.technical_attributes, ...attributeValues } }
+          : prev
+      )
+    } catch {
+      toast.error('Falha ao salvar os dados')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+
+  const handleSalvarEAprovar = async () => {
+    if (!selectedRequest || !accessToken) return
+    if (!validateRequiredFields()) return
+    setSaveLoading(true)
+    setApproveRejectLoading(true)
+    try {
+      await apiPatchWithAuth(
+        `/api/requests/${selectedRequest.id}/attributes`,
+        { attributes: attributeValues },
+        accessToken
+      )
+      await apiPatchWithAuth(
+        `/api/requests/${selectedRequest.id}/status`,
+        { action: 'approve' },
+        accessToken
+      )
+      toast.success('Dados salvos e solicitação aprovada!')
+      setDetailsOpen(false)
+      setSelectedRequest(null)
+      await fetchRequests()
+    } catch {
+      toast.error('Falha ao salvar ou aprovar')
+    } finally {
+      setSaveLoading(false)
+      setApproveRejectLoading(false)
+    }
   }
 
   const handleRejectConfirm = async () => {
@@ -316,6 +490,7 @@ export default function GovernancePage() {
                   workflowId={selectedWorkflowId}
                   onViewDetails={handleViewDetails}
                   onStatusChanged={() => { fetchRequests() }}
+                  onAssignSuccess={handleAssignSuccess}
                   showActionButtons={showActionButtons}
                   currentUserId={user?.id ?? null}
                   accessToken={accessToken}
@@ -334,14 +509,15 @@ export default function GovernancePage() {
 
       {/* Details Modal */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="max-w-2xl border-slate-200 bg-white text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden border-slate-200 bg-white p-0 text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
+          <DialogHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4 pb-2 dark:border-zinc-700/50 dark:bg-card">
             <DialogTitle className="text-slate-900 dark:text-[#C69A46]">
               REQ-{String(selectedRequest?.id).padStart(4, '0')} — {selectedRequest?.pdm_name ?? '—'}
             </DialogTitle>
           </DialogHeader>
           {selectedRequest && (
             <>
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4">
               {/* Generated description */}
               {selectedRequest.generated_description && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-zinc-700/50 dark:bg-muted/20">
@@ -405,32 +581,161 @@ export default function GovernancePage() {
                   Nenhum atributo preenchido
                 </p>
               )}
-              <DialogFooter>
-                {showActionButtons &&
-                  selectedRequest.assigned_to_id != null &&
-                  selectedRequest.assigned_to_id === user?.id && (
-                    <>
-                      <Button
-                        size="sm"
-                        disabled={approveRejectLoading}
-                        className="gap-2 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:text-white dark:hover:bg-green-700"
-                        onClick={() => handleAprovar(selectedRequest.id)}
-                      >
-                        <Check className="size-4" />
-                        Aprovar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={approveRejectLoading}
-                        className="gap-2 bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700"
-                        onClick={openRejectModal}
-                      >
-                        <X className="size-4" />
-                        Rejeitar
-                      </Button>
-                    </>
-                  )}
+
+              {/* Dados Preenchidos (technical_attributes com field_label) — visível para todos */}
+              {hasTechnicalAttributes && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
+                    Dados Preenchidos
+                  </p>
+                  <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-700/50">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {Object.entries(selectedRequest.technical_attributes ?? {}).map(
+                          ([key, val]) => {
+                            if (val == null || val === '') return null
+                            const label =
+                              fieldLabels.find((l) => l.field_name === key)?.field_label ?? key
+                            return (
+                              <tr
+                                key={key}
+                                className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40"
+                              >
+                                <td className="w-[45%] bg-slate-50 px-4 py-3 font-medium text-slate-800 dark:bg-muted/30 dark:text-foreground">
+                                  {label}
+                                </td>
+                                <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
+                                  {String(val)}
+                                </td>
+                              </tr>
+                            )
+                          }
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Meus Campos (editáveis) — somente quando assigned_to_id === current_user.id */}
+              {isAssignedToMe && myFields.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
+                    CAMPOS DE RESPONSABILIDADE: {user?.role_name ?? '—'}
+                  </p>
+                  <div className="space-y-3">
+                    {myFields.map((f) => (
+                      <div key={f.id}>
+                        <Label htmlFor={`attr-${f.field_name}`} className="text-sm font-medium">
+                          {f.field_label}
+                          {f.is_required && ' *'}
+                        </Label>
+                        {f.field_type === 'text' && (
+                          <Input
+                            id={`attr-${f.field_name}`}
+                            type="text"
+                            value={attributeValues[f.field_name] ?? ''}
+                            onChange={(e) => {
+                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
+                              clearInvalidField(f.field_name)
+                            }}
+                            className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                          />
+                        )}
+                        {f.field_type === 'number' && (
+                          <Input
+                            id={`attr-${f.field_name}`}
+                            type="number"
+                            value={attributeValues[f.field_name] ?? ''}
+                            onChange={(e) => {
+                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
+                              clearInvalidField(f.field_name)
+                            }}
+                            className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                          />
+                        )}
+                        {f.field_type === 'date' && (
+                          <Input
+                            id={`attr-${f.field_name}`}
+                            type="date"
+                            value={attributeValues[f.field_name] ?? ''}
+                            onChange={(e) => {
+                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
+                              clearInvalidField(f.field_name)
+                            }}
+                            className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                          />
+                        )}
+                        {f.field_type === 'select' && (
+                          <select
+                            id={`attr-${f.field_name}`}
+                            value={attributeValues[f.field_name] ?? ''}
+                            onChange={(e) => {
+                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
+                              clearInvalidField(f.field_name)
+                            }}
+                            className={`mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : 'border-input'}`}
+                          >
+                            <option value="">Selecione...</option>
+                            {getFieldOptions(f).map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              </div>
+
+              <DialogFooter className="sticky bottom-0 flex-col items-stretch gap-2 border-t border-slate-200 bg-white px-6 py-4 pt-2 dark:border-zinc-700/50 dark:bg-card">
+                {showActionButtons && isAssignedToMe && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setDetailsOpen(false)}
+                      disabled={saveLoading || approveRejectLoading}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={saveLoading || approveRejectLoading}
+                      className="gap-2 bg-[#0F1C38] hover:bg-[#162444]"
+                      onClick={handleSalvar}
+                    >
+                      <Save className="size-4" />
+                      Salvar
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={saveLoading || approveRejectLoading}
+                      className="gap-2 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:text-white dark:hover:bg-green-700"
+                      onClick={handleSalvarEAprovar}
+                    >
+                      <Check className="size-4" />
+                      Salvar e Aprovar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={saveLoading || approveRejectLoading}
+                      className="gap-2 bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700"
+                      onClick={openRejectModal}
+                    >
+                      <X className="size-4" />
+                      Rejeitar
+                    </Button>
+                  </div>
+                )}
+                {validationError && (
+                  <p className="text-sm text-destructive">{validationError}</p>
+                )}
               </DialogFooter>
             </>
           )}

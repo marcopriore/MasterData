@@ -120,6 +120,7 @@ from models import (
     PDMCreate,
     RequestCreate,
     RejectPayload,
+    AttributesPayload,
     StatusUpdatePayload,
     WorkflowConfigUpdate,
     WorkflowConfigCreate,
@@ -196,6 +197,45 @@ def list_fields(
         q = q.filter(FieldDictionaryORM.sap_view == sap_view)
     rows = q.order_by(FieldDictionaryORM.sap_view, FieldDictionaryORM.display_order, FieldDictionaryORM.id).all()
     return [_field_to_dict(r) for r in rows]
+
+
+@app.get("/api/fields/my-fields")
+def list_my_fields(
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """
+    Returns fields where responsible_role matches current user's role (case-insensitive)
+    and is_active is True. Ordered by display_order.
+    """
+    if not current_user.role or not current_user.role.name:
+        return []
+    role_name = current_user.role.name.strip()
+    q = (
+        db.query(FieldDictionaryORM)
+        .filter(FieldDictionaryORM.is_active == True)
+        .filter(func.lower(FieldDictionaryORM.responsible_role) == role_name.lower())
+        .order_by(FieldDictionaryORM.display_order, FieldDictionaryORM.id)
+    )
+    rows = q.all()
+    return [_field_to_dict(r) for r in rows]
+
+
+@app.get("/api/fields/field-labels")
+def list_field_labels(
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
+    """
+    Returns {field_name: field_label} for all active fields.
+    Used for displaying Dados Preenchidos with proper labels.
+    """
+    rows = (
+        db.query(FieldDictionaryORM)
+        .filter(FieldDictionaryORM.is_active == True)
+        .all()
+    )
+    return [{"field_name": r.field_name, "field_label": r.field_label} for r in rows]
 
 
 @app.post("/api/fields", status_code=201)
@@ -471,6 +511,48 @@ def assign_request(
 
     row.assigned_to_id = current_user.id
     row.assigned_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return _request_to_dict(row)
+
+
+# -------------------------------
+# ATUALIZAR ATRIBUTOS TÉCNICOS (merge)
+@app.patch("/api/requests/{request_id}/attributes")
+def update_request_attributes(
+    request_id: int,
+    payload: AttributesPayload,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """
+    Merge payload.attributes into request.technical_attributes.
+    Only the assigned user (assigned_to_id == current_user.id) can save.
+    """
+    row = (
+        db.query(MaterialRequestORM)
+        .options(
+            joinedload(MaterialRequestORM.pdm),
+            joinedload(MaterialRequestORM.request_values),
+            joinedload(MaterialRequestORM.assigned_to),
+        )
+        .filter(MaterialRequestORM.id == request_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+    if row.assigned_to_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o atendente atribuído pode salvar os campos.",
+        )
+    merged = dict(row.technical_attributes or {})
+    for k, v in (payload.attributes or {}).items():
+        if v is not None and v != "":
+            merged[k] = str(v)
+        elif k in merged:
+            del merged[k]
+    row.technical_attributes = merged if merged else None
     db.commit()
     db.refresh(row)
     return _request_to_dict(row)

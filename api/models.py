@@ -190,6 +190,11 @@ class RejectPayload(BaseModel):
     justification: Optional[str] = None
 
 
+class AttributesPayload(BaseModel):
+    """Body for PATCH /api/requests/{id}/attributes - merge into technical_attributes."""
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
 # ─── Field Dictionary (SAP MM01) ───────────────────────────────────────────────
 
 class FieldDictionaryCreate(BaseModel):
