@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { apiGet, apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { KanbanBoard } from '@/components/governance/kanban-board'
@@ -22,6 +22,7 @@ import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import { ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -255,17 +256,27 @@ export default function GovernancePage() {
     selectedRequest?.technical_attributes &&
     Object.keys(selectedRequest.technical_attributes).length > 0
 
+  const lastInitializedRequestIdRef = useRef<number | null>(null)
+
   useEffect(() => {
     if (!detailsOpen || !selectedRequest || !accessToken) return
     setHistoryFetched(false)
     setHistoryEvents([])
     setInvalidFields(new Set())
+    const currentId = selectedRequest.id
+    const isNewRequest = lastInitializedRequestIdRef.current !== currentId
+    lastInitializedRequestIdRef.current = currentId
     const attrs = selectedRequest.technical_attributes ?? {}
-    setAttributeValues(
-      Object.fromEntries(
-        Object.entries(attrs).map(([k, v]) => [k, v != null ? String(v) : ''])
+    if (isNewRequest) {
+      setAttributeValues(
+        Object.fromEntries(
+          Object.entries(attrs).map(([k, v]) => [
+            k,
+            v != null ? applyFieldMask(k, String(v)) : '',
+          ])
+        )
       )
-    )
+    }
     const assignedToMe =
       selectedRequest.assigned_to_id != null && selectedRequest.assigned_to_id === user?.id
     const hasAttrs = Object.keys(attrs).length > 0
@@ -347,6 +358,16 @@ export default function GovernancePage() {
       next.delete(fieldName)
       return next
     })
+  }
+
+  function handleFieldChange(fieldName: string, rawValue: string, fieldType?: string) {
+    let finalValue = rawValue
+    if (fieldType !== 'select' && fieldType !== 'date') {
+      const maskFn = FIELD_MASKS[fieldName.toLowerCase()]
+      if (maskFn) finalValue = maskFn(rawValue)
+    }
+    setAttributeValues((prev) => ({ ...prev, [fieldName]: finalValue }))
+    clearInvalidField(fieldName)
   }
 
   const handleSalvar = async () => {
@@ -536,7 +557,17 @@ export default function GovernancePage() {
       </div>
 
       {/* Details Modal */}
-      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+      <Dialog
+        open={detailsOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            lastInitializedRequestIdRef.current = null
+            setSelectedRequest(null)
+            setAttributeValues({})
+          }
+          setDetailsOpen(open)
+        }}
+      >
         <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden border-slate-200 bg-white p-0 text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
           <DialogHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4 pb-2 dark:border-zinc-700/50 dark:bg-card">
             <DialogTitle className="text-slate-900 dark:text-[#C69A46]">
@@ -676,34 +707,37 @@ export default function GovernancePage() {
                             id={`attr-${f.field_name}`}
                             type="text"
                             value={attributeValues[f.field_name] ?? ''}
-                            onChange={(e) => {
-                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
-                              clearInvalidField(f.field_name)
-                            }}
+                            onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'text')}
+                            maxLength={100}
                             className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                           />
                         )}
                         {f.field_type === 'number' && (
-                          <Input
-                            id={`attr-${f.field_name}`}
-                            type="number"
-                            value={attributeValues[f.field_name] ?? ''}
-                            onChange={(e) => {
-                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
-                              clearInvalidField(f.field_name)
-                            }}
-                            className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
-                          />
+                          FIELD_MASKS[f.field_name.toLowerCase()] ? (
+                            <Input
+                              id={`attr-${f.field_name}`}
+                              type="text"
+                              value={attributeValues[f.field_name] ?? ''}
+                              onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'number')}
+                              className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                            />
+                          ) : (
+                            <Input
+                              id={`attr-${f.field_name}`}
+                              type="number"
+                              min={0}
+                              value={attributeValues[f.field_name] ?? ''}
+                              onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'number')}
+                              className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                            />
+                          )
                         )}
                         {f.field_type === 'date' && (
                           <Input
                             id={`attr-${f.field_name}`}
                             type="date"
                             value={attributeValues[f.field_name] ?? ''}
-                            onChange={(e) => {
-                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
-                              clearInvalidField(f.field_name)
-                            }}
+                            onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'date')}
                             className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                           />
                         )}
@@ -711,10 +745,7 @@ export default function GovernancePage() {
                           <select
                             id={`attr-${f.field_name}`}
                             value={attributeValues[f.field_name] ?? ''}
-                            onChange={(e) => {
-                              setAttributeValues((prev) => ({ ...prev, [f.field_name]: e.target.value }))
-                              clearInvalidField(f.field_name)
-                            }}
+                            onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'select')}
                             className={`mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : 'border-input'}`}
                           >
                             <option value="">Selecione...</option>
@@ -916,6 +947,7 @@ export default function GovernancePage() {
               <textarea
                 value={rejectJustification}
                 onChange={(e) => setRejectJustification(e.target.value)}
+                maxLength={500}
                 className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 placeholder="Informe a justificativa..."
                 disabled={approveRejectLoading}

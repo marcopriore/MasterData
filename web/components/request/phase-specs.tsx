@@ -19,7 +19,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Clipboard, Settings2, Info, AlertCircle } from "lucide-react"
+import { FIELD_MASKS } from "@/lib/masks"
 import type { PDMTemplate, Attribute } from "@/app/request/page"
+
+function getMaskForAttr(attr: Attribute): ((v: string) => string) | null {
+  const id = attr.id?.toLowerCase().replace(/\s+/g, '_') ?? ''
+  const name = attr.name?.toLowerCase().replace(/\s+/g, '_') ?? ''
+  return FIELD_MASKS[id] ?? FIELD_MASKS[name] ?? null
+}
 
 interface PhaseSpecsProps {
   pdms: PDMTemplate[]
@@ -199,19 +206,32 @@ export function PhaseSpecs({
                                 ))}
                               </SelectContent>
                             </Select>
-                          ) : (
-                            <Input
-                              id={`attr-${attr.id}`}
-                              type={attr.dataType === 'numeric' ? 'number' : 'text'}
-                              value={values[attr.id] ?? ''}
-                              onChange={(e) =>
-                                onChange(attr.id, attr.dataType === 'numeric' ? e.target.value : e.target.value.toUpperCase())
-                              }
-                              placeholder={attr.dataType === 'numeric' ? 'Valor numérico...' : `INFORME ${attr.name.toUpperCase()}...`}
-                              className={`h-10 ${attr.dataType !== 'numeric' ? 'uppercase' : ''} ${inputCn}`}
-                              aria-invalid={isInvalid}
-                            />
-                          )}
+                          ) : (() => {
+                            const maskFn = getMaskForAttr(attr)
+                            const hasMask = !!maskFn
+                            const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+                              const raw = e.target.value
+                              const val = hasMask
+                                ? maskFn(raw)
+                                : attr.dataType === 'numeric'
+                                  ? raw
+                                  : raw.toUpperCase()
+                              onChange(attr.id, val)
+                            }
+                            return (
+                              <Input
+                                id={`attr-${attr.id}`}
+                                type={hasMask ? 'text' : attr.dataType === 'numeric' ? 'number' : 'text'}
+                                value={values[attr.id] ?? ''}
+                                onChange={handleChange}
+                                placeholder={attr.dataType === 'numeric' && !hasMask ? 'Valor numérico...' : `INFORME ${attr.name.toUpperCase()}...`}
+                                className={`h-10 ${attr.dataType !== 'numeric' && !hasMask ? 'uppercase' : ''} ${inputCn}`}
+                                aria-invalid={isInvalid}
+                                maxLength={hasMask ? undefined : 100}
+                                min={!hasMask && attr.dataType === 'numeric' ? 0 : undefined}
+                              />
+                            )
+                          })()}
                           {isInvalid && (
                             <p className="flex items-center gap-1 text-xs text-destructive">
                               <AlertCircle className="size-3" />
