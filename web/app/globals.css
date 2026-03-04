@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode – follows MDM toggle, not OS/Chrome preference */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Institutional palette */
 :root {
   --color-navy: #0F1C38;
@@ -158,6 +161,14 @@ body {
   font-family: var(--font-sans);
   transition: background-color 0.2s ease, color 0.2s ease;
   min-height: 100vh;
+}
+
+/* Force MDM theme on inputs – Chrome/SO dark mode overrides native input colors otherwise */
+input, select, textarea {
+  color-scheme: light;
+}
+.dark input, .dark select, .dark textarea {
+  color-scheme: dark;
 }
 
 /* Sidebar */

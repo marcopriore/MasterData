@@ -8,6 +8,7 @@ import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, Loader2 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { useTheme } from 'next-themes'
 import { maskNCM, maskCFOP } from '@/lib/masks'
 
 type MaterialDetail = {
@@ -49,7 +50,7 @@ const STATUS_BADGE: Record<string, string> = {
 }
 
 const INPUT_BASE =
-  'bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 text-zinc-900 dark:text-zinc-100 rounded-md px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400'
+  'bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 text-zinc-900 dark:text-zinc-100 rounded-md px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400'
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—'
@@ -78,7 +79,7 @@ function formatCurrency(v: number | null): string {
 function Cell({ value }: { value: string | number | null }) {
   const s = value != null && String(value).trim() ? String(value) : '—'
   return (
-    <span className="text-sm text-zinc-800 dark:text-zinc-200">
+    <span className="text-sm text-zinc-900 dark:text-zinc-100">
       {s}
     </span>
   )
@@ -109,6 +110,7 @@ function EditableRow({
   material,
   onUpdate,
   formatDisplay,
+  isDark,
 }: {
   label: string
   fieldKey: keyof MaterialDetail
@@ -117,6 +119,7 @@ function EditableRow({
   material: MaterialDetail
   onUpdate: (key: string, value: string | number | null) => void
   formatDisplay?: (v: unknown) => string
+  isDark?: boolean
 }) {
   const raw = formData[fieldKey]
   const value = raw != null ? String(raw) : ''
@@ -139,6 +142,7 @@ function EditableRow({
               onUpdate(fieldKey, v === '' ? null : parseFloat(v))
             }}
             className={INPUT_BASE}
+            style={{ colorScheme: isDark ? 'dark' : 'light' }}
           />
         </div>
       )
@@ -161,6 +165,7 @@ function EditableRow({
             }
           }}
           className={INPUT_BASE}
+          style={{ colorScheme: isDark ? 'dark' : 'light' }}
         />
       </div>
     )
@@ -168,7 +173,7 @@ function EditableRow({
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
-      <span className="text-sm text-zinc-800 dark:text-zinc-200 font-medium">{displayValue}</span>
+      <span className="text-sm text-zinc-900 dark:text-zinc-100 font-medium">{displayValue}</span>
     </div>
   )
 }
@@ -177,7 +182,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
-      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{value ?? '—'}</span>
+      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{value ?? '—'}</span>
     </div>
   )
 }
@@ -186,6 +191,8 @@ export default function DatabaseDetailPage() {
   const params = useParams()
   const id = Number(params.id)
   const { accessToken, can } = useUser()
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === 'dark'
   const [material, setMaterial] = useState<MaterialDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -373,6 +380,7 @@ export default function DatabaseDetailPage() {
                 value={String(formData.status ?? material.status)}
                 onChange={(e) => handleUpdate('status', e.target.value)}
                 className={INPUT_BASE}
+                style={{ colorScheme: isDark ? 'dark' : 'light' }}
               >
                 <option value="Ativo">Ativo</option>
                 <option value="Bloqueado">Bloqueado</option>
@@ -384,6 +392,7 @@ export default function DatabaseDetailPage() {
           )}
           <EditableRow
             label="Código SAP"
+            isDark={isDark}
             fieldKey="sap_code"
             editMode={editMode}
             formData={formData}
@@ -392,6 +401,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Descrição"
+            isDark={isDark}
             fieldKey="description"
             editMode={editMode}
             formData={formData}
@@ -400,6 +410,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Grupo de Mercadorias"
+            isDark={isDark}
             fieldKey="material_group"
             editMode={editMode}
             formData={formData}
@@ -408,6 +419,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Unidade de Medida"
+            isDark={isDark}
             fieldKey="unit_of_measure"
             editMode={editMode}
             formData={formData}
@@ -416,6 +428,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Tipo de Material"
+            isDark={isDark}
             fieldKey="material_type"
             editMode={editMode}
             formData={formData}
@@ -424,6 +437,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Peso Bruto"
+            isDark={isDark}
             fieldKey="gross_weight"
             editMode={editMode}
             formData={formData}
@@ -433,6 +447,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Peso Líquido"
+            isDark={isDark}
             fieldKey="net_weight"
             editMode={editMode}
             formData={formData}
@@ -445,6 +460,7 @@ export default function DatabaseDetailPage() {
         <SectionCard title="Classificação Fiscal">
           <EditableRow
             label="NCM"
+            isDark={isDark}
             fieldKey="ncm"
             editMode={editMode}
             formData={formData}
@@ -453,6 +469,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="CFOP"
+            isDark={isDark}
             fieldKey="cfop"
             editMode={editMode}
             formData={formData}
@@ -461,6 +478,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Origem do Material"
+            isDark={isDark}
             fieldKey="origin"
             editMode={editMode}
             formData={formData}
@@ -472,6 +490,7 @@ export default function DatabaseDetailPage() {
         <SectionCard title="Compras">
           <EditableRow
             label="Grupo de Compras"
+            isDark={isDark}
             fieldKey="purchase_group"
             editMode={editMode}
             formData={formData}
@@ -480,6 +499,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Prazo de Entrega (dias)"
+            isDark={isDark}
             fieldKey="lead_time"
             editMode={editMode}
             formData={formData}
@@ -489,6 +509,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Unidade de Pedido"
+            isDark={isDark}
             fieldKey="unit_of_measure"
             editMode={editMode}
             formData={formData}
@@ -500,6 +521,7 @@ export default function DatabaseDetailPage() {
         <SectionCard title="MRP">
           <EditableRow
             label="Tipo MRP"
+            isDark={isDark}
             fieldKey="mrp_type"
             editMode={editMode}
             formData={formData}
@@ -508,6 +530,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Estoque Mínimo"
+            isDark={isDark}
             fieldKey="min_stock"
             editMode={editMode}
             formData={formData}
@@ -517,6 +540,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Estoque Máximo"
+            isDark={isDark}
             fieldKey="max_stock"
             editMode={editMode}
             formData={formData}
@@ -529,6 +553,7 @@ export default function DatabaseDetailPage() {
         <SectionCard title="Contabilidade">
           <EditableRow
             label="Classe de Valoração"
+            isDark={isDark}
             fieldKey="valuation_class"
             editMode={editMode}
             formData={formData}
@@ -537,6 +562,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Preço Padrão"
+            isDark={isDark}
             fieldKey="standard_price"
             editMode={editMode}
             formData={formData}
@@ -546,6 +572,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Centro de Lucro"
+            isDark={isDark}
             fieldKey="profit_center"
             editMode={editMode}
             formData={formData}
@@ -557,6 +584,7 @@ export default function DatabaseDetailPage() {
         <SectionCard title="Metadados">
           <EditableRow
             label="Código PDM"
+            isDark={isDark}
             fieldKey="pdm_code"
             editMode={editMode}
             formData={formData}
@@ -565,6 +593,7 @@ export default function DatabaseDetailPage() {
           />
           <EditableRow
             label="Nome PDM"
+            isDark={isDark}
             fieldKey="pdm_name"
             editMode={editMode}
             formData={formData}
