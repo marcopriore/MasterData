@@ -78,7 +78,7 @@ export function AppSidebar() {
     if (item.href === '/') return true
     if (item.href === '/request') return can('can_submit_request')
     if (item.href === '/governance') return can('can_approve') || can('can_reject')
-    if (item.href === '/database') return true
+    if (item.href === '/database') return can('can_view_database')
     if (item.href === '/admin-pdm') return can('can_view_pdm')
     return true
   })
@@ -183,7 +183,7 @@ export function AppSidebar() {
               {(() => {
                 const adminItems = CONFIG_ADMIN.filter((item) => {
                   if (item.href === '/admin/users') return can('can_manage_users')
-                  if (item.href === '/admin/roles') return can('can_manage_users')
+                  if (item.href === '/admin/roles') return can('can_manage_roles')
                   if (item.href === '/admin/fields') return can('can_manage_fields')
                   if (item.href === '/admin/logs') return can('can_view_logs')
                   return false

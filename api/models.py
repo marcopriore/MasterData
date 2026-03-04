@@ -272,6 +272,8 @@ class RolePermissions(BaseModel):
     can_manage_users: bool = False
     can_view_logs: bool = False
     can_manage_fields: bool = False
+    can_view_database: bool = True
+    can_manage_roles: bool = False
 
 
 class RoleCreate(BaseModel):

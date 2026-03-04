@@ -38,6 +38,8 @@ type Permissions = {
   can_manage_users: boolean
   can_view_logs: boolean
   can_manage_fields: boolean
+  can_view_database: boolean
+  can_manage_roles: boolean
 }
 
 type Role = {
@@ -55,9 +57,9 @@ const PERMISSION_GROUPS: {
   {
     title: 'Solicitações',
     items: [
-      { key: 'can_approve',        label: 'Aprovar solicitações',   description: 'Aprovar solicitações de cadastro' },
-      { key: 'can_reject',         label: 'Rejeitar solicitações',  description: 'Rejeitar solicitações de cadastro' },
-      { key: 'can_submit_request', label: 'Criar solicitações',     description: 'Abrir novas solicitações de cadastro' },
+      { key: 'can_approve',        label: 'Aprovar',             description: 'Aprovar solicitações de cadastro' },
+      { key: 'can_reject',         label: 'Rejeitar',            description: 'Rejeitar solicitações de cadastro' },
+      { key: 'can_submit_request', label: 'Criar solicitações',  description: 'Abrir novas solicitações de cadastro' },
     ],
   },
   {
@@ -68,7 +70,7 @@ const PERMISSION_GROUPS: {
     ],
   },
   {
-    title: 'Workflows',
+    title: 'Workflow',
     items: [
       { key: 'can_view_workflows', label: 'Visualizar Workflows', description: 'Ver configuração dos fluxos de aprovação' },
       { key: 'can_edit_workflows', label: 'Editar Workflows',     description: 'Configurar fluxos de aprovação' },
@@ -77,15 +79,14 @@ const PERMISSION_GROUPS: {
   {
     title: 'Administração',
     items: [
-      { key: 'can_manage_users',   label: 'Gerir Usuários',      description: 'Criar, editar e desativar usuários' },
-      { key: 'can_view_logs',      label: 'Visualizar Logs',     description: 'Visualizar log de auditoria do sistema' },
-      { key: 'can_manage_fields',  label: 'Gerir Dicionário',    description: 'Gerir dicionário de campos e metadados' },
+      { key: 'can_manage_users',  label: 'Gestão de Usuários',   description: 'Criar, editar e desativar usuários' },
+      { key: 'can_view_logs',     label: 'Gestão de Logs',       description: 'Visualizar log de auditoria do sistema' },
+      { key: 'can_manage_fields', label: 'Dicionário de Dados',  description: 'Gerir dicionário de campos e metadados' },
+      { key: 'can_view_database', label: 'Base de Dados',        description: 'Visualizar base de dados de materiais' },
+      { key: 'can_manage_roles',  label: 'Perfil de Acesso',     description: 'Gerir perfis e permissões de acesso' },
     ],
   },
 ]
-
-const PERMISSION_LABELS: { key: keyof Permissions; label: string }[] =
-  PERMISSION_GROUPS.flatMap((g) => g.items.map(({ key, label }) => ({ key, label })))
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,8 @@ function emptyPermissions(): Permissions {
     can_manage_users: false,
     can_view_logs: false,
     can_manage_fields: false,
+    can_view_database: true,
+    can_manage_roles: false,
   }
 }
 
@@ -226,9 +229,9 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
           <div className="space-y-3">
             <p className="text-sm font-semibold text-foreground">Permissões</p>
             <div className="space-y-4">
-              {PERMISSION_GROUPS.map((group) => (
-                <div key={group.title} className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {PERMISSION_GROUPS.map((group, idx) => (
+                <div key={group.title} className={idx > 0 ? 'space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700' : 'space-y-2'}>
+                  <p className="text-xs font-bold text-foreground">
                     {group.title}
                   </p>
                   <div className="space-y-2">
@@ -363,8 +366,6 @@ export default function RolesPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {roles.map((role) => {
             const accent = roleAccentColor(role.name)
-            const activePerms = PERMISSION_LABELS.filter(({ key }) => role.permissions?.[key])
-            const inactivePerms = PERMISSION_LABELS.filter(({ key }) => !role.permissions?.[key])
 
             return (
               <div
@@ -410,41 +411,43 @@ export default function RolesPage() {
                   </div>
                 </div>
 
-                {/* Permissions list */}
-                <div className="flex-1 px-5 py-4 space-y-1">
-                  {PERMISSION_LABELS.map(({ key, label }) => {
-                    const on = role.permissions?.[key] ?? false
-                    return (
-                      <div key={key} className="flex items-center gap-2.5 py-0.5">
-                        <span
-                          className="flex size-4 shrink-0 items-center justify-center rounded-full"
-                          style={{
-                            backgroundColor: on ? '#0F1C38' : '#F1F5F9',
-                          }}
-                        >
-                          {on ? (
-                            <Check className="size-2.5 text-white" strokeWidth={3} />
-                          ) : (
-                            <X className="size-2.5 text-slate-400" strokeWidth={2.5} />
-                          )}
-                        </span>
-                        <span
-                          className="text-xs"
-                          style={{
-                            color: on ? '#0F1C38' : '#94A3B8',
-                            fontWeight: on ? 500 : 400,
-                          }}
-                        >
-                          {label}
-                        </span>
+                {/* Permissions list — grouped */}
+                <div className="flex-1 px-5 py-4 space-y-4">
+                  {PERMISSION_GROUPS.map((group) => (
+                    <div key={group.title} className="space-y-2">
+                      <p className="text-xs font-bold text-foreground">{group.title}</p>
+                      <div className="space-y-1.5">
+                        {group.items.map(({ key, label }) => {
+                          const on = role.permissions?.[key] ?? false
+                          return (
+                            <div key={key} className="flex items-center gap-2.5 py-0.5">
+                              <span
+                                className="flex size-4 shrink-0 items-center justify-center rounded-full"
+                                style={{
+                                  backgroundColor: on ? '#dcfce7' : '#F1F5F9',
+                                }}
+                              >
+                                {on ? (
+                                  <Check className="size-2.5 text-green-600" strokeWidth={3} />
+                                ) : (
+                                  <X className="size-2.5 text-slate-400" strokeWidth={2.5} aria-hidden />
+                                )}
+                              </span>
+                              <span
+                                className="text-xs"
+                                style={{
+                                  color: on ? '#0F1C38' : '#94A3B8',
+                                  fontWeight: on ? 500 : 400,
+                                }}
+                              >
+                                {label}
+                              </span>
+                            </div>
+                          )
+                        })}
                       </div>
-                    )
-                  })}
-                </div>
-
-                {/* Footer summary */}
-                <div className="border-t px-5 py-3 text-xs text-muted-foreground" style={{ borderColor: accent.border }}>
-                  {activePerms.length} de {PERMISSION_LABELS.length} permissões ativas
+                    </div>
+                  ))}
                 </div>
               </div>
             )

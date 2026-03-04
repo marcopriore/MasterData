@@ -37,6 +37,8 @@ export type RolePermissions = {
   can_manage_users: boolean
   can_view_logs: boolean
   can_manage_fields: boolean
+  can_view_database: boolean
+  can_manage_roles: boolean
 }
 
 export type UserPreferences = {

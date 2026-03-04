@@ -76,6 +76,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_users": True,
             "can_view_logs": True,
             "can_manage_fields": True,
+            "can_view_database": True,
+            "can_manage_roles": True,
         },
     },
     {
@@ -92,6 +94,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_users": False,
             "can_view_logs": False,
             "can_manage_fields": False,
+            "can_view_database": True,
+            "can_manage_roles": False,
         },
     },
     {
@@ -108,6 +112,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_users": False,
             "can_view_logs": False,
             "can_manage_fields": False,
+            "can_view_database": True,
+            "can_manage_roles": False,
         },
     },
     {
@@ -124,6 +130,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_users": False,
             "can_view_logs": False,
             "can_manage_fields": False,
+            "can_view_database": True,
+            "can_manage_roles": False,
         },
     },
     {
@@ -140,6 +148,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_users": True,
             "can_view_logs": True,
             "can_manage_fields": True,
+            "can_view_database": True,
+            "can_manage_roles": False,
         },
     },
     {
@@ -156,6 +166,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_users": False,
             "can_view_logs": False,
             "can_manage_fields": False,
+            "can_view_database": True,
+            "can_manage_roles": False,
         },
     },
 ]
