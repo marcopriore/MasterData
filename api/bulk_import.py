@@ -130,12 +130,6 @@ def build_template_xlsx() -> BytesIO:
             12, len(str(TEMPLATE_HEADERS[col_idx - 1])) + 2
         )
 
-    # Aba Instruções
-    ws_inst = wb.create_sheet("Instruções", 0)
-    for idx, line in enumerate(INSTRUCTIONS, start=1):
-        ws_inst.cell(row=idx, column=1, value=line)
-    ws_inst.column_dimensions["A"].width = 60
-
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
