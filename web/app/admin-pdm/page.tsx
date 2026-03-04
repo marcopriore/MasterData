@@ -17,11 +17,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Search, Plus, FileText } from "lucide-react"
+import { Search, Plus, FileText, FileDown, Upload, Loader2, X, FileSpreadsheet, AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
 import { Toaster, toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { useUser } from "@/contexts/user-context"
+import { apiDownloadWithAuth, apiUploadWithAuth, apiGetWithAuth } from "@/lib/api"
 
 export default function MDMDashboard() {
+  const { accessToken, can } = useUser()
+  const showExport = can("can_edit_pdm")
+  const showBulkImport = can("can_bulk_import")
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
   const [pdmsLoading, setPdmsLoading] = useState(true)
   const [selectedPdmId, setSelectedPdmId] = useState<number | null>(null)
@@ -42,6 +47,18 @@ export default function MDMDashboard() {
   const [cloneLoading, setCloneLoading] = useState(false)
   const [isEditMode, setIsEditMode] = useState(false)
   const searchContainerRef = useRef<HTMLDivElement>(null)
+  const [pdmExporting, setPdmExporting] = useState(false)
+  const [showPdmImportModal, setShowPdmImportModal] = useState(false)
+  const [pdmImportStep, setPdmImportStep] = useState(1)
+  const [pdmImportFile, setPdmImportFile] = useState<File | null>(null)
+  const [pdmImportResult, setPdmImportResult] = useState<{
+    pdm: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: Array<{ row_number: number; operacao: string; pdm_code: string | null; nome: string | null; status: string; errors: string[]; warnings: string[] }> }
+    attributes: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: Array<{ row_number: number; operacao: string; pdm_code: string | null; atributo_key: string | null; status: string; errors: string[]; warnings: string[] }> }
+  } | null>(null)
+  const [pdmImportDownloading, setPdmImportDownloading] = useState(false)
+  const [pdmImportValidating, setPdmImportValidating] = useState(false)
+  const [pdmImportConfirming, setPdmImportConfirming] = useState(false)
+  const [pdmImportError, setPdmImportError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchPdms = async () => {
@@ -196,6 +213,92 @@ export default function MDMDashboard() {
     }
   }
 
+  const closePdmImportModal = () => {
+    setShowPdmImportModal(false)
+    setPdmImportStep(1)
+    setPdmImportFile(null)
+    setPdmImportResult(null)
+    setPdmImportError(null)
+  }
+
+  const handlePdmDownloadTemplate = async () => {
+    if (!accessToken) return
+    setPdmImportDownloading(true)
+    try {
+      await apiDownloadWithAuth("/api/pdm/import-template", accessToken, "template_importacao_pdm.xlsx")
+      toast.success("Template baixado com sucesso!")
+    } catch (err) {
+      toast.error((err as Error)?.message ?? "Falha ao baixar template")
+    } finally {
+      setPdmImportDownloading(false)
+    }
+  }
+
+  const handlePdmValidateFile = async () => {
+    if (!accessToken || !pdmImportFile) return
+    setPdmImportValidating(true)
+    setPdmImportError(null)
+    try {
+      const res = await apiUploadWithAuth<{
+        dry_run: boolean
+        pdm: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: Array<{ row_number: number; operacao: string; pdm_code: string | null; nome: string | null; status: string; errors: string[]; warnings: string[] }> }
+        attributes: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: Array<{ row_number: number; operacao: string; pdm_code: string | null; atributo_key: string | null; status: string; errors: string[]; warnings: string[] }> }
+      }>("/api/pdm/import?dry_run=true", pdmImportFile, accessToken)
+      setPdmImportResult(res)
+      setPdmImportStep(3)
+    } catch (err) {
+      setPdmImportError((err as Error)?.message ?? "Falha ao validar planilha")
+    } finally {
+      setPdmImportValidating(false)
+    }
+  }
+
+  const handlePdmConfirmImport = async () => {
+    if (!accessToken || !pdmImportFile || !pdmImportResult) return
+    const hasPdmErrors = pdmImportResult.pdm?.error_rows ? pdmImportResult.pdm.error_rows > 0 : false
+    const hasAttrErrors = pdmImportResult.attributes?.error_rows ? pdmImportResult.attributes.error_rows > 0 : false
+    if (hasPdmErrors || hasAttrErrors) return
+    setPdmImportConfirming(true)
+    setPdmImportError(null)
+    try {
+      const res = await apiUploadWithAuth<{
+        dry_run: boolean
+        pdm_created: number
+        pdm_updated: number
+        attr_created: number
+        attr_updated: number
+        attr_deleted: number
+      }>("/api/pdm/import?dry_run=false", pdmImportFile, accessToken)
+      toast.success(
+        `Importação concluída: ${res.pdm_created + res.pdm_updated} PDM(s), ${res.attr_created + res.attr_updated} atributo(s) criados/atualizados, ${res.attr_deleted} deletados`
+      )
+      closePdmImportModal()
+      try {
+        const data = await apiGetWithAuth<PDMTemplate[]>("/api/pdm", accessToken)
+        setPdms(data)
+      } catch {
+        // ignore refresh error
+      }
+    } catch (err) {
+      setPdmImportError((err as Error)?.message ?? "Falha ao importar")
+    } finally {
+      setPdmImportConfirming(false)
+    }
+  }
+
+  const handlePdmExport = async () => {
+    if (!accessToken) return
+    setPdmExporting(true)
+    try {
+      await apiDownloadWithAuth("/api/pdm/export", accessToken, "pdm_export.xlsx")
+      toast.success("Exportação concluída!")
+    } catch (err) {
+      toast.error((err as Error)?.message ?? "Falha ao exportar")
+    } finally {
+      setPdmExporting(false)
+    }
+  }
+
   const handleOpenCloneModal = () => {
     setCloneName(`Cópia de ${pdmName}`)
     setCloneCode("")
@@ -307,6 +410,29 @@ export default function MDMDashboard() {
                   autoComplete="off"
                 />
               </div>
+              {showExport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 gap-2"
+                  onClick={handlePdmExport}
+                  disabled={pdmExporting}
+                >
+                  {pdmExporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
+                  Exportar Excel
+                </Button>
+              )}
+              {showBulkImport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 gap-2"
+                  onClick={() => setShowPdmImportModal(true)}
+                >
+                  <Upload className="size-4" />
+                  Importação em Massa
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -506,6 +632,291 @@ export default function MDMDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal Importação em Massa PDM */}
+      {showPdmImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/60 p-4">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="flex items-start justify-between border-b border-zinc-200 px-6 py-4 shrink-0 dark:border-zinc-700">
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                  Importação em Massa de PDM
+                </h2>
+                <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+                  Etapa {pdmImportStep} de 3
+                </p>
+              </div>
+              <button
+                onClick={closePdmImportModal}
+                disabled={pdmImportValidating || pdmImportConfirming}
+                className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300 transition-colors disabled:opacity-50"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {pdmImportStep === 1 && (
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50 space-y-3">
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Regras principais:</p>
+                    <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-1 list-disc list-inside">
+                      <li>A planilha tem duas abas: <strong>PDM</strong> e <strong>Atributos</strong></li>
+                      <li>PDM: operacao C (Criar) ou E (Editar)</li>
+                      <li>Atributos: operacao C, E ou D (Deletar — apenas para atributos)</li>
+                      <li>Não alterar os nomes das colunas do cabeçalho</li>
+                    </ul>
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Aba PDM:</p>
+                    <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-1 list-disc list-inside">
+                      <li><strong>operacao=E</strong>: pdm_code identifica o PDM e não pode ser alterado. Apenas nome, descrição e ativo serão atualizados.</li>
+                    </ul>
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Aba Atributos:</p>
+                    <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-1 list-disc list-inside">
+                      <li><strong>operacao=E</strong>: o par pdm_code + atributo_key identifica o atributo e nenhum dos dois pode ser alterado. Use D + C para renomear.</li>
+                      <li><strong>operacao=D</strong>: remove o atributo. Requer pdm_code e atributo_key.</li>
+                    </ul>
+                  </div>
+                  <Button
+                    onClick={handlePdmDownloadTemplate}
+                    disabled={pdmImportDownloading}
+                    className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {pdmImportDownloading ? <Loader2 className="size-4 animate-spin" /> : <FileSpreadsheet className="size-4" />}
+                    Baixar Planilha Template
+                  </Button>
+                </div>
+              )}
+              {pdmImportStep === 2 && (
+                <div className="space-y-4">
+                  <div
+                    onDragOver={(e) => { e.preventDefault() }}
+                    onDragLeave={() => {}}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      const f = e.dataTransfer.files[0]
+                      if (f && (f.name.endsWith(".xlsx") || f.name.endsWith(".xls"))) {
+                        setPdmImportFile(f)
+                      } else {
+                        toast.error("Apenas arquivos .xlsx ou .xls são aceitos")
+                      }
+                    }}
+                    onClick={() => document.getElementById("pdm-import-file")?.click()}
+                    className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors border-zinc-300 dark:border-zinc-600 hover:border-zinc-400 dark:hover:border-zinc-500"
+                  >
+                    <input
+                      id="pdm-import-file"
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) setPdmImportFile(f)
+                        e.target.value = ""
+                      }}
+                    />
+                    <FileSpreadsheet className="size-10 text-zinc-400 dark:text-zinc-500" />
+                    <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      Arraste a planilha aqui ou clique para selecionar
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">Formatos aceitos: .xlsx, .xls</p>
+                    {pdmImportFile && (
+                      <p className="text-sm text-green-600 dark:text-green-400 font-medium mt-2">
+                        ✓ {pdmImportFile.name}
+                      </p>
+                    )}
+                  </div>
+                  {pdmImportFile && (
+                    <Button onClick={handlePdmValidateFile} disabled={pdmImportValidating} className="gap-2">
+                      {pdmImportValidating ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Validar Planilha
+                    </Button>
+                  )}
+                </div>
+              )}
+              {pdmImportStep === 3 && pdmImportResult && (
+                <div className="space-y-6">
+                  {pdmImportError && (
+                    <p className="text-sm text-red-600 dark:text-red-400">{pdmImportError}</p>
+                  )}
+                  {/* PDM section */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Aba PDM</h3>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                        Total: {pdmImportResult.pdm?.total_rows ?? 0}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                        Válidas: {pdmImportResult.pdm?.valid_rows ?? 0}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
+                        Avisos: {pdmImportResult.pdm?.warning_rows ?? 0}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                        Erros: {pdmImportResult.pdm?.error_rows ?? 0}
+                      </span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-zinc-100 dark:bg-zinc-800">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Linha</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Op.</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Código</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Nome</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Status</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Erros/Avisos</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(pdmImportResult.pdm?.rows ?? [])
+                            .sort((a, b) => (a.status === "error" ? 0 : a.status === "warning" ? 1 : 2) - (b.status === "error" ? 0 : b.status === "warning" ? 1 : 2))
+                            .map((r) => (
+                              <tr
+                                key={`pdm-${r.row_number}`}
+                                className={
+                                  r.status === "error"
+                                    ? "bg-red-50 dark:bg-red-900/20"
+                                    : r.status === "warning"
+                                      ? "bg-yellow-50 dark:bg-yellow-900/20"
+                                      : "bg-white dark:bg-zinc-900"
+                                }
+                              >
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{r.row_number}</td>
+                                <td className="px-3 py-2">
+                                  {r.operacao === "C" && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">Criação</span>}
+                                  {r.operacao === "E" && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">Edição</span>}
+                                  {r.operacao === "D" && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">Exclusão</span>}
+                                  {!["C","E","D"].includes(r.operacao) && <span className="text-zinc-600 dark:text-zinc-400">{r.operacao}</span>}
+                                </td>
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{r.pdm_code ?? "—"}</td>
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300 max-w-[140px] truncate">{r.nome ?? "—"}</td>
+                                <td className="px-3 py-2">
+                                  {r.status === "ok" && <span className="text-green-600 dark:text-green-400"><CheckCircle2 className="size-3.5 inline" /> ok</span>}
+                                  {r.status === "warning" && <span className="text-yellow-600 dark:text-yellow-400"><AlertTriangle className="size-3.5 inline" /> aviso</span>}
+                                  {r.status === "error" && <span className="text-red-600 dark:text-red-400"><XCircle className="size-3.5 inline" /> erro</span>}
+                                </td>
+                                <td className="px-3 py-2 text-xs">
+                                  {r.errors?.map((e, i) => <p key={i} className="text-red-600 dark:text-red-400"><XCircle className="size-3 inline" /> {e}</p>)}
+                                  {r.warnings?.map((w, i) => <p key={i} className="text-yellow-600 dark:text-yellow-400"><AlertTriangle className="size-3 inline" /> {w}</p>)}
+                                  {(!r.errors?.length && !r.warnings?.length) && "—"}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  {/* Attributes section */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Aba Atributos</h3>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                        Total: {pdmImportResult.attributes?.total_rows ?? 0}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                        Válidas: {pdmImportResult.attributes?.valid_rows ?? 0}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
+                        Avisos: {pdmImportResult.attributes?.warning_rows ?? 0}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                        Erros: {pdmImportResult.attributes?.error_rows ?? 0}
+                      </span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-zinc-100 dark:bg-zinc-800">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Linha</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Op.</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">PDM</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Key</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Label</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Status</th>
+                            <th className="px-3 py-2 text-left font-semibold text-zinc-700 dark:text-zinc-300">Erros/Avisos</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(pdmImportResult.attributes?.rows ?? [])
+                            .sort((a, b) => (a.status === "error" ? 0 : a.status === "warning" ? 1 : 2) - (b.status === "error" ? 0 : b.status === "warning" ? 1 : 2))
+                            .map((r) => (
+                              <tr
+                                key={`attr-${r.row_number}`}
+                                className={
+                                  r.status === "error"
+                                    ? "bg-red-50 dark:bg-red-900/20"
+                                    : r.status === "warning"
+                                      ? "bg-yellow-50 dark:bg-yellow-900/20"
+                                      : "bg-white dark:bg-zinc-900"
+                                }
+                              >
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{r.row_number}</td>
+                                <td className="px-3 py-2">
+                                  {r.operacao === "C" && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300">Criação</span>}
+                                  {r.operacao === "E" && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">Edição</span>}
+                                  {r.operacao === "D" && <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">Exclusão</span>}
+                                  {!["C","E","D"].includes(r.operacao) && <span className="text-zinc-600 dark:text-zinc-400">{r.operacao}</span>}
+                                </td>
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{r.pdm_code ?? "—"}</td>
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{r.atributo_key ?? "—"}</td>
+                                <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300 max-w-[120px] truncate">{(r as { data?: { label?: string } }).data?.label ?? "—"}</td>
+                                <td className="px-3 py-2">
+                                  {r.status === "ok" && <span className="text-green-600 dark:text-green-400"><CheckCircle2 className="size-3.5 inline" /> ok</span>}
+                                  {r.status === "warning" && <span className="text-yellow-600 dark:text-yellow-400"><AlertTriangle className="size-3.5 inline" /> aviso</span>}
+                                  {r.status === "error" && <span className="text-red-600 dark:text-red-400"><XCircle className="size-3.5 inline" /> erro</span>}
+                                </td>
+                                <td className="px-3 py-2 text-xs">
+                                  {r.errors?.map((e, i) => <p key={i} className="text-red-600 dark:text-red-400"><XCircle className="size-3 inline" /> {e}</p>)}
+                                  {r.warnings?.map((w, i) => <p key={i} className="text-yellow-600 dark:text-yellow-400"><AlertTriangle className="size-3 inline" /> {w}</p>)}
+                                  {(!r.errors?.length && !r.warnings?.length) && "—"}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    {((pdmImportResult.pdm?.error_rows ?? 0) + (pdmImportResult.attributes?.error_rows ?? 0)) > 0
+                      ? "Corrija os erros antes de confirmar a importação"
+                      : "Pronto para confirmar a importação"}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="border-t border-zinc-200 px-6 py-4 flex justify-between shrink-0 dark:border-zinc-700">
+              <div>
+                {pdmImportStep === 1 && <Button variant="outline" size="sm" onClick={closePdmImportModal}>Cancelar</Button>}
+                {pdmImportStep === 2 && <Button variant="outline" size="sm" onClick={() => setPdmImportStep(1)}>← Voltar</Button>}
+                {pdmImportStep === 3 && <Button variant="outline" size="sm" onClick={() => setPdmImportStep(2)} disabled={pdmImportConfirming}>← Voltar</Button>}
+              </div>
+              <div className="flex gap-2">
+                {pdmImportStep === 1 && <Button size="sm" onClick={() => setPdmImportStep(2)}>Próximo →</Button>}
+                {pdmImportStep === 2 && (
+                  <Button size="sm" onClick={handlePdmValidateFile} disabled={!pdmImportFile || pdmImportValidating}>
+                    {pdmImportValidating ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                    Validar Planilha
+                  </Button>
+                )}
+                {pdmImportStep === 3 && (
+                  <Button
+                    size="sm"
+                    onClick={handlePdmConfirmImport}
+                    disabled={
+                      (pdmImportResult?.pdm?.error_rows ?? 0) > 0 ||
+                      (pdmImportResult?.attributes?.error_rows ?? 0) > 0 ||
+                      pdmImportConfirming
+                    }
+                    className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                  >
+                    {pdmImportConfirming ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                    Confirmar Importação
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

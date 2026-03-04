@@ -12,7 +12,7 @@ from fastapi import Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
-from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm
 from orm_models import (
     ProductORM,
     PDMOrm,
@@ -35,6 +35,11 @@ from bulk_import import (
     parse_and_validate_excel,
     _row_to_create_kwargs,
     _row_to_update_kwargs,
+)
+from bulk_import_pdm import (
+    build_pdm_template_xlsx,
+    build_pdm_export_xlsx,
+    parse_and_validate_pdm_excel,
 )
 from notifications import notify_request_event
 from security import hash_password
@@ -487,6 +492,220 @@ def list_pdms(db: Session = Depends(get_db)):
         }
         for r in rows
     ]
+
+
+# -------------------------------
+# PDM IMPORT/EXPORT
+@app.get("/api/pdm/import-template")
+def get_pdm_import_template(
+    _: UserORM = Depends(get_user_with_bulk_import),
+):
+    buf = build_pdm_template_xlsx()
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=template_importacao_pdm.xlsx"},
+    )
+
+
+@app.post("/api/pdm/import")
+async def import_pdm(
+    file: UploadFile = File(..., description="Planilha Excel para importação"),
+    dry_run: bool = Query(True, description="Se True, apenas valida sem gravar"),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_bulk_import),
+):
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Arquivo deve ser planilha Excel (.xlsx)")
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler arquivo: {e}")
+
+    try:
+        result = parse_and_validate_pdm_excel(content, db)
+    except Exception as e:
+        logging.getLogger(__name__).exception("Erro ao processar Excel PDM")
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido ou corrompido: {e}")
+
+    if "_error" in result:
+        raise HTTPException(status_code=400, detail=result["_error"])
+
+    if dry_run:
+        return result
+
+    pdm_data = result.get("pdm", {})
+    attr_data = result.get("attributes", {})
+    has_pdm_errors = any(r.get("status") == "error" for r in pdm_data.get("rows", []))
+    has_attr_errors = any(r.get("status") == "error" for r in attr_data.get("rows", []))
+    if has_pdm_errors or has_attr_errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Existem erros críticos nas linhas. Corrija e tente novamente.",
+                "pdm": pdm_data,
+                "attributes": attr_data,
+            },
+        )
+
+    pdm_created = 0
+    pdm_updated = 0
+    attr_created = 0
+    attr_updated = 0
+    attr_deleted = 0
+
+    pdm_by_code: dict[str, PDMOrm] = {r.internal_code: r for r in db.query(PDMOrm).all()}
+
+    for row_info in pdm_data.get("rows", []):
+        if row_info.get("status") == "error":
+            continue
+        op = row_info.get("operacao")
+        data = row_info.get("data", {})
+        pdm_code = str(data.get("pdm_code") or "").strip()
+        nome = str(data.get("nome") or "").strip()
+        ativo_str = str(data.get("ativo") or "Sim").strip()
+        is_active = ativo_str.lower() in ("sim", "s", "1", "true")
+        if op == "C":
+            row = PDMOrm(
+                name=nome or pdm_code,
+                internal_code=pdm_code,
+                is_active=is_active,
+                attributes=[],
+            )
+            db.add(row)
+            db.flush()
+            pdm_by_code[pdm_code] = row
+            pdm_created += 1
+        elif op == "E":
+            row = pdm_by_code.get(pdm_code)
+            if row:
+                # Atualizar apenas nome, ativo — pdm_code é chave e não pode ser alterado
+                row.name = nome or row.name
+                row.is_active = is_active
+                db.flush()
+                pdm_updated += 1
+
+    db.commit()
+    db.expire_all()
+    pdm_by_code = {r.internal_code: r for r in db.query(PDMOrm).all()}
+
+    def _parse_opcoes(s: str) -> list[dict]:
+        if not s or not str(s).strip():
+            return []
+        return [{"value": v.strip(), "abbreviation": ""} for v in str(s).split(";") if v.strip()]
+
+    def _map_tipo(t: str) -> str:
+        t = (t or "text").lower()
+        if t == "select":
+            return "lov"
+        if t == "number":
+            return "numeric"
+        return "text"
+
+    attr_rows_by_pdm: dict[str, list] = {}
+    for row_info in attr_data.get("rows", []):
+        if row_info.get("status") == "error":
+            continue
+        pdm_code = str(row_info.get("pdm_code") or "").strip()
+        if pdm_code not in attr_rows_by_pdm:
+            attr_rows_by_pdm[pdm_code] = []
+        attr_rows_by_pdm[pdm_code].append(row_info)
+
+    for pdm_code, rows in attr_rows_by_pdm.items():
+        row = pdm_by_code.get(pdm_code)
+        if not row:
+            continue
+        attrs: list[dict] = list(row.attributes or [])
+        attrs_by_key: dict[str, int] = {str(a.get("id", a.get("name", ""))): i for i, a in enumerate(attrs)}
+
+        for row_info in rows:
+            op = row_info.get("operacao")
+            data = row_info.get("data", {})
+            key = str(data.get("atributo_key") or "").strip()
+            if not key:
+                continue
+            if op == "D":
+                idx = attrs_by_key.get(key)
+                if idx is not None:
+                    attrs.pop(idx)
+                    attrs_by_key = {str(a.get("id", a.get("name", ""))): i for i, a in enumerate(attrs)}
+                    attr_deleted += 1
+                continue
+            label = str(data.get("label") or key).strip()
+            tipo = _map_tipo(str(data.get("tipo") or "text"))
+            obrig = str(data.get("obrigatorio") or "Não").strip().lower() in ("sim", "s")
+            ordem = int(float(data.get("ordem") or 999)) if data.get("ordem") is not None else 999
+            opcoes = _parse_opcoes(str(data.get("opcoes") or ""))
+
+            attr_obj = {
+                "id": key,
+                "order": ordem,
+                "name": label,
+                "dataType": tipo,
+                "isRequired": obrig,
+                "includeInDescription": True,
+                "abbreviation": "",
+                "allowedValues": opcoes,
+            }
+            if op == "C":
+                attrs.append(attr_obj)
+                attr_created += 1
+            elif op == "E":
+                idx = attrs_by_key.get(key)
+                if idx is not None:
+                    # Atualizar apenas label, tipo, obrigatorio, ordem, opcoes — pdm_code e atributo_key não alteráveis
+                    attrs[idx] = attr_obj
+                    attr_updated += 1
+                else:
+                    attrs.append(attr_obj)
+                    attr_created += 1
+            attrs_by_key[key] = len(attrs) - 1
+
+        row.attributes = attrs
+        db.flush()
+
+    db.commit()
+    log_system_event(
+        db,
+        current_user.id,
+        "pdm",
+        "bulk_import",
+        f"PDM: {pdm_created} criados, {pdm_updated} atualizados. Atributos: {attr_created} criados, {attr_updated} atualizados, {attr_deleted} deletados por {current_user.email}",
+    )
+    return {
+        "dry_run": False,
+        "pdm_created": pdm_created,
+        "pdm_updated": pdm_updated,
+        "attr_created": attr_created,
+        "attr_updated": attr_updated,
+        "attr_deleted": attr_deleted,
+    }
+
+
+@app.get("/api/pdm/export")
+def export_pdm(
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_user_with_edit_pdm),
+):
+    rows = db.query(PDMOrm).order_by(PDMOrm.name.asc()).all()
+    pdms = [
+        {"id": r.id, "name": r.name, "internal_code": r.internal_code, "is_active": r.is_active}
+        for r in rows
+    ]
+    attrs_flat: list[dict] = []
+    for r in rows:
+        for a in (r.attributes or []):
+            ao = dict(a) if isinstance(a, dict) else {}
+            ao["pdm_code"] = r.internal_code
+            attrs_flat.append(ao)
+    buf = build_pdm_export_xlsx(pdms, attrs_flat)
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = f"pdm_export_{today}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # -------------------------------
