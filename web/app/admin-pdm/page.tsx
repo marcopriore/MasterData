@@ -389,27 +389,8 @@ export default function MDMDashboard() {
           onClone={handleOpenCloneModal}
           minimal={!hasSelection}
           pdmName={pdmName || undefined}
-        />
-
-        {/* Search - below header, above Detalhes do PDM */}
-        <div className="shrink-0 border-b border-slate-200/60 bg-white px-6 py-4 dark:border-zinc-700/50 dark:bg-card">
-          <div ref={searchContainerRef} className="relative max-w-xl">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search
-                  className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
-                  aria-hidden
-                />
-                <Input
-                  type="search"
-                  placeholder=""
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
-                  onFocus={() => setSearchFocused(true)}
-                  className="h-9 pl-9 pr-3 text-sm uppercase"
-                  autoComplete="off"
-                />
-              </div>
+          headerActions={
+            <>
               {showExport && (
                 <Button
                   variant="outline"
@@ -442,10 +423,28 @@ export default function MDMDashboard() {
                 <Plus className="size-4" />
                 Novo PDM
               </Button>
+            </>
+          }
+        />
+
+        {/* Search - below header, full width */}
+        <div className="shrink-0 border-b border-slate-200/60 bg-white px-6 py-4 dark:border-zinc-700/50 dark:bg-card">
+          <div ref={searchContainerRef} className="relative w-full">
+            <div className="relative w-full">
+              <Search
+                className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"
+                aria-hidden
+              />
+              <Input
+                type="search"
+                placeholder="Buscar PDM por descrição ou código..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
+                onFocus={() => setSearchFocused(true)}
+                className="h-9 w-full pl-9 pr-3 text-sm uppercase"
+                autoComplete="off"
+              />
             </div>
-            <p className="mt-1.5 text-xs text-slate-500">
-              Buscar PDM por descrição ou código
-            </p>
 
             {/* Results dropdown - solid white bg, navy text */}
             {showDropdown && (

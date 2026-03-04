@@ -21,9 +21,11 @@ interface DashboardHeaderProps {
   onClone: () => void
   minimal?: boolean
   pdmName?: string
+  /** Ações exibidas à direita na linha do título (ex: Exportar, Importação, Novo PDM) */
+  headerActions?: React.ReactNode
 }
 
-export function DashboardHeader({ status, isEditMode = false, onEditClick, onSave, onClone, minimal = false, pdmName }: DashboardHeaderProps) {
+export function DashboardHeader({ status, isEditMode = false, onEditClick, onSave, onClone, minimal = false, pdmName, headerActions }: DashboardHeaderProps) {
   return (
     <header className="flex flex-col gap-3 rounded-2xl border-b border-slate-200/60 bg-white px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] dark:border-zinc-700/50 dark:bg-card dark:shadow-[0_2px_8px_rgba(0,0,0,0.2),0_4px_6px_-1px_rgba(0,0,0,0.1)] md:flex-row md:items-center md:justify-between">
       <div className="flex flex-col gap-2">
@@ -64,8 +66,10 @@ export function DashboardHeader({ status, isEditMode = false, onEditClick, onSav
           )}
         </div>
       </div>
-        {!minimal && (
         <div className="flex items-center gap-2">
+        {headerActions}
+        {!minimal && (
+          <>
         {isEditMode ? (
           <Button size="sm" onClick={onSave} className="gap-1.5 rounded-xl bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90">
             <Save className="size-3.5" />
@@ -81,8 +85,9 @@ export function DashboardHeader({ status, isEditMode = false, onEditClick, onSav
           <Copy className="size-3.5" />
           Clonar PDM
         </Button>
-      </div>
+          </>
         )}
+      </div>
     </header>
   )
 }
