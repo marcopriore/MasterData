@@ -12,7 +12,7 @@ from fastapi import Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
-from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database
 from orm_models import (
     ProductORM,
     PDMOrm,
@@ -31,6 +31,7 @@ from orm_models import (
 from audit import log_request_event, log_system_event
 from bulk_import import (
     build_template_xlsx,
+    build_export_xlsx,
     parse_and_validate_excel,
     _row_to_create_kwargs,
     _row_to_update_kwargs,
@@ -1628,6 +1629,59 @@ def erp_integrate_materials(
         f"{len(integrated)} materiais integrados por {current_user.email}: IDs {material_ids_str}",
     )
     return {"integrated": integrated, "skipped": skipped, "total": len(integrated)}
+
+
+@app.get("/api/database/materials/export")
+def export_materials(
+    q: str | None = Query(None, description="Busca por descrição ou sap_code"),
+    status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
+    pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
+    erp_status: str | None = Query(None, description="Filtrar por erp_status: pendente_erp|integrado"),
+    date_from: str | None = Query(None, description="Data de criação a partir de (YYYY-MM-DD)"),
+    date_to: str | None = Query(None, description="Data de criação até (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_user_with_view_database),
+):
+    """Exporta materiais filtrados para Excel. Sem paginação."""
+    query = db.query(MaterialDatabaseORM)
+    if q:
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                MaterialDatabaseORM.description.ilike(term),
+                MaterialDatabaseORM.sap_code.ilike(term),
+            )
+        )
+    if status:
+        query = query.filter(MaterialDatabaseORM.status == status)
+    if pdm_code:
+        query = query.filter(MaterialDatabaseORM.pdm_code == pdm_code)
+    if erp_status:
+        query = query.filter(MaterialDatabaseORM.erp_status == erp_status)
+    if date_from:
+        try:
+            dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            query = query.filter(MaterialDatabaseORM.created_at >= dt_from)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt_to = datetime.strptime(date_to, "%Y-%m-%d")
+            dt_until = (dt_to + timedelta(days=1)).replace(tzinfo=timezone.utc)
+            query = query.filter(MaterialDatabaseORM.created_at < dt_until)
+        except ValueError:
+            pass
+    query = query.order_by(MaterialDatabaseORM.description.asc())
+    rows = query.all()
+    materials = [_material_db_to_dict(r) for r in rows]
+    buf = build_export_xlsx(materials)
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = f"materiais_export_{today}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/database/materials/import-template")

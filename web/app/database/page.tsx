@@ -21,6 +21,7 @@ import {
   X,
   Upload,
   FileSpreadsheet,
+  FileDown,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -151,6 +152,31 @@ export default function DatabasePage() {
 
   const showStandardizeActions = can('can_standardize')
   const showBulkImport = can('can_bulk_import')
+  const showExport = can('can_view_database')
+
+  const [exporting, setExporting] = useState(false)
+
+  const handleExportExcel = async () => {
+    if (!accessToken) return
+    setExporting(true)
+    try {
+      const params = new URLSearchParams()
+      if (appliedSearch) params.set('q', appliedSearch)
+      if (appliedStatus) params.set('status', appliedStatus)
+      if (appliedPdm) params.set('pdm_code', appliedPdm)
+      if (appliedErpFilter) params.set('erp_status', appliedErpFilter)
+      if (appliedDateFrom) params.set('date_from', appliedDateFrom)
+      if (appliedDateTo) params.set('date_to', appliedDateTo)
+      const qs = params.toString()
+      const path = `/api/database/materials/export${qs ? `?${qs}` : ''}`
+      await apiDownloadWithAuth(path, accessToken, 'materiais_export.xlsx')
+      toast.success('Exportação concluída!')
+    } catch (err) {
+      toast.error((err as Error)?.message ?? 'Falha ao exportar')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // Bulk import modal state
   const [showBulkImportModal, setShowBulkImportModal] = useState(false)
@@ -388,7 +414,7 @@ export default function DatabasePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-foreground">
             <Database className="size-6" />
@@ -399,6 +425,18 @@ export default function DatabasePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {showExport && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              className="gap-2"
+            >
+              {exporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
+              Exportar Excel
+            </Button>
+          )}
           {showBulkImport && (
             <Button
               variant="outline"

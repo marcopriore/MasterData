@@ -101,6 +101,69 @@ INSTRUCTIONS = [
 ]
 
 
+def _material_to_export_row(m: dict[str, Any]) -> list[Any]:
+    """Map material dict to a row matching TEMPLATE_HEADERS order (operacao=E, codigo_material=sap_code)."""
+    return [
+        "E",  # operacao
+        m.get("sap_code") or "",
+        m.get("description") or "",
+        m.get("pdm_code") or "",
+        m.get("status") or "Ativo",
+        m.get("unit_of_measure") or "",
+        m.get("material_type") or "",
+        "",  # industry_sector
+        "",  # base_unit
+        m.get("gross_weight"),
+        m.get("net_weight"),
+        "",  # weight_unit
+        "",  # volume
+        "",  # volume_unit
+        m.get("lead_time"),
+        m.get("min_stock"),
+        m.get("max_stock"),
+        m.get("standard_price"),
+        "",  # price_unit
+        "",  # currency
+        m.get("ncm") or "",
+        m.get("cfop") or "",
+        m.get("origin") or "",
+    ]
+
+
+def build_export_xlsx(materials: list[dict[str, Any]]) -> BytesIO:
+    """Build Excel export with header and one row per material. Same format as import template."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Materiais"
+
+    # Row 1: header (same style as template)
+    for col_idx, header in enumerate(TEMPLATE_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    # Rows 2+: one per material
+    for row_idx, m in enumerate(materials, start=2):
+        row_vals = _material_to_export_row(m)
+        for col_idx, val in enumerate(row_vals, start=1):
+            ws.cell(row=row_idx, column=col_idx, value=val)
+
+    # Adjust column widths
+    for col_idx in range(1, len(TEMPLATE_HEADERS) + 1):
+        max_len = len(str(TEMPLATE_HEADERS[col_idx - 1])) + 2
+        for r in range(2, len(materials) + 2):
+            v = ws.cell(row=r, column=col_idx).value
+            if v is not None:
+                max_len = max(max_len, len(str(v)) + 2)
+        ws.column_dimensions[get_column_letter(col_idx)].width = max(12, min(max_len, 50))
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
 def build_template_xlsx() -> BytesIO:
     """Build the Excel template and return as BytesIO."""
     wb = Workbook()

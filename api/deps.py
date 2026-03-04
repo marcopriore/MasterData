@@ -89,3 +89,14 @@ def get_user_with_bulk_import(
     if not perms.get("can_bulk_import", False):
         raise HTTPException(status_code=403, detail="Permissão can_bulk_import necessária")
     return current_user
+
+
+def get_user_with_view_database(
+    current_user: UserORM = Depends(get_current_user),
+) -> UserORM:
+    """Require authenticated user with can_view_database permission."""
+    from fastapi import HTTPException
+    perms = current_user.role.permissions if current_user.role else {}
+    if not perms.get("can_view_database", False):
+        raise HTTPException(status_code=403, detail="Permissão can_view_database necessária")
+    return current_user
