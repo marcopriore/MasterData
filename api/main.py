@@ -54,18 +54,106 @@ app.add_middleware(
 
 # Default role definitions (role_type: "sistema" | "etapa")
 _DEFAULT_ROLES: list[dict] = [
-    {"name": "ADMIN", "role_type": "sistema", "permissions": {
-        "can_approve": True, "can_reject": True, "can_edit_pdm": True,
-        "can_manage_users": True, "can_manage_workflows": True, "can_submit_request": True,
-    }},
-    {"name": "SOLICITANTE", "role_type": "sistema", "permissions": {
-        "can_approve": False, "can_reject": False, "can_edit_pdm": False,
-        "can_manage_users": False, "can_manage_workflows": False, "can_submit_request": True,
-    }},
-    {"name": "TRIAGEM", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
-    {"name": "FISCAL", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
-    {"name": "MASTER", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
-    {"name": "MRP", "role_type": "etapa", "permissions": {"can_approve": True, "can_reject": True}},
+    {
+        "name": "ADMIN",
+        "role_type": "sistema",
+        "permissions": {
+            # Solicitações
+            "can_approve": True,
+            "can_reject": True,
+            "can_submit_request": True,
+            # PDM
+            "can_view_pdm": True,
+            "can_edit_pdm": True,
+            # Workflows
+            "can_view_workflows": True,
+            "can_edit_workflows": True,
+            # Administração
+            "can_manage_users": True,
+            "can_view_logs": True,
+            "can_manage_fields": True,
+        },
+    },
+    {
+        "name": "SOLICITANTE",
+        "role_type": "sistema",
+        "permissions": {
+            "can_approve": False,
+            "can_reject": False,
+            "can_submit_request": True,
+            "can_view_pdm": True,
+            "can_edit_pdm": False,
+            "can_view_workflows": False,
+            "can_edit_workflows": False,
+            "can_manage_users": False,
+            "can_view_logs": False,
+            "can_manage_fields": False,
+        },
+    },
+    {
+        "name": "TRIAGEM",
+        "role_type": "etapa",
+        "permissions": {
+            "can_approve": True,
+            "can_reject": True,
+            "can_submit_request": False,
+            "can_view_pdm": True,
+            "can_edit_pdm": False,
+            "can_view_workflows": False,
+            "can_edit_workflows": False,
+            "can_manage_users": False,
+            "can_view_logs": False,
+            "can_manage_fields": False,
+        },
+    },
+    {
+        "name": "FISCAL",
+        "role_type": "etapa",
+        "permissions": {
+            "can_approve": True,
+            "can_reject": True,
+            "can_submit_request": False,
+            "can_view_pdm": False,
+            "can_edit_pdm": False,
+            "can_view_workflows": False,
+            "can_edit_workflows": False,
+            "can_manage_users": False,
+            "can_view_logs": False,
+            "can_manage_fields": False,
+        },
+    },
+    {
+        "name": "MASTER",
+        "role_type": "etapa",
+        "permissions": {
+            "can_approve": True,
+            "can_reject": True,
+            "can_submit_request": True,
+            "can_view_pdm": True,
+            "can_edit_pdm": True,
+            "can_view_workflows": True,
+            "can_edit_workflows": True,
+            "can_manage_users": True,
+            "can_view_logs": True,
+            "can_manage_fields": True,
+        },
+    },
+    {
+        "name": "MRP",
+        "role_type": "etapa",
+        "permissions": {
+            "can_approve": True,
+            "can_reject": True,
+            "can_submit_request": False,
+            "can_view_pdm": False,
+            "can_edit_pdm": False,
+            "can_view_workflows": False,
+            "can_edit_workflows": False,
+            "can_manage_users": False,
+            "can_view_logs": False,
+            "can_manage_fields": False,
+        },
+    },
 ]
 
 _DEFAULT_USERS = [

@@ -21,12 +21,23 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Permissions = {
+  // Solicitações
   can_approve: boolean
   can_reject: boolean
-  can_edit_pdm: boolean
-  can_manage_users: boolean
-  can_manage_workflows: boolean
   can_submit_request: boolean
+
+  // PDM
+  can_view_pdm: boolean
+  can_edit_pdm: boolean
+
+  // Workflows
+  can_view_workflows: boolean
+  can_edit_workflows: boolean
+
+  // Administração
+  can_manage_users: boolean
+  can_view_logs: boolean
+  can_manage_fields: boolean
 }
 
 type Role = {
@@ -37,14 +48,44 @@ type Role = {
   user_count: number
 }
 
-const PERMISSION_LABELS: { key: keyof Permissions; label: string; description: string }[] = [
-  { key: 'can_approve',          label: 'Aprovar',          description: 'Aprovar solicitações de cadastro' },
-  { key: 'can_reject',           label: 'Rejeitar',         description: 'Rejeitar solicitações de cadastro' },
-  { key: 'can_edit_pdm',         label: 'Editar PDM',       description: 'Criar e editar modelos de PDM' },
-  { key: 'can_manage_users',     label: 'Gerir Usuários',   description: 'Criar, editar e desativar usuários' },
-  { key: 'can_manage_workflows', label: 'Gerir Workflows',  description: 'Configurar fluxos de aprovação' },
-  { key: 'can_submit_request',   label: 'Solicitar',        description: 'Abrir novas solicitações de cadastro' },
+const PERMISSION_GROUPS: {
+  title: string
+  items: { key: keyof Permissions; label: string; description: string }[]
+}[] = [
+  {
+    title: 'Solicitações',
+    items: [
+      { key: 'can_approve',        label: 'Aprovar solicitações',   description: 'Aprovar solicitações de cadastro' },
+      { key: 'can_reject',         label: 'Rejeitar solicitações',  description: 'Rejeitar solicitações de cadastro' },
+      { key: 'can_submit_request', label: 'Criar solicitações',     description: 'Abrir novas solicitações de cadastro' },
+    ],
+  },
+  {
+    title: 'Gestão PDM',
+    items: [
+      { key: 'can_view_pdm', label: 'Visualizar PDM', description: 'Visualizar dados e modelos de PDM' },
+      { key: 'can_edit_pdm', label: 'Editar PDM',     description: 'Criar e editar modelos de PDM' },
+    ],
+  },
+  {
+    title: 'Workflows',
+    items: [
+      { key: 'can_view_workflows', label: 'Visualizar Workflows', description: 'Ver configuração dos fluxos de aprovação' },
+      { key: 'can_edit_workflows', label: 'Editar Workflows',     description: 'Configurar fluxos de aprovação' },
+    ],
+  },
+  {
+    title: 'Administração',
+    items: [
+      { key: 'can_manage_users',   label: 'Gerir Usuários',      description: 'Criar, editar e desativar usuários' },
+      { key: 'can_view_logs',      label: 'Visualizar Logs',     description: 'Visualizar log de auditoria do sistema' },
+      { key: 'can_manage_fields',  label: 'Gerir Dicionário',    description: 'Gerir dicionário de campos e metadados' },
+    ],
+  },
 ]
+
+const PERMISSION_LABELS: { key: keyof Permissions; label: string }[] =
+  PERMISSION_GROUPS.flatMap((g) => g.items.map(({ key, label }) => ({ key, label })))
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,10 +105,14 @@ function emptyPermissions(): Permissions {
   return {
     can_approve: false,
     can_reject: false,
-    can_edit_pdm: false,
-    can_manage_users: false,
-    can_manage_workflows: false,
     can_submit_request: false,
+    can_view_pdm: false,
+    can_edit_pdm: false,
+    can_view_workflows: false,
+    can_edit_workflows: false,
+    can_manage_users: false,
+    can_view_logs: false,
+    can_manage_fields: false,
   }
 }
 
@@ -180,18 +225,29 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 
           <div className="space-y-3">
             <p className="text-sm font-semibold text-foreground">Permissões</p>
-            {PERMISSION_LABELS.map(({ key, label, description }) => (
-              <div key={key} className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{label}</p>
-                  <p className="text-xs text-muted-foreground">{description}</p>
+            <div className="space-y-4">
+              {PERMISSION_GROUPS.map((group) => (
+                <div key={group.title} className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.title}
+                  </p>
+                  <div className="space-y-2">
+                    {group.items.map(({ key, label, description }) => (
+                      <div key={key} className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{label}</p>
+                          <p className="text-xs text-muted-foreground">{description}</p>
+                        </div>
+                        <PermToggle
+                          checked={perms[key]}
+                          onChange={() => togglePerm(key)}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <PermToggle
-                  checked={perms[key]}
-                  onChange={() => togglePerm(key)}
-                />
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           <Separator />

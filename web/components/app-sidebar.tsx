@@ -75,9 +75,9 @@ export function AppSidebar() {
 
   const visibleNavLinks = navLinks.filter((item) => {
     if (item.href === '/') return true
-    if (item.href === '/request') return isAdmin || can('can_submit_request')
-    if (item.href === '/governance') return isAdmin || can('can_approve')
-    if (item.href === '/admin-pdm') return isAdmin || can('can_edit_pdm')
+    if (item.href === '/request') return can('can_submit_request')
+    if (item.href === '/governance') return can('can_approve') || can('can_reject')
+    if (item.href === '/admin-pdm') return can('can_view_pdm')
     return true
   })
 
@@ -152,9 +152,10 @@ export function AppSidebar() {
           <CollapsibleContent>
             <div className="mt-1 flex flex-col gap-0.5 pl-4">
 
-              {/* ── Meu Perfil (always) + Workflows (ADMIN only) ── */}
+              {/* ── Meu Perfil (always) + Workflows (by permission) ── */}
               {CONFIG_BASE.filter((item) =>
-                item.href === '/settings/profile' || (item.href === '/settings/workflow' && isAdmin)
+                item.href === '/settings/profile' ||
+                (item.href === '/settings/workflow' && can('can_view_workflows'))
               ).map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(item.href)
                 return (
@@ -176,8 +177,17 @@ export function AppSidebar() {
                 )
               })}
 
-              {/* ── ADMIN items (isAdmin or can_manage_users) ── */}
-              {(isAdmin || can('can_manage_users')) && (
+              {/* ── ADMIN items (driven by granular permissions) ── */}
+              {(() => {
+                const adminItems = CONFIG_ADMIN.filter((item) => {
+                  if (item.href === '/admin/users') return can('can_manage_users')
+                  if (item.href === '/admin/roles') return can('can_manage_users')
+                  if (item.href === '/admin/fields') return can('can_manage_fields')
+                  if (item.href === '/admin/logs') return can('can_view_logs')
+                  return false
+                })
+                if (adminItems.length === 0) return null
+                return (
                 <>
                   {/* Thin divider to visually separate admin items */}
                   <div
@@ -190,9 +200,7 @@ export function AppSidebar() {
                   >
                     Administração
                   </p>
-                  {CONFIG_ADMIN.filter((item) =>
-                    item.href !== '/admin/logs' || isAdmin
-                  ).map((item) => {
+                  {adminItems.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href)
                     return (
                       <Link
@@ -213,7 +221,8 @@ export function AppSidebar() {
                     )
                   })}
                 </>
-              )}
+                )
+              })()}
 
             </div>
           </CollapsibleContent>

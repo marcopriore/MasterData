@@ -26,10 +26,17 @@ import {
 export type RolePermissions = {
   can_approve: boolean
   can_reject: boolean
-  can_edit_pdm: boolean
-  can_manage_users: boolean
-  can_manage_workflows: boolean
   can_submit_request: boolean
+
+  can_view_pdm: boolean
+  can_edit_pdm: boolean
+
+  can_view_workflows: boolean
+  can_edit_workflows: boolean
+
+  can_manage_users: boolean
+  can_view_logs: boolean
+  can_manage_fields: boolean
 }
 
 export type UserPreferences = {

@@ -241,12 +241,23 @@ class FieldDictionaryResponse(BaseModel):
 # ─── Roles ────────────────────────────────────────────────────────────────────
 
 class RolePermissions(BaseModel):
+    # Solicitações
     can_approve: bool = False
     can_reject: bool = False
+    can_submit_request: bool = False
+
+    # PDM
+    can_view_pdm: bool = False
     can_edit_pdm: bool = False
+
+    # Workflows
+    can_view_workflows: bool = False
+    can_edit_workflows: bool = False
+
+    # Administração
     can_manage_users: bool = False
-    can_manage_workflows: bool = False
-    can_submit_request: bool = True
+    can_view_logs: bool = False
+    can_manage_fields: bool = False
 
 
 class RoleCreate(BaseModel):
