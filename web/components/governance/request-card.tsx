@@ -1,5 +1,6 @@
 "use client"
 
+import { useTheme } from "next-themes"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -17,6 +18,8 @@ import {
   Clock,
   ChevronRight,
   Play,
+  User,
+  UserCheck,
 } from "lucide-react"
 
 
@@ -31,6 +34,7 @@ export interface MaterialRequest {
   requestId: string
   materialName: string
   pdmCode: string
+  pdm_id?: number
   category: string
   requester: string
   requesterAvatar: string
@@ -50,17 +54,49 @@ const urgencyConfig = {
   low: {
     label: "Baixa",
     dotClass: "bg-success",
-    badgeClass: "bg-success/10 text-success border-success/20",
+    badgeClass: "bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600",
   },
   medium: {
-    label: "Media",
-    dotClass: "bg-warning",
-    badgeClass: "bg-warning/10 text-warning-foreground border-warning/20",
+    label: "Média",
+    dotClass: "bg-amber-400",
+    badgeClass: "bg-amber-50 text-amber-700 border border-amber-400 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700",
   },
   high: {
     label: "Alta",
     dotClass: "bg-destructive",
-    badgeClass: "bg-destructive/10 text-destructive border-destructive/20",
+    badgeClass: "bg-red-100 text-red-700 border border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700",
+  },
+}
+
+/** Estilos inline para badge de prioridade na visão lista — evita conflito com Tailwind em modo claro */
+const listPriorityStyles: Record<'low' | 'medium' | 'high', { light: React.CSSProperties; dark: React.CSSProperties }> = {
+  high: {
+    light: { backgroundColor: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5' },
+    dark: { backgroundColor: 'rgba(127,29,29,0.3)', color: '#f87171', border: '1px solid #b91c1c' },
+  },
+  medium: {
+    light: { backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d' },
+    dark: { backgroundColor: 'rgba(120,53,15,0.3)', color: '#fbbf24', border: '1px solid #b45309' },
+  },
+  low: {
+    light: { backgroundColor: '#f3f4f6', color: '#4b5563', border: '1px solid #d1d5db' },
+    dark: { backgroundColor: 'rgba(31,41,55,0.8)', color: '#9ca3af', border: '1px solid #4b5563' },
+  },
+}
+
+/** Estilos inline para badge de prioridade no kanban — contraste correto no modo claro */
+const kanbanPriorityStyles: Record<'high' | 'medium' | 'low', { light: React.CSSProperties & { dotColor: string }; dark: React.CSSProperties & { dotColor: string } }> = {
+  high: {
+    light: { backgroundColor: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', dotColor: '#b91c1c' },
+    dark: { backgroundColor: 'rgba(153,27,27,0.3)', color: '#f87171', border: '1px solid #991b1b', dotColor: '#f87171' },
+  },
+  medium: {
+    light: { backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', dotColor: '#b45309' },
+    dark: { backgroundColor: 'rgba(120,53,15,0.3)', color: '#fbbf24', border: '1px solid #78350f', dotColor: '#fbbf24' },
+  },
+  low: {
+    light: { backgroundColor: '#f3f4f6', color: '#4b5563', border: '1px solid #d1d5db', dotColor: '#4b5563' },
+    dark: { backgroundColor: 'rgba(55,65,81,0.5)', color: '#9ca3af', border: '1px solid #374151', dotColor: '#9ca3af' },
   },
 }
 
@@ -86,6 +122,50 @@ interface RequestCardProps {
   onIniciarAtendimentoClick?: () => void
 }
 
+function ListPriorityBadge({ urgency }: { urgency: "low" | "medium" | "high" }) {
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === 'dark' // undefined durante SSR → trata como light
+  const cfg = listPriorityStyles[urgency]
+  const style = isDark ? cfg.dark : cfg.light
+  const label = urgency === 'high' ? 'Alta' : urgency === 'medium' ? 'Média' : 'Baixa'
+  return (
+    <span
+      className="inline-flex px-2 py-0.5 rounded text-[10px] font-medium"
+      style={style}
+    >
+      {label}
+    </span>
+  )
+}
+
+function KanbanPriorityBadge({ urgency }: { urgency: "low" | "medium" | "high" }) {
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === 'dark'
+  const cfg = kanbanPriorityStyles[urgency ?? 'low']
+  const style = isDark ? cfg.dark : cfg.light
+  const label = urgency === 'high' ? 'Alta' : urgency === 'medium' ? 'Média' : 'Baixa'
+  const { dotColor, ...badgeStyle } = style
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium"
+      style={badgeStyle}
+    >
+      <span
+        className="size-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: dotColor }}
+      />
+      {label}
+    </span>
+  )
+}
+
+const enrichmentLabelMap: Record<string, string> = {
+  T: 'Técnico',
+  F: 'Fiscal',
+  M: 'Master',
+  MRP: 'MRP',
+}
+
 function MiniProgress({ label, percent }: { label: string; percent: number }) {
   return (
     <TooltipProvider delayDuration={200}>
@@ -105,7 +185,7 @@ function MiniProgress({ label, percent }: { label: string; percent: number }) {
           </div>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          {label}: {percent}% concluido
+          {enrichmentLabelMap[label] ?? label}: {percent}% concluído
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -122,7 +202,6 @@ export function RequestCard({
   currentUserId = null,
   onIniciarAtendimentoClick,
 }: RequestCardProps) {
-  const urg = urgencyConfig[request.urgency]
   const needsAction =
     request.status === "pending_fiscal" || request.status === "pending_mrp"
   const totalProgress = Math.round(
@@ -181,8 +260,7 @@ export function RequestCard({
   if (variant === "list") {
     return (
       <div className="group flex items-center gap-4 rounded-lg border border-slate-200/60 !bg-white px-4 py-3 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] transition-all hover:border-primary/20 hover:shadow-sm dark:!bg-card dark:border-zinc-400/40 dark:shadow-none">
-        {/* Urgency dot */}
-        <div className={cn("size-2.5 rounded-full shrink-0", urg.dotClass)} />
+        <div className="size-2.5 shrink-0" />
 
         {/* Request ID + Material */}
         <div className="flex flex-col min-w-0 w-40 shrink-0">
@@ -194,10 +272,10 @@ export function RequestCard({
           </span>
         </div>
 
-        {/* Category */}
-        <span className="hidden md:block text-xs text-muted-foreground w-24 shrink-0 truncate">
-          {request.category}
-        </span>
+        {/* Prioridade (urgência) — inline styles para contraste correto no modo claro */}
+        <div className="hidden md:block w-24 shrink-0">
+          <ListPriorityBadge urgency={request.urgency ?? 'low'} />
+        </div>
 
         {/* Requester */}
         <div className="hidden lg:flex items-center gap-2 w-36 shrink-0">
@@ -213,15 +291,40 @@ export function RequestCard({
           {request.date}
         </div>
 
-        {/* Progress bars */}
-        <div className="flex-1 min-w-0 hidden xl:flex items-center gap-3">
-          {request.enrichment.map((step) => (
-            <MiniProgress key={step.key} label={step.label} percent={step.percent} />
-          ))}
+        {/* Progress bars — trilho com hsl(--muted), preenchimento hex para ambos os temas */}
+        <div className="flex-1 min-w-0 hidden lg:grid grid-cols-4 gap-x-4 items-start">
+          {request.enrichment.map((step) => {
+            const p = Math.min(100, step.percent)
+            const fillBg =
+              p === 0
+                ? 'transparent'
+                : p < 50
+                  ? '#60a5fa'
+                  : p < 100
+                    ? '#2563eb'
+                    : '#16a34a'
+            return (
+              <div key={step.key} className="flex flex-col gap-1 min-w-0">
+                <span className="text-xs font-medium text-muted-foreground truncate">
+                  {enrichmentLabelMap[step.label] ?? step.label}
+                </span>
+                <div
+                  className="w-full h-2 overflow-hidden rounded-full"
+                  style={{ backgroundColor: 'var(--muted)' }}
+                >
+                  <div
+                    className="h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${p}%`, backgroundColor: fillBg }}
+                  />
+                </div>
+                <span className="text-xs tabular-nums text-muted-foreground">{step.percent}%</span>
+              </div>
+            )
+          })}
         </div>
 
         {/* Overall progress for smaller screens */}
-        <div className="xl:hidden flex items-center gap-2 w-20 shrink-0">
+        <div className="lg:hidden flex items-center gap-2 w-20 shrink-0">
           <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden dark:bg-slate-700">
             <div
               className="h-full rounded-full bg-slate-600 transition-all duration-500 dark:bg-slate-300"
@@ -292,10 +395,7 @@ export function RequestCard({
                 Inválido
               </Badge>
             )}
-            <Badge variant="outline" className={cn("text-[10px] gap-1", urg.badgeClass)}>
-              <div className={cn("size-1.5 rounded-full shrink-0", urg.dotClass)} />
-              {urg.label}
-            </Badge>
+            <KanbanPriorityBadge urgency={request.urgency ?? 'low'} />
           </div>
         </div>
 
@@ -311,17 +411,23 @@ export function RequestCard({
 
         <Separator style={{ backgroundColor: 'var(--kanban-card-separator)' }} />
 
-        {/* Bottom row: requester avatar + name + date */}
-        <div className="flex items-center justify-between gap-2">
+        {/* Solicitante + Atendente + Data */}
+        <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 min-w-0">
-            <div
-              className="size-5 shrink-0 rounded-full flex items-center justify-center text-[9px] font-bold"
-              style={{ backgroundColor: 'var(--kanban-card-accent)', color: 'var(--kanban-card-bg)' }}
-            >
-              {request.requesterAvatar}
-            </div>
+            <User className="size-3 shrink-0" style={{ color: 'var(--kanban-card-sub)' }} />
+            <span className="text-[10px]" style={{ color: 'var(--kanban-card-sub)' }}>Solicitante:</span>
             <span className="text-[11px] truncate" style={{ color: 'var(--kanban-card-title)' }}>
               {request.requester}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <UserCheck className="size-3 shrink-0" style={{ color: 'var(--kanban-card-sub)' }} />
+            <span className="text-[10px]" style={{ color: 'var(--kanban-card-sub)' }}>Atendente:</span>
+            <span className={cn(
+              "text-[11px] truncate",
+              request.assigned_to_name ? "" : "italic"
+            )} style={{ color: request.assigned_to_name ? 'var(--kanban-card-title)' : 'var(--kanban-card-sub)' }}>
+              {request.assigned_to_name ?? "Sem atendente"}
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0 text-[10px]" style={{ color: 'var(--kanban-card-sub)' }}>

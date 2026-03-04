@@ -18,6 +18,13 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+interface PdmOption {
+  id: number
+  name: string
+  internal_code: string
+  is_active: boolean
+}
+
 interface FiltersBarProps {
   search: string
   onSearchChange: (value: string) => void
@@ -28,6 +35,7 @@ interface FiltersBarProps {
   view: "kanban" | "list"
   onViewChange: (view: "kanban" | "list") => void
   resultCount: number
+  pdms?: PdmOption[]
 }
 
 export function FiltersBar({
@@ -40,6 +48,7 @@ export function FiltersBar({
   view,
   onViewChange,
   resultCount,
+  pdms = [],
 }: FiltersBarProps) {
   const hasFilters = search || category !== "all" || dateRange !== "all"
 
@@ -67,16 +76,17 @@ export function FiltersBar({
         {/* Filters */}
         <div className="flex items-center gap-2">
           <Select value={category} onValueChange={onCategoryChange}>
-            <SelectTrigger className="h-10 w-[150px] uppercase" style={{ backgroundColor: 'var(--filter-input-bg)', color: 'var(--kanban-col-text)', borderColor: 'var(--kanban-col-border)' }}>
+            <SelectTrigger className="h-10 w-[180px] uppercase" style={{ backgroundColor: 'var(--filter-input-bg)', color: 'var(--kanban-col-text)', borderColor: 'var(--kanban-col-border)' }}>
               <SlidersHorizontal className="size-3.5 text-muted-foreground mr-1.5" />
-              <SelectValue placeholder="Categoria" />
+              <SelectValue placeholder="PDM" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
-              <SelectItem value="mechanical">Mechanical</SelectItem>
-              <SelectItem value="electrical">Electrical</SelectItem>
-              <SelectItem value="ppe">PPE</SelectItem>
-              <SelectItem value="office">Office</SelectItem>
+              <SelectItem value="all">Todos os PDMs</SelectItem>
+              {pdms.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name} ({p.internal_code})
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 

@@ -310,13 +310,12 @@ export function KanbanBoard({
                     {col.label}
                   </span>
                   <span
-                    className={cn(
-                      "ml-auto flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-                      items.length > 0 ? `${col.dotClass} text-white` : ""
-                    )}
-                    style={items.length === 0
-                      ? { backgroundColor: 'var(--kanban-col-badge-empty)', color: 'var(--kanban-col-text)' }
-                      : undefined}
+                    className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold border"
+                    style={{
+                      backgroundColor: items.length > 0 ? 'var(--kanban-col-header-bg)' : 'var(--kanban-col-badge-empty)',
+                      color: 'var(--kanban-col-text)',
+                      borderColor: 'var(--kanban-col-border)',
+                    }}
                   >
                     {items.length}
                   </span>

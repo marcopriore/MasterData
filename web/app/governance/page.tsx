@@ -103,6 +103,7 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
     requestId: `REQ-${String(r.id).padStart(4, '0')}`,
     materialName: r.pdm_name ?? '—',
     pdmCode: r.pdm_name ?? '',
+    pdm_id: r.pdm_id,
     category: r.cost_center ?? '',
     requester: r.requester || '—',
     requesterAvatar: initials || '?',
@@ -114,8 +115,9 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
     assigned_to_id: r.assigned_to_id ?? null,
     assigned_to_name: r.assigned_to_name ?? null,
     enrichment: [
-      { label: 'Técnico', key: 'technical', percent: r.values?.length > 0 ? 100 : 0 },
-      { label: 'Fiscal', key: 'fiscal', percent: 0 },
+      { label: 'T', key: 'technical', percent: r.values?.length > 0 ? 100 : 0 },
+      { label: 'F', key: 'fiscal', percent: 0 },
+      { label: 'M', key: 'master', percent: 0 },
       { label: 'MRP', key: 'mrp', percent: 0 },
     ],
     description: r.generated_description ?? '',
@@ -139,7 +141,12 @@ function filterRequests(
     )
   }
   if (category !== 'all') {
-    filtered = filtered.filter((r) => r.category.toLowerCase() === category.toLowerCase())
+    const pdmId = parseInt(category, 10)
+    if (!Number.isNaN(pdmId)) {
+      filtered = filtered.filter((r) => r.pdm_id === pdmId)
+    } else {
+      filtered = filtered.filter((r) => r.category.toLowerCase() === category.toLowerCase())
+    }
   }
   if (dateRange !== 'all') {
     const today = new Date()
@@ -164,6 +171,7 @@ export default function GovernancePage() {
   const { user, accessToken, ready } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
+  const [pdms, setPdms] = useState<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>([])
   const [requests, setRequests] = useState<ApiRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -192,6 +200,12 @@ export default function GovernancePage() {
         }
       })
       .catch(() => setWorkflows([]))
+  }, [])
+
+  useEffect(() => {
+    apiGet<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>('/api/pdm')
+      .then((list) => setPdms((list ?? []).filter((p) => p.is_active)))
+      .catch(() => setPdms([]))
   }, [])
 
   const fetchRequests = useCallback((): Promise<ApiRequest[]> => {
@@ -526,6 +540,7 @@ export default function GovernancePage() {
               view={view}
               onViewChange={setView}
               resultCount={filteredRequests.length}
+              pdms={pdms}
             />
 
             <div className="mt-6 overflow-x-auto pb-2">
@@ -617,42 +632,6 @@ export default function GovernancePage() {
                   <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">{selectedRequest.status}</p>
                 </div>
               </div>
-
-              {/* Justification */}
-              {selectedRequest.justification && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-1">Justificativa</p>
-                  <p className="text-sm text-slate-700 dark:text-muted-foreground whitespace-pre-wrap">{selectedRequest.justification}</p>
-                </div>
-              )}
-
-              {/* Technical attributes */}
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Atributos Técnicos</p>
-              {selectedRequest.values && selectedRequest.values.length > 0 ? (
-                <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-700/50">
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {selectedRequest.values.map((v, idx) => (
-                        <tr
-                          key={idx}
-                          className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40"
-                        >
-                          <td className="w-[45%] bg-slate-50 px-4 py-3 font-medium text-slate-800 dark:bg-muted/30 dark:text-foreground">
-                            {v.label}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
-                            {v.value || '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-600 dark:text-muted-foreground">
-                  Nenhum atributo preenchido
-                </p>
-              )}
 
               {/* Dados Preenchidos (technical_attributes com field_label) — visível para todos */}
               {hasTechnicalAttributes && (
