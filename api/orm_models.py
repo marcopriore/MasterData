@@ -200,6 +200,26 @@ class PDMOrm(Base):
     )
 
 
+class FieldDictionaryORM(Base):
+    """Dicionário de campos SAP MM01 — global, não vinculado ao PDM."""
+    __tablename__ = "field_dictionary"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    field_label: Mapped[str] = mapped_column(String(150), nullable=False)
+    sap_field: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    sap_view: Mapped[str] = mapped_column(String(50), nullable=False)
+    field_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    responsible_role: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class ProductORM(Base):
     __tablename__ = "products"
 

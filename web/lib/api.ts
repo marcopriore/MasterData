@@ -63,18 +63,65 @@ export async function apiPostWithAuth<T, B = unknown>(
 }
 
 export async function apiPut<T, B = unknown>(path: string, body: B): Promise<T> {
+  return apiPutWithAuth(path, body)
+}
+
+/**
+ * PUT with optional JWT (e.g. for admin endpoints).
+ */
+export async function apiPutWithAuth<T, B = unknown>(
+  path: string,
+  body: B,
+  accessToken?: string | null
+): Promise<T> {
+  const headers: HeadersInit = { 'Content-Type': 'application/json' }
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`
+  }
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) {
+    let detail: string | undefined
+    try {
+      const json = await res.json()
+      detail = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json?.detail)
+    } catch { /* ignore */ }
+    throw new Error(detail ?? `HTTP ${res.status}`)
+  }
   return (await res.json()) as T
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const text = await res.text()
+  return (text ? JSON.parse(text) : {}) as T
+}
+
+/**
+ * DELETE with optional JWT (e.g. for admin endpoints).
+ */
+export async function apiDeleteWithAuth<T>(
+  path: string,
+  accessToken?: string | null
+): Promise<T> {
+  const headers: HeadersInit = {}
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'DELETE',
+    headers: Object.keys(headers).length ? headers : undefined,
+  })
+  if (!res.ok) {
+    let detail: string | undefined
+    try {
+      const json = await res.json()
+      detail = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json?.detail)
+    } catch { /* ignore */ }
+    throw new Error(detail ?? `HTTP ${res.status}`)
+  }
   const text = await res.text()
   return (text ? JSON.parse(text) : {}) as T
 }

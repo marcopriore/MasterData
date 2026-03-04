@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight,
   Home, FileText, ShieldCheck, Database,
   Settings, GitBranch, Sun, Moon,
-  UserCircle, Users, ShieldHalf, LogOut,
+  UserCircle, Users, ShieldHalf, BookOpen, LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -36,8 +36,9 @@ const CONFIG_BASE = [
 
 // Items visible only to ADMIN role
 const CONFIG_ADMIN = [
-  { href: '/admin/users', label: 'Gestão de Usuários', icon: Users      },
-  { href: '/admin/roles', label: 'Perfis de Acesso',   icon: ShieldHalf },
+  { href: '/admin/users',  label: 'Gestão de Usuários',     icon: Users      },
+  { href: '/admin/roles',  label: 'Perfis de Acesso',       icon: ShieldHalf },
+  { href: '/admin/fields', label: 'Dicionário de Campos',   icon: BookOpen   },
 ] as const
 
 function NavLink({
@@ -75,7 +76,8 @@ export function AppSidebar() {
   const isInsideConfig =
     pathname.startsWith('/settings/') ||
     pathname.startsWith('/admin/users') ||
-    pathname.startsWith('/admin/roles')
+    pathname.startsWith('/admin/roles') ||
+    pathname.startsWith('/admin/fields')
   const [configExpanded, setConfigExpanded] = useState(isInsideConfig)
 
   useEffect(() => {

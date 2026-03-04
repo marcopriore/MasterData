@@ -190,6 +190,49 @@ class RejectPayload(BaseModel):
     justification: Optional[str] = None
 
 
+# ─── Field Dictionary (SAP MM01) ───────────────────────────────────────────────
+
+class FieldDictionaryCreate(BaseModel):
+    field_name: str
+    field_label: str
+    sap_field: Optional[str] = None
+    sap_view: str
+    field_type: str
+    options: Optional[dict] = None
+    responsible_role: str
+    is_required: bool = False
+    is_active: bool = True
+    display_order: int = 0
+
+
+class FieldDictionaryUpdate(BaseModel):
+    field_name: Optional[str] = None
+    field_label: Optional[str] = None
+    sap_field: Optional[str] = None
+    sap_view: Optional[str] = None
+    field_type: Optional[str] = None
+    options: Optional[dict] = None
+    responsible_role: Optional[str] = None
+    is_required: Optional[bool] = None
+    is_active: Optional[bool] = None
+    display_order: Optional[int] = None
+
+
+class FieldDictionaryResponse(BaseModel):
+    id: int
+    field_name: str
+    field_label: str
+    sap_field: Optional[str] = None
+    sap_view: str
+    field_type: str
+    options: Optional[dict] = None
+    responsible_role: str
+    is_required: bool
+    is_active: bool
+    display_order: int
+    created_at: Optional[str] = None
+
+
 # ─── Roles ────────────────────────────────────────────────────────────────────
 
 class RolePermissions(BaseModel):

@@ -51,10 +51,19 @@ def get_current_user(
 ) -> UserORM:
     """
     Extract and validate user from JWT. Raises HTTP 401 if missing/invalid.
-    Use for endpoints that require authentication.
     """
     from fastapi import HTTPException
     user = get_current_user_optional(authorization=authorization, db=db)
     if user is None:
         raise HTTPException(status_code=401, detail="Autenticação necessária")
     return user
+
+
+def get_admin_user(
+    current_user: UserORM = Depends(get_current_user),
+) -> UserORM:
+    """Require authenticated user with ADMIN role."""
+    from fastapi import HTTPException
+    if not current_user.role or current_user.role.name.upper() != "ADMIN":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao administrador")
+    return current_user

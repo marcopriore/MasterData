@@ -11,7 +11,7 @@ from fastapi import Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone
 
-from deps import get_current_user, get_current_user_optional, get_db
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db
 from orm_models import (
     ProductORM,
     PDMOrm,
@@ -21,6 +21,7 @@ from orm_models import (
     WorkflowHeaderORM,
     RoleORM,
     UserORM,
+    FieldDictionaryORM,
 )
 from security import hash_password
 
@@ -129,6 +130,9 @@ from models import (
     WorkflowHeaderCreate,
     RequestOut,
     MoveToPayload,
+    FieldDictionaryCreate,
+    FieldDictionaryUpdate,
+    FieldDictionaryResponse,
 )
 
 from routes.admin import router as admin_router
@@ -161,6 +165,124 @@ def create_product(payload: ProductCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(row)
     return {"id": row.id, "name": row.name, "description": row.description}
+
+# -------------------------------
+# FIELD DICTIONARY (SAP MM01) — ADMIN only
+def _field_to_dict(r: FieldDictionaryORM) -> dict:
+    return {
+        "id": r.id,
+        "field_name": r.field_name,
+        "field_label": r.field_label,
+        "sap_field": r.sap_field,
+        "sap_view": r.sap_view,
+        "field_type": r.field_type,
+        "options": r.options,
+        "responsible_role": r.responsible_role,
+        "is_required": r.is_required,
+        "is_active": r.is_active,
+        "display_order": r.display_order,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@app.get("/api/fields")
+def list_fields(
+    sap_view: str | None = Query(None, description="Filtrar por visão SAP"),
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_admin_user),
+):
+    q = db.query(FieldDictionaryORM)
+    if sap_view:
+        q = q.filter(FieldDictionaryORM.sap_view == sap_view)
+    rows = q.order_by(FieldDictionaryORM.sap_view, FieldDictionaryORM.display_order, FieldDictionaryORM.id).all()
+    return [_field_to_dict(r) for r in rows]
+
+
+@app.post("/api/fields", status_code=201)
+def create_field(
+    payload: FieldDictionaryCreate,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_admin_user),
+):
+    row = FieldDictionaryORM(
+        field_name=payload.field_name,
+        field_label=payload.field_label,
+        sap_field=payload.sap_field,
+        sap_view=payload.sap_view,
+        field_type=payload.field_type,
+        options=payload.options,
+        responsible_role=payload.responsible_role,
+        is_required=payload.is_required,
+        is_active=payload.is_active,
+        display_order=payload.display_order,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _field_to_dict(row)
+
+
+@app.get("/api/fields/{field_id}")
+def get_field(
+    field_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_admin_user),
+):
+    row = db.query(FieldDictionaryORM).filter(FieldDictionaryORM.id == field_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Campo não encontrado")
+    return _field_to_dict(row)
+
+
+@app.put("/api/fields/{field_id}")
+def update_field(
+    field_id: int,
+    payload: FieldDictionaryUpdate,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_admin_user),
+):
+    row = db.query(FieldDictionaryORM).filter(FieldDictionaryORM.id == field_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Campo não encontrado")
+    if payload.field_name is not None:
+        row.field_name = payload.field_name
+    if payload.field_label is not None:
+        row.field_label = payload.field_label
+    if payload.sap_field is not None:
+        row.sap_field = payload.sap_field
+    if payload.sap_view is not None:
+        row.sap_view = payload.sap_view
+    if payload.field_type is not None:
+        row.field_type = payload.field_type
+    if payload.options is not None:
+        row.options = payload.options
+    if payload.responsible_role is not None:
+        row.responsible_role = payload.responsible_role
+    if payload.is_required is not None:
+        row.is_required = payload.is_required
+    if payload.is_active is not None:
+        row.is_active = payload.is_active
+    if payload.display_order is not None:
+        row.display_order = payload.display_order
+    db.commit()
+    db.refresh(row)
+    return _field_to_dict(row)
+
+
+@app.delete("/api/fields/{field_id}")
+def delete_field(
+    field_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_admin_user),
+):
+    row = db.query(FieldDictionaryORM).filter(FieldDictionaryORM.id == field_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Campo não encontrado")
+    row.is_active = False
+    db.commit()
+    db.refresh(row)
+    return _field_to_dict(row)
+
 
 # -------------------------------
 # LISTAR PDMs

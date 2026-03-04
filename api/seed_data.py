@@ -35,6 +35,7 @@ from orm_models import (
     WorkflowHeaderORM,
     WorkflowConfigORM,
     MaterialRequestORM,
+    FieldDictionaryORM,
 )
 from security import hash_password
 
@@ -423,6 +424,137 @@ def seed_requests(db, pdm: PDMOrm, workflow: WorkflowHeaderORM, user: UserORM) -
     return inserted
 
 
+# ─── Field Dictionary (SAP MM01) ───────────────────────────────────────────────
+
+_FIELD_DICT_ENTRIES: list[dict] = [
+    # DADOS BÁSICOS
+    {"field_name": "descricao_basica", "field_label": "Descrição Básica", "sap_field": "MAKTX",
+     "sap_view": "dados_basicos", "field_type": "text", "options": None, "responsible_role": "TRIAGEM",
+     "is_required": True, "display_order": 1},
+    {"field_name": "grupo_mercadorias", "field_label": "Grupo de Mercadorias", "sap_field": "MATKL",
+     "sap_view": "dados_basicos", "field_type": "select",
+     "options": ["001 - Matéria-prima", "002 - Semimanufaturado", "003 - Produto acabado", "004 - Mercadoria para revenda"],
+     "responsible_role": "TRIAGEM", "is_required": True, "display_order": 2},
+    {"field_name": "unidade_medida_base", "field_label": "Unidade de Medida Base", "sap_field": "MEINS",
+     "sap_view": "dados_basicos", "field_type": "select",
+     "options": ["UN", "KG", "L", "M", "M2", "M3", "PC", "CX"],
+     "responsible_role": "TRIAGEM", "is_required": True, "display_order": 3},
+    {"field_name": "tipo_material", "field_label": "Tipo de Material", "sap_field": "MTART",
+     "sap_view": "dados_basicos", "field_type": "select",
+     "options": ["FERT - Produto acabado", "HALB - Semimanufaturado", "ROH - Matéria-prima", "HAWA - Mercadoria para revenda"],
+     "responsible_role": "TRIAGEM", "is_required": True, "display_order": 4},
+    {"field_name": "peso_bruto", "field_label": "Peso Bruto (kg)", "sap_field": "BRGEW",
+     "sap_view": "dados_basicos", "field_type": "number", "options": None, "responsible_role": "TRIAGEM",
+     "is_required": False, "display_order": 5},
+    {"field_name": "peso_liquido", "field_label": "Peso Líquido (kg)", "sap_field": "NTGEW",
+     "sap_view": "dados_basicos", "field_type": "number", "options": None, "responsible_role": "TRIAGEM",
+     "is_required": False, "display_order": 6},
+    # FISCAL
+    {"field_name": "ncm", "field_label": "NCM", "sap_field": "J_1BNCM", "sap_view": "fiscal",
+     "field_type": "text", "options": None, "responsible_role": "FISCAL", "is_required": True, "display_order": 1},
+    {"field_name": "cfop", "field_label": "CFOP", "sap_field": None, "sap_view": "fiscal",
+     "field_type": "select",
+     "options": ["5101 - Venda de mercadoria", "5102 - Venda de mercadoria", "6101 - Compra para industrialização", "6102 - Compra para revenda"],
+     "responsible_role": "FISCAL", "is_required": True, "display_order": 2},
+    {"field_name": "origem_material", "field_label": "Origem do Material", "sap_field": "J_1BORIGM",
+     "sap_view": "fiscal", "field_type": "select",
+     "options": ["0 - Nacional", "1 - Importado Direto", "2 - Importado Adquirido no Mercado Interno"],
+     "responsible_role": "FISCAL", "is_required": True, "display_order": 3},
+    {"field_name": "cst_ipi", "field_label": "CST IPI", "sap_field": None, "sap_view": "fiscal",
+     "field_type": "select", "options": ["00 - Entrada com crédito", "49 - Outras entradas", "50 - Saída tributada"],
+     "responsible_role": "FISCAL", "is_required": False, "display_order": 4},
+    {"field_name": "cst_pis_cofins", "field_label": "CST PIS/COFINS", "sap_field": None, "sap_view": "fiscal",
+     "field_type": "select", "options": ["01 - Operação Tributável", "02 - Operação Tributável", "49 - Outras Operações de Saída"],
+     "responsible_role": "FISCAL", "is_required": False, "display_order": 5},
+    # COMPRAS
+    {"field_name": "grupo_compras", "field_label": "Grupo de Compras", "sap_field": "EKGRP",
+     "sap_view": "compras", "field_type": "select",
+     "options": ["001 - Compras Nacionais", "002 - Importação", "003 - Serviços"],
+     "responsible_role": "MRP", "is_required": True, "display_order": 1},
+    {"field_name": "prazo_entrega", "field_label": "Prazo de Entrega (dias)", "sap_field": "PLIFZ",
+     "sap_view": "compras", "field_type": "number", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 2},
+    {"field_name": "unidade_medida_pedido", "field_label": "Unidade de Medida Pedido", "sap_field": "BSTME",
+     "sap_view": "compras", "field_type": "select",
+     "options": ["UN", "KG", "L", "M", "CX", "PC"],
+     "responsible_role": "MRP", "is_required": False, "display_order": 3},
+    {"field_name": "tolerancia_entrega", "field_label": "Tolerância de Entrega (%)", "sap_field": "MTVFP",
+     "sap_view": "compras", "field_type": "number", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 4},
+    {"field_name": "fornecedor_preferencial", "field_label": "Fornecedor Preferencial", "sap_field": None,
+     "sap_view": "compras", "field_type": "text", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 5},
+    # MRP
+    {"field_name": "tipo_mrp", "field_label": "Tipo MRP", "sap_field": "DISMM",
+     "sap_view": "mrp", "field_type": "select",
+     "options": ["PD - MRP", "VB - Consumo direto", "ND - Sem planejamento"],
+     "responsible_role": "MRP", "is_required": True, "display_order": 1},
+    {"field_name": "responsavel_mrp", "field_label": "Responsável MRP", "sap_field": "DISPO",
+     "sap_view": "mrp", "field_type": "text", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 2},
+    {"field_name": "estoque_minimo", "field_label": "Estoque Mínimo", "sap_field": "MINBE",
+     "sap_view": "mrp", "field_type": "number", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 3},
+    {"field_name": "tamanho_lote", "field_label": "Tamanho do Lote", "sap_field": "BSTFE",
+     "sap_view": "mrp", "field_type": "number", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 4},
+    {"field_name": "estoque_maximo", "field_label": "Estoque Máximo", "sap_field": "MABST",
+     "sap_view": "mrp", "field_type": "number", "options": None, "responsible_role": "MRP",
+     "is_required": False, "display_order": 5},
+    {"field_name": "perfil_previsao", "field_label": "Perfil de Previsão", "sap_field": "PVRSM",
+     "sap_view": "mrp", "field_type": "select",
+     "options": ["A - Média móvel", "B - Consumo constante", "V - Média com tendência"],
+     "responsible_role": "MRP", "is_required": False, "display_order": 6},
+    # CONTABILIDADE
+    {"field_name": "conta_estoque", "field_label": "Conta de Estoque", "sap_field": None,
+     "sap_view": "contabilidade", "field_type": "text", "options": None, "responsible_role": "MASTER",
+     "is_required": True, "display_order": 1},
+    {"field_name": "centro_lucro", "field_label": "Centro de Lucro", "sap_field": "PRCTR",
+     "sap_view": "contabilidade", "field_type": "text", "options": None, "responsible_role": "MASTER",
+     "is_required": False, "display_order": 2},
+    {"field_name": "grupo_valoracao", "field_label": "Grupo de Valoração", "sap_field": "BKLAS",
+     "sap_view": "contabilidade", "field_type": "select",
+     "options": ["3000 - Matéria-prima", "7900 - Produto acabado", "7920 - Mercadoria para revenda"],
+     "responsible_role": "MASTER", "is_required": True, "display_order": 3},
+    {"field_name": "controle_preco", "field_label": "Controle de Preço", "sap_field": "VPRSV",
+     "sap_view": "contabilidade", "field_type": "select",
+     "options": ["S - Preço padrão", "V - Custo médio móvel", "D - Preço de mercado"],
+     "responsible_role": "MASTER", "is_required": True, "display_order": 4},
+    {"field_name": "preco_padrao", "field_label": "Preço Padrão", "sap_field": "STPRS",
+     "sap_view": "contabilidade", "field_type": "number", "options": None, "responsible_role": "MASTER",
+     "is_required": False, "display_order": 5},
+    # VENDAS
+    {"field_name": "org_vendas", "field_label": "Organização de Vendas", "sap_field": "VKORG",
+     "sap_view": "vendas", "field_type": "select",
+     "options": ["1000 - Organização 1000", "2000 - Organização 2000"],
+     "responsible_role": "MASTER", "is_required": False, "display_order": 1},
+    {"field_name": "canal_distribuicao", "field_label": "Canal de Distribuição", "sap_field": "VTWEG",
+     "sap_view": "vendas", "field_type": "select",
+     "options": ["10 - Varejo", "20 - Atacado", "30 - Exportação"],
+     "responsible_role": "MASTER", "is_required": False, "display_order": 2},
+    {"field_name": "grupo_material", "field_label": "Grupo de Material", "sap_field": "WGBEZ",
+     "sap_view": "vendas", "field_type": "select",
+     "options": ["01 - Produtos acabados", "02 - Materiais de embalagem"],
+     "responsible_role": "MASTER", "is_required": False, "display_order": 3},
+    {"field_name": "unidade_venda", "field_label": "Unidade de Venda", "sap_field": "VRKME",
+     "sap_view": "vendas", "field_type": "select",
+     "options": ["UN", "KG", "CX", "PC"],
+     "responsible_role": "MASTER", "is_required": False, "display_order": 4},
+]
+
+
+def ensure_field_dictionary(db) -> int:
+    """Insere campos do dicionário SAP MM01 se a tabela estiver vazia."""
+    if db.query(FieldDictionaryORM).count() > 0:
+        _skip("Field dictionary")
+        return 0
+    for entry in _FIELD_DICT_ENTRIES:
+        db.add(FieldDictionaryORM(**entry))
+    db.flush()
+    _ok(f"{len(_FIELD_DICT_ENTRIES)} campos do dicionário SAP MM01 inseridos")
+    return len(_FIELD_DICT_ENTRIES)
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -445,6 +577,9 @@ def main() -> None:
 
         print("\n5. Material Requests")
         seed_requests(db, pdm, workflow, admin_user)
+
+        print("\n6. Field Dictionary (SAP MM01)")
+        ensure_field_dictionary(db)
 
         db.commit()
         print("\n=== Seed concluido com sucesso! ===\n")
