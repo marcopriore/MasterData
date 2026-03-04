@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { apiGetWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollText, Loader2, Filter, X } from 'lucide-react'
+import { ScrollText, Loader2, Filter, X, ChevronDown, ChevronUp } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -69,6 +69,96 @@ function formatDateTime(iso: string | null): string {
   })
 }
 
+function hasEventData(data: Record<string, unknown> | null): boolean {
+  if (!data || typeof data !== 'object') return false
+  const keys = Object.keys(data).filter((k) => {
+    const v = data[k]
+    if (v == null) return false
+    if (typeof v === 'object' && !Array.isArray(v)) return Object.keys(v as object).length > 0
+    if (typeof v === 'string') return v.trim() !== ''
+    return true
+  })
+  return keys.length > 0
+}
+
+function formatKey(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function EventDataContent({ data }: { data: Record<string, unknown> }) {
+  const fieldsChanged = data.fields_changed as Record<string, string | { de: string; para: string }> | undefined
+  const justification = data.justification
+  const otherKeys = Object.keys(data).filter(
+    (k) => k !== 'fields_changed' && k !== 'justification'
+  )
+
+  return (
+    <div className="space-y-3 p-4 text-sm">
+      {fieldsChanged && Object.keys(fieldsChanged).length > 0 && (
+        <div>
+          <p className="mb-2 font-semibold text-slate-700 dark:text-foreground">Campos alterados</p>
+          <div className="overflow-hidden rounded border border-slate-200 dark:border-zinc-600">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-100 dark:border-zinc-600 dark:bg-muted/50">
+                  <th className="px-3 py-2 text-left font-medium text-slate-700 dark:text-foreground">Campo</th>
+                  <th className="px-3 py-2 text-left font-medium text-slate-700 dark:text-foreground">Antes</th>
+                  <th className="px-3 py-2 text-left font-medium text-slate-700 dark:text-foreground">Depois</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(fieldsChanged).map(([label, val]) => {
+                  const isDePara = typeof val === 'object' && val !== null && 'de' in val && 'para' in val
+                  const de = isDePara ? String((val as { de: string }).de) : '—'
+                  const para = isDePara ? String((val as { para: string }).para) : String(val)
+                  return (
+                    <tr key={label} className="border-b border-slate-100 last:border-b-0 dark:border-zinc-700/50">
+                      <td className="px-3 py-2 font-medium text-slate-800 dark:text-foreground">{label}</td>
+                      <td className="max-w-[120px] truncate px-3 py-2 text-gray-500 line-through dark:text-muted-foreground">
+                        {de.length > 40 ? `${de.slice(0, 40)}...` : de || '—'}
+                      </td>
+                      <td className="max-w-[160px] truncate px-3 py-2 text-slate-700 dark:text-foreground">
+                        {para.length > 40 ? `${para.slice(0, 40)}...` : para}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {justification != null && justification !== '' && (
+        <div>
+          <p className="mb-1 font-semibold text-slate-700 dark:text-foreground">Justificativa</p>
+          <blockquote className="border-l-2 border-slate-200 pl-3 text-slate-600 dark:border-zinc-600 dark:text-muted-foreground">
+            &quot;{String(justification)}&quot;
+          </blockquote>
+        </div>
+      )}
+      {otherKeys.length > 0 && (
+        <div>
+          <p className="mb-2 font-semibold text-slate-700 dark:text-foreground">Outros detalhes</p>
+          <div className="space-y-1 text-slate-600 dark:text-muted-foreground">
+            {otherKeys.map((k) => {
+              const v = data[k]
+              const display = typeof v === 'object' ? JSON.stringify(v) : String(v ?? '—')
+              return (
+                <div key={k}>
+                  <span className="font-medium text-slate-700 dark:text-foreground">{formatKey(k)}:</span>{' '}
+                  {display.length > 80 ? `${display.slice(0, 80)}...` : display}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -90,6 +180,16 @@ export default function AdminLogsPage() {
   const [appliedUserId, setAppliedUserId] = useState('')
   const [appliedDateFrom, setAppliedDateFrom] = useState('')
   const [appliedDateTo, setAppliedDateTo] = useState('')
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+
+  const toggleExpand = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const fetchLogs = useCallback(() => {
     if (!accessToken) return
@@ -244,41 +344,64 @@ export default function AdminLogsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log) => (
-                    <tr
-                      key={log.id}
-                      className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40"
-                    >
-                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                        {formatDateTime(log.created_at)}
-                      </td>
-                      <td className="px-4 py-3 font-medium">
-                        {log.user_name ?? 'Sistema'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                            CATEGORY_BADGE[log.category] ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700/50 dark:text-slate-300'
+                  {logs.map((log) => {
+                    const expandable = hasEventData(log.event_data)
+                    const isExpanded = expandedIds.has(log.id)
+                    return (
+                      <React.Fragment key={log.id}>
+                        <tr
+                          key={log.id}
+                          className={`border-b border-slate-200 dark:border-zinc-700/40 ${
+                            expandable ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-muted/30' : ''
                           }`}
+                          onClick={() => expandable && toggleExpand(log.id)}
                         >
-                          {log.category}
-                        </span>
-                      </td>
-                      <td className="font-mono text-xs px-4 py-3">{log.action}</td>
-                      <td className="max-w-[320px] px-4 py-3">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="block truncate cursor-default">
-                              {log.description || '—'}
+                          <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                            {formatDateTime(log.created_at)}
+                          </td>
+                          <td className="px-4 py-3 font-medium">
+                            {log.user_name ?? 'Sistema'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                CATEGORY_BADGE[log.category] ?? 'bg-slate-100 text-slate-700 dark:bg-slate-700/50 dark:text-slate-300'
+                              }`}
+                            >
+                              {log.category}
                             </span>
-                          </TooltipTrigger>
-                          <TooltipContent side="left" className="max-w-md">
-                            {log.description || '—'}
-                          </TooltipContent>
-                        </Tooltip>
-                      </td>
-                    </tr>
-                  ))}
+                          </td>
+                          <td className="font-mono text-xs px-4 py-3">{log.action}</td>
+                          <td className="max-w-[320px] px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="min-w-0 flex-1 truncate cursor-default">
+                                    {log.description || '—'}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="left" className="max-w-md">
+                                  {log.description || '—'}
+                                </TooltipContent>
+                              </Tooltip>
+                              {expandable && (
+                                <span className="shrink-0 text-muted-foreground">
+                                  {isExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded && log.event_data && (
+                          <tr key={`${log.id}-exp`} className="border-b border-slate-200 dark:border-zinc-700/40">
+                            <td colSpan={5} className="bg-gray-50 p-0 dark:bg-muted/20">
+                              <EventDataContent data={log.event_data} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </TooltipProvider>
