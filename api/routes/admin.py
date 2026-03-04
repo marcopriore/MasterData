@@ -33,9 +33,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 
-from deps import get_db
-from orm_models import RoleORM, UserORM
+from deps import get_db, get_admin_user, get_current_user_optional
+from orm_models import RoleORM, UserORM, SystemLogORM
 from security import create_access_token, hash_password, verify_password
+from audit import log_system_event
 from models import (
     LoginRequest,
     RoleCreate,
@@ -137,7 +138,11 @@ def get_role(role_id: int, db: Session = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
     summary="Cria um novo perfil de acesso",
 )
-def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
+def create_role(
+    payload: RoleCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
+):
     """
     O `name` é automaticamente convertido para maiúsculas.
     As `permissions` são flags booleanas; omita para usar os padrões (todos False
@@ -157,6 +162,11 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     db.add(row)
     db.commit()
     db.refresh(row)
+    creator = current_user.name if current_user else "Sistema"
+    log_system_event(
+        db, current_user.id if current_user else None, "roles", "role_created",
+        f"Perfil '{name_upper}' criado por {creator}",
+    )
     return _role_to_dict(_load_role(row.id, db))
 
 
@@ -164,7 +174,12 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     "/roles/{role_id}",
     summary="Atualiza nome e/ou permissões de um perfil",
 )
-def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)):
+def update_role(
+    role_id: int,
+    payload: RoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
+):
     row = _load_role(role_id, db)
     if payload.role_type is not None:
         row.role_type = payload.role_type
@@ -185,6 +200,11 @@ def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)
         row.permissions = payload.permissions.model_dump()
     db.commit()
     db.refresh(row)
+    updater = current_user.name if current_user else "Sistema"
+    log_system_event(
+        db, current_user.id if current_user else None, "roles", "role_updated",
+        f"Perfil #{role_id} ({row.name}) atualizado por {updater}",
+    )
     return _role_to_dict(_load_role(row.id, db))
 
 
@@ -253,7 +273,11 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
     summary="Cria novo usuário com senha criptografada",
 )
-def create_user(payload: UserCreate, db: Session = Depends(get_db)):
+def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
+):
     """
     A senha é recebida em texto plano e armazenada como hash bcrypt.
     O campo `role_id` deve referenciar um perfil existente.
@@ -279,6 +303,11 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     db.add(row)
     db.commit()
     db.refresh(row)
+    creator = current_user.name if current_user else "Sistema"
+    log_system_event(
+        db, current_user.id if current_user else None, "users", "user_created",
+        f"Usuário {row.email} criado por {creator}",
+    )
     return _user_to_dict(_load_user(row.id, db))
 
 
@@ -286,7 +315,12 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
     "/users/{user_id}",
     summary="Atualiza dados e perfil do usuário (substituição completa)",
 )
-def replace_user(user_id: int, payload: UserCreate, db: Session = Depends(get_db)):
+def replace_user(
+    user_id: int,
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
+):
     """
     Substitui todos os campos editáveis do usuário.
     Para atualizações parciais use `PATCH /admin/users/{user_id}`.
@@ -317,6 +351,11 @@ def replace_user(user_id: int, payload: UserCreate, db: Session = Depends(get_db
     row.preferences = payload.preferences.model_dump()
     db.commit()
     db.refresh(row)
+    updater = current_user.name if current_user else "Sistema"
+    log_system_event(
+        db, current_user.id if current_user else None, "users", "user_updated",
+        f"Usuário #{user_id} ({row.email}) atualizado por {updater}",
+    )
     return _user_to_dict(_load_user(row.id, db))
 
 
@@ -324,7 +363,12 @@ def replace_user(user_id: int, payload: UserCreate, db: Session = Depends(get_db
     "/users/{user_id}",
     summary="Atualização parcial de dados e/ou perfil",
 )
-def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)):
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: Optional[UserORM] = Depends(get_current_user_optional),
+):
     """
     Todos os campos são opcionais. Apenas os campos enviados são alterados.
     """
@@ -361,6 +405,11 @@ def update_user(user_id: int, payload: UserUpdate, db: Session = Depends(get_db)
 
     db.commit()
     db.refresh(row)
+    updater = current_user.name if current_user else "Sistema"
+    log_system_event(
+        db, current_user.id if current_user else None, "users", "user_updated",
+        f"Usuário #{user_id} ({row.email}) atualizado por {updater}",
+    )
     return _user_to_dict(_load_user(row.id, db))
 
 
@@ -449,6 +498,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         .first()
     )
     if not row or not verify_password(payload.password, row.hashed_password):
+        log_system_event(
+            db, None, "auth", "login_failed",
+            f"Tentativa de login falhou para {payload.email}",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="E-mail ou senha inválidos",
@@ -461,8 +514,72 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     role_name = row.role.name if row.role else "SOLICITANTE"
     role_type = getattr(row.role, "role_type", "sistema") if row.role else "sistema"
     permissions = row.role.permissions if row.role else {}
+    log_system_event(
+        db, row.id, "auth", "login",
+        f"Login realizado com sucesso: {row.email}",
+    )
     return {
         "ok": True,
         "user": _user_to_dict(row),
         "access_token": create_access_token(row.id, role_name, role_type, permissions),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SYSTEM LOGS (ADMIN only)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/logs",
+    summary="Lista logs do sistema (apenas ADMIN)",
+)
+def list_system_logs(
+    category: Optional[str] = Query(None, description="Filtrar por categoria"),
+    user_id: Optional[int] = Query(None, description="Filtrar por user_id"),
+    from_date: Optional[str] = Query(None, alias="from", description="Data inicial ISO (ex: 2026-01-01)"),
+    to_date: Optional[str] = Query(None, alias="to", description="Data final ISO (ex: 2026-03-01)"),
+    page: int = Query(1, ge=1, description="Página"),
+    limit: int = Query(50, ge=1, le=200, description="Itens por página"),
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_admin_user),
+):
+    """Retorna lista paginada de logs do sistema."""
+    q = db.query(SystemLogORM).options(joinedload(SystemLogORM.user))
+    if category:
+        q = q.filter(SystemLogORM.category == category)
+    if user_id is not None:
+        q = q.filter(SystemLogORM.user_id == user_id)
+    if from_date:
+        try:
+            from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            q = q.filter(SystemLogORM.created_at >= from_dt)
+        except ValueError:
+            pass
+    if to_date:
+        try:
+            to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            q = q.filter(SystemLogORM.created_at <= to_dt)
+        except ValueError:
+            pass
+    q = q.order_by(SystemLogORM.created_at.desc())
+    total = q.count()
+    offset = (page - 1) * limit
+    rows = q.offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "items": [
+            {
+                "id": r.id,
+                "user_name": r.user.name if r.user else None,
+                "category": r.category,
+                "action": r.action,
+                "description": r.description,
+                "event_data": r.event_data,
+                "ip_address": r.ip_address,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ],
     }

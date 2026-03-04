@@ -20,9 +20,20 @@ import {
 } from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
-import { ChevronLeft, FilePlus, Check, X, Save } from 'lucide-react'
+import { ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+type HistoryEvent = {
+  id: number
+  event_type: string
+  message: string
+  event_data: Record<string, unknown> | null
+  stage: string | null
+  created_at: string | null
+  user_name: string | null
+}
 
 type MyField = {
   id: number
@@ -166,6 +177,9 @@ export default function GovernancePage() {
   const [attributeValues, setAttributeValues] = useState<Record<string, string>>({})
   const [saveLoading, setSaveLoading] = useState(false)
   const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set())
+  const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyFetched, setHistoryFetched] = useState(false)
 
   useEffect(() => {
     apiGet<WorkflowHeader[]>('/api/workflows')
@@ -243,6 +257,8 @@ export default function GovernancePage() {
 
   useEffect(() => {
     if (!detailsOpen || !selectedRequest || !accessToken) return
+    setHistoryFetched(false)
+    setHistoryEvents([])
     setInvalidFields(new Set())
     const attrs = selectedRequest.technical_attributes ?? {}
     setAttributeValues(
@@ -335,7 +351,7 @@ export default function GovernancePage() {
 
   const handleSalvar = async () => {
     if (!selectedRequest || !accessToken) return
-    if (!validateRequiredFields()) return
+    setInvalidFields(new Set())
     setSaveLoading(true)
     try {
       await apiPatchWithAuth(
@@ -389,6 +405,18 @@ export default function GovernancePage() {
       setApproveRejectLoading(false)
     }
   }
+
+  const fetchHistory = useCallback(() => {
+    if (!selectedRequest || !accessToken || historyFetched || historyLoading) return
+    setHistoryLoading(true)
+    apiGetWithAuth<HistoryEvent[]>(`/api/requests/${selectedRequest.id}/history`, accessToken)
+      .then((data) => {
+        setHistoryEvents(data ?? [])
+        setHistoryFetched(true)
+      })
+      .catch(() => setHistoryEvents([]))
+      .finally(() => setHistoryLoading(false))
+  }, [selectedRequest, accessToken, historyFetched, historyLoading])
 
   const handleRejectConfirm = async () => {
     if (!selectedRequest) return
@@ -517,7 +545,20 @@ export default function GovernancePage() {
           </DialogHeader>
           {selectedRequest && (
             <>
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4">
+            <Tabs
+              key={selectedRequest.id}
+              defaultValue="detalhes"
+              className="flex flex-1 min-h-0 flex-col overflow-hidden"
+              onValueChange={(v) => { if (v === 'historico') fetchHistory() }}
+            >
+              <div className="border-b border-slate-200 px-6 dark:border-zinc-700/50">
+                <TabsList className="h-9">
+                  <TabsTrigger value="detalhes">Detalhes</TabsTrigger>
+                  <TabsTrigger value="historico">Histórico</TabsTrigger>
+                </TabsList>
+              </div>
+              <TabsContent value="detalhes" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+              <div className="px-6 py-4 space-y-4">
               {/* Generated description */}
               {selectedRequest.generated_description && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-zinc-700/50 dark:bg-muted/20">
@@ -691,6 +732,111 @@ export default function GovernancePage() {
               )}
 
               </div>
+              </TabsContent>
+              <TabsContent value="historico" className="mt-0 flex-1 min-h-0 overflow-y-auto">
+                <div className="px-6 py-4">
+                  {historyLoading ? (
+                    <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                      <Loader2 className="size-5 animate-spin" />
+                      <span>Carregando histórico...</span>
+                    </div>
+                  ) : historyEvents.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-muted-foreground">
+                      Nenhum evento registrado.
+                    </p>
+                  ) : (
+                    <div className="relative space-y-0">
+                      {historyEvents.map((evt, idx) => {
+                        const isLast = idx === historyEvents.length - 1
+                        const iconMap: Record<string, { icon: string; color: string }> = {
+                          created: { icon: '📋', color: 'text-blue-600 dark:text-blue-400' },
+                          assigned: { icon: '▶', color: 'text-slate-600 dark:text-slate-400' },
+                          fields_saved: { icon: '💾', color: 'text-amber-600 dark:text-amber-400' },
+                          approved: { icon: '✅', color: 'text-green-600 dark:text-green-400' },
+                          rejected: { icon: '❌', color: 'text-red-600 dark:text-red-400' },
+                          status_changed: { icon: '🔄', color: 'text-violet-600 dark:text-violet-400' },
+                          action: { icon: '⚡', color: 'text-orange-600 dark:text-orange-400' },
+                        }
+                        const cfg = iconMap[evt.event_type] ?? { icon: '•', color: 'text-slate-500' }
+                        const justification = evt.event_data && typeof evt.event_data === 'object' && 'justification' in evt.event_data
+                          ? String(evt.event_data.justification)
+                          : null
+                        const fieldsChanged = evt.event_data && typeof evt.event_data === 'object' && 'fields_changed' in evt.event_data && evt.event_data.fields_changed
+                          ? (evt.event_data.fields_changed as Record<string, string | { de: string; para: string }>)
+                          : null
+                        let dateStr = ''
+                        if (evt.created_at) {
+                          const d = new Date(evt.created_at)
+                          dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+                            d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                        }
+                        return (
+                          <div key={evt.id} className="relative flex gap-4 pb-6">
+                            {!isLast && (
+                              <div
+                                className="absolute left-[11px] top-6 bottom-0 w-px bg-slate-200 dark:bg-zinc-600"
+                                aria-hidden
+                              />
+                            )}
+                            <div className={`relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full bg-background text-base ${cfg.color}`}>
+                              {cfg.icon}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                                <div>
+                                  <p className="font-semibold text-slate-900 dark:text-foreground">
+                                    {evt.message}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    por {evt.user_name ?? 'Sistema'}
+                                    {evt.stage && `  •  Etapa: ${evt.stage}`}
+                                  </p>
+                                  {justification && (
+                                    <blockquote className="mt-2 border-l-2 border-slate-200 pl-3 text-sm text-muted-foreground dark:border-zinc-600">
+                                      {justification}
+                                    </blockquote>
+                                  )}
+                                  {fieldsChanged && Object.keys(fieldsChanged).length > 0 && (
+                                    <div className="mt-2 rounded-lg bg-gray-50 p-2 text-sm dark:bg-muted/50">
+                                      {Object.entries(fieldsChanged).map(([label, val]) => {
+                                        const isDePara = typeof val === 'object' && val !== null && 'de' in val && 'para' in val
+                                        return (
+                                          <div key={label} className="flex gap-2 text-xs">
+                                            <span className="min-w-[120px] shrink-0 font-medium text-slate-800 dark:text-foreground">{label}</span>
+                                            {isDePara ? (
+                                              <>
+                                                <span className="max-w-[100px] truncate text-gray-400 line-through dark:text-muted-foreground">
+                                                  {String(val.de).length > 40 ? `${String(val.de).slice(0, 40)}...` : val.de}
+                                                </span>
+                                                <span className="shrink-0 text-gray-400 dark:text-muted-foreground">→</span>
+                                                <span className="max-w-[120px] truncate text-gray-800 dark:text-foreground">
+                                                  {String(val.para).length > 40 ? `${String(val.para).slice(0, 40)}...` : val.para}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <span className="text-slate-600 dark:text-muted-foreground">
+                                                {String(val).length > 40 ? `${String(val).slice(0, 40)}...` : val}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="shrink-0 text-xs text-muted-foreground">
+                                  {dateStr}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
 
               <DialogFooter className="sticky bottom-0 flex-col items-stretch gap-2 border-t border-slate-200 bg-white px-6 py-4 pt-2 dark:border-zinc-700/50 dark:bg-card">
                 {showActionButtons && isAssignedToMe && (

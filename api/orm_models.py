@@ -146,6 +146,52 @@ class MaterialRequestORM(Base):
     request_attachments: Mapped[list["RequestAttachmentORM"]] = relationship(
         "RequestAttachmentORM", back_populates="request", cascade="all, delete-orphan"
     )
+    history: Mapped[list["RequestHistoryORM"]] = relationship(
+        "RequestHistoryORM", back_populates="request", order_by="RequestHistoryORM.created_at"
+    )
+
+
+class RequestHistoryORM(Base):
+    """Histórico de eventos por solicitação."""
+    __tablename__ = "request_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("material_requests.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    event_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    stage: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    request: Mapped["MaterialRequestORM"] = relationship("MaterialRequestORM", back_populates="history")
+    user: Mapped[Optional["UserORM"]] = relationship("UserORM", foreign_keys=[user_id])
+
+
+class SystemLogORM(Base):
+    """Log de auditoria geral do sistema."""
+    __tablename__ = "system_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    event_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    user: Mapped[Optional["UserORM"]] = relationship("UserORM", foreign_keys=[user_id])
 
 
 class RequestValueORM(Base):

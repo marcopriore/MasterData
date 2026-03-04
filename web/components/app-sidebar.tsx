@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight,
   Home, FileText, ShieldCheck, Database,
   Settings, GitBranch, Sun, Moon,
-  UserCircle, Users, ShieldHalf, BookOpen, LogOut,
+  UserCircle, Users, ShieldHalf, BookOpen, LogOut, ScrollText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ const CONFIG_ADMIN = [
   { href: '/admin/users',  label: 'Gestão de Usuários',     icon: Users      },
   { href: '/admin/roles',  label: 'Perfis de Acesso',       icon: ShieldHalf },
   { href: '/admin/fields', label: 'Dicionário de Campos',   icon: BookOpen   },
+  { href: '/admin/logs',   label: 'Log do Sistema',         icon: ScrollText },
 ] as const
 
 function NavLink({
@@ -85,7 +86,8 @@ export function AppSidebar() {
     pathname.startsWith('/settings/') ||
     pathname.startsWith('/admin/users') ||
     pathname.startsWith('/admin/roles') ||
-    pathname.startsWith('/admin/fields')
+    pathname.startsWith('/admin/fields') ||
+    pathname.startsWith('/admin/logs')
   const [configExpanded, setConfigExpanded] = useState(isInsideConfig)
 
   useEffect(() => {
@@ -188,7 +190,9 @@ export function AppSidebar() {
                   >
                     Administração
                   </p>
-                  {CONFIG_ADMIN.map((item) => {
+                  {CONFIG_ADMIN.filter((item) =>
+                    item.href !== '/admin/logs' || isAdmin
+                  ).map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href)
                     return (
                       <Link

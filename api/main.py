@@ -17,12 +17,14 @@ from orm_models import (
     PDMOrm,
     MaterialRequestORM,
     RequestValueORM,
+    RequestHistoryORM,
     WorkflowConfigORM,
     WorkflowHeaderORM,
     RoleORM,
     UserORM,
     FieldDictionaryORM,
 )
+from audit import log_request_event, log_system_event
 from security import hash_password
 
 app = FastAPI(title="MasterData API", version="1.8.0")
@@ -242,7 +244,7 @@ def list_field_labels(
 def create_field(
     payload: FieldDictionaryCreate,
     db: Session = Depends(get_db),
-    _: UserORM = Depends(get_admin_user),
+    current_user: UserORM = Depends(get_admin_user),
 ):
     row = FieldDictionaryORM(
         field_name=payload.field_name,
@@ -259,6 +261,10 @@ def create_field(
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_system_event(
+        db, current_user.id, "fields", "field_created",
+        f"Campo '{payload.field_label}' ({payload.field_name}) criado por {current_user.name}",
+    )
     return _field_to_dict(row)
 
 
@@ -279,7 +285,7 @@ def update_field(
     field_id: int,
     payload: FieldDictionaryUpdate,
     db: Session = Depends(get_db),
-    _: UserORM = Depends(get_admin_user),
+    current_user: UserORM = Depends(get_admin_user),
 ):
     row = db.query(FieldDictionaryORM).filter(FieldDictionaryORM.id == field_id).first()
     if not row:
@@ -306,6 +312,10 @@ def update_field(
         row.display_order = payload.display_order
     db.commit()
     db.refresh(row)
+    log_system_event(
+        db, current_user.id, "fields", "field_updated",
+        f"Campo #{field_id} ({row.field_label}) atualizado por {current_user.name}",
+    )
     return _field_to_dict(row)
 
 
@@ -313,7 +323,7 @@ def update_field(
 def delete_field(
     field_id: int,
     db: Session = Depends(get_db),
-    _: UserORM = Depends(get_admin_user),
+    current_user: UserORM = Depends(get_admin_user),
 ):
     row = db.query(FieldDictionaryORM).filter(FieldDictionaryORM.id == field_id).first()
     if not row:
@@ -321,6 +331,10 @@ def delete_field(
     row.is_active = False
     db.commit()
     db.refresh(row)
+    log_system_event(
+        db, current_user.id, "fields", "field_deactivated",
+        f"Campo #{field_id} ({row.field_label}) desativado por {current_user.name}",
+    )
     return _field_to_dict(row)
 
 
@@ -478,6 +492,39 @@ def list_requests(
 
 
 # -------------------------------
+# HISTÓRICO DA SOLICITAÇÃO
+@app.get("/api/requests/{request_id}/history")
+def get_request_history(
+    request_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
+    """Retorna o histórico de eventos da solicitação, ordenado por data."""
+    req = db.query(MaterialRequestORM).filter(MaterialRequestORM.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+    rows = (
+        db.query(RequestHistoryORM)
+        .options(joinedload(RequestHistoryORM.user))
+        .filter(RequestHistoryORM.request_id == request_id)
+        .order_by(RequestHistoryORM.created_at.asc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "event_type": r.event_type,
+            "message": r.message,
+            "event_data": r.event_data,
+            "stage": r.stage,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "user_name": r.user.name if r.user else None,
+        }
+        for r in rows
+    ]
+
+
+# -------------------------------
 # INICIAR ATENDIMENTO (atribui a solicitação ao usuário logado)
 @app.patch("/api/requests/{request_id}/assign")
 def assign_request(
@@ -513,6 +560,15 @@ def assign_request(
     row.assigned_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
+    log_request_event(
+        db, row.id, current_user.id, "assigned",
+        f"Atendimento iniciado por {current_user.name}",
+        stage=row.status,
+    )
+    log_system_event(
+        db, current_user.id, "requests", "request_assigned",
+        f"Solicitação #{row.id} atribuída a {current_user.name}",
+    )
     return _request_to_dict(row)
 
 
@@ -546,8 +602,10 @@ def update_request_attributes(
             status_code=403,
             detail="Apenas o atendente atribuído pode salvar os campos.",
         )
-    merged = dict(row.technical_attributes or {})
-    for k, v in (payload.attributes or {}).items():
+    previous_attributes = dict(row.technical_attributes or {})
+    new_attributes = payload.attributes or {}
+    merged = dict(previous_attributes)
+    for k, v in new_attributes.items():
         if v is not None and v != "":
             merged[k] = str(v)
         elif k in merged:
@@ -555,6 +613,37 @@ def update_request_attributes(
     row.technical_attributes = merged if merged else None
     db.commit()
     db.refresh(row)
+
+    fields_changed = {}
+    for field_name, new_value in new_attributes.items():
+        old_value = previous_attributes.get(field_name)
+        if str(old_value or "") == str(new_value or ""):
+            continue
+        field_def = (
+            db.query(FieldDictionaryORM)
+            .filter(
+                FieldDictionaryORM.field_name == field_name,
+                FieldDictionaryORM.is_active == True,
+            )
+            .first()
+        )
+        label = field_def.field_label if field_def else field_name
+        fields_changed[label] = {
+            "de": old_value if old_value is not None else "—",
+            "para": new_value if new_value is not None else "—",
+        }
+    if fields_changed:
+        log_request_event(
+            db, row.id, current_user.id, "fields_saved",
+            f"Campos atualizados por {current_user.name}",
+            event_data={"fields_changed": fields_changed},
+            stage=row.status,
+        )
+        log_system_event(
+            db, current_user.id, "requests", "request_fields_saved",
+            f"Campos da solicitação #{row.id} salvos por {current_user.name}",
+            event_data={"fields_changed": fields_changed},
+        )
     return _request_to_dict(row)
 
 
@@ -630,6 +719,17 @@ def create_request(
 
     db.commit()
     db.refresh(row)
+
+    requester_name = current_user.name if current_user else payload.requester
+    log_request_event(
+        db, row.id, current_user.id if current_user else None, "created",
+        f"Solicitação criada por {requester_name}",
+        stage=initial_status,
+    )
+    log_system_event(
+        db, current_user.id if current_user else None, "requests", "request_created",
+        f"Solicitação #{row.id} criada por {requester_name}",
+    )
 
     # Eager-load relationships for the response
     row = (
@@ -707,6 +807,7 @@ def update_request_status(
     request_id: int,
     payload: StatusUpdatePayload | None = Body(None),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
 ):
     row = (
         db.query(MaterialRequestORM)
@@ -728,9 +829,32 @@ def update_request_status(
             status_code=400,
             detail=f"Request already at final status: {row.status}",
         )
+    from_status = row.status
     row.status = next_status
     db.commit()
     db.refresh(row)
+
+    next_step = (
+        db.query(WorkflowConfigORM)
+        .filter(
+            WorkflowConfigORM.workflow_id == row.workflow_id,
+            WorkflowConfigORM.status_key == next_status,
+        )
+        .first()
+    )
+    next_step_label = next_step.step_name if next_step else next_status
+    approver_name = current_user.name if current_user else "Sistema"
+    log_request_event(
+        db, row.id, current_user.id if current_user else None, "approved",
+        f"Aprovado por {approver_name} — avançou para {next_step_label}",
+        event_data={"from_stage": from_status, "to_stage": next_status},
+        stage=next_status,
+    )
+    log_system_event(
+        db, current_user.id if current_user else None, "requests", "request_approved",
+        f"Solicitação #{row.id} aprovada por {approver_name}",
+        event_data={"from_stage": from_status, "to_stage": next_status},
+    )
     return _request_to_dict(row)
 
 
@@ -741,6 +865,7 @@ def reject_request(
     request_id: int,
     payload: RejectPayload | None = Body(None),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
 ):
     row = (
         db.query(MaterialRequestORM)
@@ -757,6 +882,20 @@ def reject_request(
     row.status = "Rejected"
     db.commit()
     db.refresh(row)
+
+    justification = (payload.justification or "") if payload else ""
+    rejector_name = current_user.name if current_user else "Sistema"
+    log_request_event(
+        db, row.id, current_user.id if current_user else None, "rejected",
+        f"Rejeitado por {rejector_name}",
+        event_data={"justification": justification},
+        stage="Rejected",
+    )
+    log_system_event(
+        db, current_user.id if current_user else None, "requests", "request_rejected",
+        f"Solicitação #{row.id} rejeitada por {rejector_name}",
+        event_data={"justification": justification},
+    )
     return _request_to_dict(row)
 
 
@@ -767,6 +906,7 @@ def move_request_to_status(
     request_id: int,
     payload: MoveToPayload,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
 ):
     """
     Set the request status to any valid status_key that belongs to its workflow.
@@ -798,9 +938,22 @@ def move_request_to_status(
             detail=f"'{payload.status_key}' is not a valid status for workflow {row.workflow_id}",
         )
 
+    from_status = row.status
     row.status = payload.status_key
     db.commit()
     db.refresh(row)
+    mover_name = current_user.name if current_user else "Sistema"
+    log_request_event(
+        db, row.id, current_user.id if current_user else None, "status_changed",
+        f"Status alterado por {mover_name}: {from_status} → {payload.status_key}",
+        event_data={"from_stage": from_status, "to_stage": payload.status_key},
+        stage=payload.status_key,
+    )
+    log_system_event(
+        db, current_user.id if current_user else None, "requests", "request_status_changed",
+        f"Solicitação #{row.id} movida por {mover_name} para {payload.status_key}",
+        event_data={"from_stage": from_status, "to_stage": payload.status_key},
+    )
     return _request_to_dict(row)
 
 
