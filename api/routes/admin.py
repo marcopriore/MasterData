@@ -34,10 +34,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
-from deps import get_db, get_admin_user, get_current_user_optional, get_user_with_manage_users
+from deps import get_db, get_admin_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs
 from orm_models import RoleORM, UserORM, SystemLogORM
 from security import create_access_token, hash_password, verify_password
 from audit import log_system_event
+from bulk_import import HEADER_FILL, HEADER_FONT
 from bulk_import_users import (
     build_user_template_xlsx,
     build_user_export_xlsx,
@@ -685,6 +686,99 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SYSTEM LOGS (ADMIN only)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+LOG_EXPORT_HEADERS = ["Data/Hora", "Usuário", "Categoria", "Ação", "Detalhe", "IP"]
+
+
+def _build_logs_export_xlsx(rows: list) -> bytes:
+    """Build Excel with logs. Uses HEADER_FILL, HEADER_FONT from bulk_import."""
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Logs do Sistema"
+
+    for col_idx, header in enumerate(LOG_EXPORT_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for row_idx, r in enumerate(rows, start=2):
+        ws.cell(row=row_idx, column=1, value=r.get("created_at") or "")
+        ws.cell(row=row_idx, column=2, value=r.get("user_name") or "Sistema")
+        ws.cell(row=row_idx, column=3, value=r.get("category") or "")
+        ws.cell(row=row_idx, column=4, value=r.get("action") or "")
+        detail_cell = ws.cell(row=row_idx, column=5, value=r.get("description") or "")
+        detail_cell.alignment = Alignment(wrap_text=True)
+        ws.cell(row=row_idx, column=6, value=r.get("ip_address") or "")
+
+    widths = [18, 20, 12, 18, 50, 16]
+    for col_idx, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = w
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+@router.get(
+    "/logs/export",
+    summary="Exportar logs do sistema para Excel",
+)
+def export_logs(
+    category: Optional[str] = Query(None, description="Filtrar por categoria"),
+    user_id: Optional[int] = Query(None, description="Filtrar por user_id"),
+    from_date: Optional[str] = Query(None, alias="from", description="Data inicial ISO"),
+    to_date: Optional[str] = Query(None, alias="to", description="Data final ISO"),
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_user_with_view_logs),
+):
+    """Exporta logs com os mesmos filtros de GET /admin/logs. Sem paginação."""
+    q = db.query(SystemLogORM).options(joinedload(SystemLogORM.user))
+    if category:
+        q = q.filter(SystemLogORM.category == category)
+    if user_id is not None:
+        q = q.filter(SystemLogORM.user_id == user_id)
+    if from_date:
+        try:
+            from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+            q = q.filter(SystemLogORM.created_at >= from_dt)
+        except ValueError:
+            pass
+    if to_date:
+        try:
+            to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+            q = q.filter(SystemLogORM.created_at <= to_dt)
+        except ValueError:
+            pass
+    q = q.order_by(SystemLogORM.created_at.desc())
+    rows = q.all()
+    data = [
+        {
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "user_name": r.user.name if r.user else None,
+            "category": r.category,
+            "action": r.action,
+            "description": r.description,
+            "ip_address": r.ip_address,
+        }
+        for r in rows
+    ]
+    from io import BytesIO
+    content = _build_logs_export_xlsx(data)
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = f"logs_export_{today}.xlsx"
+    return StreamingResponse(
+        BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 @router.get(
     "/logs",

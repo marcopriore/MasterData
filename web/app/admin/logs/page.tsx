@@ -1,11 +1,11 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { apiGetWithAuth } from '@/lib/api'
+import { apiGetWithAuth, apiDownloadWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollText, Loader2, Filter, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { ScrollText, Loader2, Filter, X, ChevronDown, ChevronUp, FileDown } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -163,7 +163,8 @@ function EventDataContent({ data }: { data: Record<string, unknown> }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLogsPage() {
-  const { accessToken, isAdmin } = useUser()
+  const { accessToken, isAdmin, can } = useUser()
+  const canViewLogs = can('can_view_logs')
   const [logs, setLogs] = useState<LogItem[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
   const [total, setTotal] = useState(0)
@@ -181,6 +182,7 @@ export default function AdminLogsPage() {
   const [appliedDateFrom, setAppliedDateFrom] = useState('')
   const [appliedDateTo, setAppliedDateTo] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+  const [exporting, setExporting] = useState(false)
 
   const toggleExpand = (id: number) => {
     setExpandedIds((prev) => {
@@ -242,6 +244,25 @@ export default function AdminLogsPage() {
     setAppliedDateFrom('')
     setAppliedDateTo('')
     setPage(1)
+  }
+
+  const handleExport = async () => {
+    if (!accessToken) return
+    setExporting(true)
+    try {
+      const params = new URLSearchParams()
+      if (appliedCategory) params.set('category', appliedCategory)
+      if (appliedUserId) params.set('user_id', appliedUserId)
+      if (appliedDateFrom) params.set('from', appliedDateFrom + 'T00:00:00')
+      if (appliedDateTo) params.set('to', appliedDateTo + 'T23:59:59')
+      const path = `/admin/logs/export${params.toString() ? '?' + params.toString() : ''}`
+      await apiDownloadWithAuth(path, accessToken, 'logs_export.xlsx')
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err)
+    } finally {
+      setExporting(false)
+    }
   }
 
   if (!isAdmin) {
@@ -318,6 +339,18 @@ export default function AdminLogsPage() {
             <X className="size-4" />
             Limpar
           </Button>
+          {canViewLogs && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleExport}
+              disabled={exporting}
+              className="gap-2 border-slate-300 dark:border-zinc-600"
+            >
+              {exporting ? <Loader2 className="size-4 animate-spin" /> : <FileDown className="size-4" />}
+              Exportar Excel
+            </Button>
+          )}
         </div>
 
         {/* Tabela */}
