@@ -139,7 +139,6 @@ export default function NewMaterialRequestPage() {
   const validateStep = (step: number): boolean => {
     if (step === 1) {
       if (!requesterName.trim()) { toast.error('Informe o nome do solicitante.'); return false }
-      if (!costCenter.trim()) { toast.error('Informe o centro de custo.'); return false }
       return true
     }
     if (step === 2) {
@@ -287,9 +286,7 @@ export default function NewMaterialRequestPage() {
             {currentStep === 1 && (
               <PhaseAdmin
                 requesterName={requesterName}
-                onRequesterNameChange={setRequesterName}
-                costCenter={costCenter}
-                onCostCenterChange={setCostCenter}
+                requesterEmail={user?.email ?? ''}
                 urgency={urgency}
                 onUrgencyChange={setUrgency}
               />

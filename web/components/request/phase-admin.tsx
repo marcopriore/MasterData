@@ -1,13 +1,12 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
 import {
   User,
-  Building2,
+  Mail,
   AlertTriangle,
   ArrowDown,
   ArrowRight,
@@ -17,9 +16,7 @@ import {
 
 interface PhaseAdminProps {
   requesterName: string
-  onRequesterNameChange: (v: string) => void
-  costCenter: string
-  onCostCenterChange: (v: string) => void
+  requesterEmail: string | null
   urgency: "low" | "medium" | "high"
   onUrgencyChange: (v: "low" | "medium" | "high") => void
 }
@@ -38,8 +35,8 @@ const urgencyOptions = [
     label: "Media",
     description: "Necessidade em ate 15 dias",
     icon: <ArrowRight className="size-4" />,
-    color: "text-warning border-warning/30 bg-warning/5",
-    ring: "ring-warning/20",
+    color: "bg-amber-50 text-amber-800 border-amber-400",
+    ring: "ring-amber-200",
   },
   {
     value: "high" as const,
@@ -53,9 +50,7 @@ const urgencyOptions = [
 
 export function PhaseAdmin({
   requesterName,
-  onRequesterNameChange,
-  costCenter,
-  onCostCenterChange,
+  requesterEmail,
   urgency,
   onUrgencyChange,
 }: PhaseAdminProps) {
@@ -75,39 +70,26 @@ export function PhaseAdmin({
             Dados do Solicitante
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="requester-name" className="text-sm font-medium flex items-center gap-1">
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
                 Nome do Solicitante
                 <Asterisk className="size-2.5 text-destructive" />
               </Label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50" />
-                <Input
-                  id="requester-name"
-                  value={requesterName}
-                  onChange={(e) => onRequesterNameChange(e.target.value.toUpperCase())}
-                  placeholder="Nome completo"
-                  className="h-10 pl-10 uppercase bg-card"
-                />
-              </div>
+              <p className="mt-0.5 flex items-center gap-2 text-sm font-medium text-foreground">
+                <User className="size-4 text-muted-foreground" />
+                <span className="truncate">{requesterName || "—"}</span>
+              </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="cost-center" className="text-sm font-medium flex items-center gap-1">
-                Centro de Custo
-                <Asterisk className="size-2.5 text-destructive" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                E-mail
               </Label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50" />
-                <Input
-                  id="cost-center"
-                  value={costCenter}
-                  onChange={(e) => onCostCenterChange(e.target.value.toUpperCase())}
-                  placeholder="Ex: CC-4500-MNT"
-                  className="h-10 pl-10 uppercase bg-card font-mono"
-                />
-              </div>
+              <p className="mt-0.5 flex items-center gap-2 text-sm text-foreground">
+                <Mail className="size-4 text-muted-foreground" />
+                <span className="truncate">{requesterEmail || "—"}</span>
+              </p>
             </div>
           </div>
         </CardContent>
