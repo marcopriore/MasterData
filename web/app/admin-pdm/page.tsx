@@ -342,25 +342,44 @@ export default function MDMDashboard() {
                   </div>
                 ) : (
                   <ul className="py-1">
-                    {searchResults.map((pdm) => (
-                      <li key={pdm.id}>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectPdm(pdm)}
-                          className={cn(
-                            "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-[#0F1C38] transition-colors",
-                            "hover:bg-slate-100",
-                            selectedPdmId === pdm.id && "bg-slate-100 font-semibold"
-                          )}
-                        >
-                          <FileText className="size-4 shrink-0 opacity-70" />
-                          <span className="flex-1 truncate uppercase">{pdm.name}</span>
-                          <span className="shrink-0 text-xs uppercase opacity-70">
-                            {pdm.internal_code}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                    {searchResults.map((pdm) => {
+                      const count = (pdm as { materials_count?: number }).materials_count ?? 0
+                      const countLabel =
+                        count === 0
+                          ? "Sem materiais"
+                          : count === 1
+                            ? "1 material"
+                            : `${count} materiais`
+                      return (
+                        <li key={pdm.id}>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPdm(pdm)}
+                            className={cn(
+                              "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-[#0F1C38] transition-colors",
+                              "hover:bg-slate-100",
+                              selectedPdmId === pdm.id && "bg-slate-100 font-semibold"
+                            )}
+                          >
+                            <FileText className="size-4 shrink-0 opacity-70" />
+                            <span className="flex-1 truncate uppercase">{pdm.name}</span>
+                            <span className="shrink-0 text-xs uppercase opacity-70">
+                              {pdm.internal_code}
+                            </span>
+                            <span
+                              className={cn(
+                                "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium border",
+                                count === 0
+                                  ? "bg-gray-100 text-gray-600 border-gray-200"
+                                  : "bg-blue-100 text-blue-800 border-blue-200"
+                              )}
+                            >
+                              {countLabel}
+                            </span>
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
               </div>
@@ -386,6 +405,7 @@ export default function MDMDashboard() {
                     onToggle={() => setIsDetailsOpen((prev) => !prev)}
                     readOnly={!isEditMode}
                     attributes={attributes}
+                    materialsCount={(pdms.find((p) => p.id === selectedPdmId) as { materials_count?: number } | undefined)?.materials_count ?? 0}
                   />
                 </div>
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col px-6 py-5">

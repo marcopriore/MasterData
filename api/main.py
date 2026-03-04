@@ -432,6 +432,12 @@ def delete_field(
 @app.get("/api/pdm")
 def list_pdms(db: Session = Depends(get_db)):
     rows = db.query(PDMOrm).order_by(PDMOrm.name.asc()).all()
+    counts = (
+        db.query(MaterialDatabaseORM.pdm_code, func.count(MaterialDatabaseORM.id).label("cnt"))
+        .group_by(MaterialDatabaseORM.pdm_code)
+        .all()
+    )
+    count_map = {pdm_code: cnt for pdm_code, cnt in counts if pdm_code}
     return [
         {
             "id": r.id,
@@ -439,6 +445,7 @@ def list_pdms(db: Session = Depends(get_db)):
             "internal_code": r.internal_code,
             "is_active": r.is_active,
             "attributes": r.attributes or [],
+            "materials_count": count_map.get(r.internal_code, 0),
         }
         for r in rows
     ]

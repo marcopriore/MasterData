@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { FileText, ChevronDown, ChevronUp, Eye } from "lucide-react"
+import { FileText, ChevronDown, ChevronUp } from "lucide-react"
 import type { Attribute } from "./attributes-table"
 
 interface PdmDetailsProps {
@@ -20,6 +20,7 @@ interface PdmDetailsProps {
   onToggle?: () => void
   readOnly?: boolean
   attributes?: Attribute[]
+  materialsCount?: number
 }
 
 export function PdmDetails({
@@ -34,25 +35,15 @@ export function PdmDetails({
   onToggle,
   readOnly = false,
   attributes = [],
+  materialsCount = 0,
 }: PdmDetailsProps) {
   const isActivePdm = selectedPdmId != null
-  const includedAttrs = attributes.filter((a) => a.includeInDescription)
-  const generatePreview = () => {
-    const parts: string[] = []
-    if (name) {
-      parts.push(name.toUpperCase().replace(/\s+/g, " "))
-    } else {
-      parts.push("MATERIAL")
-    }
-    includedAttrs.forEach((attr) => {
-      if (attr.abbreviation) {
-        parts.push(`[${attr.abbreviation.toUpperCase()}]`)
-      } else if (attr.name) {
-        parts.push(`[${attr.name.toUpperCase().replace(/\s+/g, "_")}]`)
-      }
-    })
-    return parts.join(" ")
-  }
+  const countLabel =
+    materialsCount === 0
+      ? "Sem materiais"
+      : materialsCount === 1
+        ? "1 material"
+        : `${materialsCount} materiais`
   return (
     <Card
       className={cn(
@@ -117,27 +108,26 @@ export function PdmDetails({
             </p>
           </div>
           <div className="flex flex-col justify-end gap-2 pb-1">
-            <div className="flex items-center gap-2 overflow-x-auto">
-              <Eye className="size-4 shrink-0 text-primary" />
-              <code className="font-mono text-sm font-bold text-preview-foreground whitespace-nowrap">
-                {generatePreview()}
-              </code>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
-                {includedAttrs.length} {includedAttrs.length === 1 ? "campo" : "campos"}
-              </span>
-              <div className={cn("flex items-center gap-2", readOnly && "opacity-70")}>
-                <Switch
-                  id="pdm-active"
-                  checked={isActive}
-                  onCheckedChange={onActiveChange}
-                  disabled={readOnly}
-                />
-                <Label htmlFor="pdm-active" className="text-sm font-medium text-foreground cursor-pointer">
-                  {isActive ? "Ativo" : "Inativo"}
-                </Label>
-              </div>
+            <span
+              className={cn(
+                "inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-medium border",
+                materialsCount === 0
+                  ? "bg-gray-100 text-gray-600 border-gray-200"
+                  : "bg-blue-100 text-blue-800 border-blue-200"
+              )}
+            >
+              {countLabel}
+            </span>
+            <div className={cn("flex items-center gap-2", readOnly && "opacity-70")}>
+              <Switch
+                id="pdm-active"
+                checked={isActive}
+                onCheckedChange={onActiveChange}
+                disabled={readOnly}
+              />
+              <Label htmlFor="pdm-active" className="text-sm font-medium text-foreground cursor-pointer">
+                {isActive ? "Ativo" : "Inativo"}
+              </Label>
             </div>
           </div>
         </div>
