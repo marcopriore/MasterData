@@ -30,13 +30,19 @@ Auth
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
-from deps import get_db, get_admin_user, get_current_user_optional
+from deps import get_db, get_admin_user, get_current_user_optional, get_user_with_manage_users
 from orm_models import RoleORM, UserORM, SystemLogORM
 from security import create_access_token, hash_password, verify_password
 from audit import log_system_event
+from bulk_import_users import (
+    build_user_template_xlsx,
+    build_user_export_xlsx,
+    parse_and_validate_user_excel,
+)
 from models import (
     LoginRequest,
     RoleCreate,
@@ -258,6 +264,157 @@ def list_users(
             UserORM.name.ilike(term) | UserORM.email.ilike(term)
         )
     return [_user_to_dict(u) for u in q.all()]
+
+
+# Import/export must be defined before /users/{user_id} to match correctly
+DEFAULT_PASSWORD = "Mudar@1234"
+
+
+@router.get(
+    "/users/import-template",
+    summary="Download template Excel para importação de usuários",
+)
+def get_user_import_template(
+    _: UserORM = Depends(get_user_with_manage_users),
+):
+    """Retorna planilha modelo com aba Usuários."""
+    buf = build_user_template_xlsx()
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=template_importacao_usuarios.xlsx"},
+    )
+
+
+@router.post(
+    "/users/import",
+    summary="Importar usuários em massa via Excel",
+)
+async def import_users(
+    file: UploadFile = File(..., description="Planilha Excel para importação"),
+    dry_run: bool = Query(True, description="Se True, apenas valida sem gravar"),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_manage_users),
+):
+    """Importa usuários conforme planilha. C (criar) ou E (editar). Nunca exporta ou altera senhas."""
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Arquivo deve ser planilha Excel (.xlsx ou .xls)")
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler arquivo: {e}")
+
+    try:
+        result = parse_and_validate_user_excel(content, db)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido ou corrompido: {e}")
+
+    if "_error" in result:
+        raise HTTPException(status_code=400, detail=result["_error"])
+
+    if dry_run:
+        return result
+
+    user_data = result.get("users", {})
+    has_errors = any(r.get("status") == "error" for r in user_data.get("rows", []))
+    if has_errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Existem erros críticos nas linhas. Corrija e tente novamente.",
+                "users": user_data,
+            },
+        )
+
+    role_by_name: dict[str, int] = {
+        (r.name or "").upper(): r.id for r in db.query(RoleORM).all()
+    }
+    users_by_email: dict[str, UserORM] = {
+        u.email.lower(): u for u in db.query(UserORM).options(joinedload(UserORM.role)).all()
+    }
+
+    created = 0
+    updated = 0
+
+    for row_info in user_data.get("rows", []):
+        if row_info.get("status") == "error":
+            continue
+        op = row_info.get("operacao")
+        data = row_info.get("data", {})
+        email = str(data.get("email") or "").strip().lower()
+        nome = str(data.get("nome") or "").strip() or email
+        perfil_raw = str(data.get("perfil") or "").strip().upper()
+        ativo_raw = str(data.get("ativo") or "Sim").strip()
+        is_active = ativo_raw.lower() in ("sim", "s", "1", "true")
+
+        role_id = role_by_name.get(perfil_raw)
+        if not role_id:
+            continue
+
+        if op == "C":
+            row = UserORM(
+                name=nome,
+                email=email,
+                hashed_password=hash_password(DEFAULT_PASSWORD),
+                role_id=role_id,
+                is_active=is_active,
+            )
+            db.add(row)
+            created += 1
+        elif op == "E":
+            row = users_by_email.get(email)
+            if row:
+                if nome:
+                    row.name = nome
+                row.role_id = role_id
+                row.is_active = is_active
+                updated += 1
+
+    db.commit()
+
+    log_system_event(
+        db,
+        current_user.id,
+        "users",
+        "bulk_import",
+        f"Importação em massa: {created} criados, {updated} atualizados por {current_user.email}",
+    )
+
+    return {"dry_run": False, "created": created, "updated": updated}
+
+
+@router.get(
+    "/users/export",
+    summary="Exportar todos os usuários para Excel",
+)
+def export_users(
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_user_with_manage_users),
+):
+    """Retorna planilha com todos os usuários. NUNCA exporta senhas."""
+    rows = (
+        db.query(UserORM)
+        .options(joinedload(UserORM.role))
+        .order_by(UserORM.id)
+        .all()
+    )
+    users = [
+        {
+            "email": u.email,
+            "name": u.name,
+            "role_name": u.role.name if u.role else None,
+            "is_active": u.is_active,
+        }
+        for u in rows
+    ]
+    buf = build_user_export_xlsx(users)
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = f"usuarios_export_{today}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get(

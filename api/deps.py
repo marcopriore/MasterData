@@ -111,3 +111,14 @@ def get_user_with_edit_pdm(
     if not perms.get("can_edit_pdm", False):
         raise HTTPException(status_code=403, detail="Permissão can_edit_pdm necessária")
     return current_user
+
+
+def get_user_with_manage_users(
+    current_user: UserORM = Depends(get_current_user),
+) -> UserORM:
+    """Require authenticated user with can_manage_users permission."""
+    from fastapi import HTTPException
+    perms = current_user.role.permissions if current_user.role else {}
+    if not perms.get("can_manage_users", False):
+        raise HTTPException(status_code=403, detail="Permissão can_manage_users necessária")
+    return current_user
