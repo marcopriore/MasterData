@@ -1,3 +1,4 @@
+import logging
 from dotenv import load_dotenv
 load_dotenv()
 from pathlib import Path
@@ -7,11 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from fastapi import Body, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
-from deps import get_admin_user, get_current_user, get_current_user_optional, get_db
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import
 from orm_models import (
     ProductORM,
     PDMOrm,
@@ -28,6 +29,12 @@ from orm_models import (
     UserNotificationPrefsORM,
 )
 from audit import log_request_event, log_system_event
+from bulk_import import (
+    build_template_xlsx,
+    parse_and_validate_excel,
+    _row_to_create_kwargs,
+    _row_to_update_kwargs,
+)
 from notifications import notify_request_event
 from security import hash_password
 
@@ -78,6 +85,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": True,
             "can_view_database": True,
             "can_manage_roles": True,
+            "can_standardize": True,
+            "can_bulk_import": True,
         },
     },
     {
@@ -96,6 +105,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_standardize": False,
+            "can_bulk_import": False,
         },
     },
     {
@@ -114,6 +125,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_standardize": False,
+            "can_bulk_import": False,
         },
     },
     {
@@ -132,6 +145,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_standardize": False,
+            "can_bulk_import": False,
         },
     },
     {
@@ -150,6 +165,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": True,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_standardize": True,
+            "can_bulk_import": True,
         },
     },
     {
@@ -168,6 +185,8 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_standardize": False,
+            "can_bulk_import": False,
         },
     },
 ]
@@ -241,6 +260,8 @@ from models import (
     FieldDictionaryCreate,
     FieldDictionaryUpdate,
     FieldDictionaryResponse,
+    MaterialStandardizeBody,
+    ErpIntegrateBody,
 )
 
 from routes.admin import router as admin_router
@@ -1484,6 +1505,10 @@ def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
         "standard_price": row.standard_price,
         "profit_center": row.profit_center,
         "source": row.source,
+        "erp_status": row.erp_status,
+        "erp_integrated_at": row.erp_integrated_at.isoformat() if row.erp_integrated_at else None,
+        "standardized_at": row.standardized_at.isoformat() if row.standardized_at else None,
+        "standardized_by": row.standardized_by,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -1494,6 +1519,7 @@ def list_material_database(
     q: str | None = Query(None, description="Busca por descrição ou sap_code"),
     status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
     pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
+    erp_status: str | None = Query(None, description="Filtrar por erp_status: pendente_erp|integrado"),
     date_from: str | None = Query(None, description="Filtrar por data de criação (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="Filtrar por data de criação até (YYYY-MM-DD)"),
     page: int = Query(1, ge=1),
@@ -1515,6 +1541,8 @@ def list_material_database(
         query = query.filter(MaterialDatabaseORM.status == status)
     if pdm_code:
         query = query.filter(MaterialDatabaseORM.pdm_code == pdm_code)
+    if erp_status:
+        query = query.filter(MaterialDatabaseORM.erp_status == erp_status)
     if date_from:
         try:
             dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -1563,6 +1591,156 @@ def search_material_database(
     return [_material_db_to_dict(r) for r in rows]
 
 
+@app.post("/api/database/materials/erp-integrate")
+def erp_integrate_materials(
+    payload: ErpIntegrateBody,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_standardize),
+):
+    """
+    Integra materiais com ERP (em massa). Simula chamada ERP e marca como integrado.
+    """
+    integrated: list[int] = []
+    skipped: list[int] = []
+    for mid in payload.material_ids:
+        row = db.query(MaterialDatabaseORM).filter(MaterialDatabaseORM.id == mid).first()
+        if not row:
+            skipped.append(mid)
+            continue
+        if row.erp_status == "integrado":
+            skipped.append(mid)
+            continue
+        if row.erp_status != "pendente_erp":
+            skipped.append(mid)
+            continue
+        # Simular chamada ERP (apenas log)
+        logging.getLogger(__name__).info("ERP integrate simulated for material_id=%s", mid)
+        row.erp_status = "integrado"
+        row.erp_integrated_at = datetime.now(timezone.utc)
+        integrated.append(mid)
+    db.commit()
+    material_ids_str = ", ".join(str(i) for i in integrated)
+    log_system_event(
+        db,
+        current_user.id,
+        "erp",
+        "integrate",
+        f"{len(integrated)} materiais integrados por {current_user.email}: IDs {material_ids_str}",
+    )
+    return {"integrated": integrated, "skipped": skipped, "total": len(integrated)}
+
+
+@app.get("/api/database/materials/import-template")
+def get_import_template(
+    current_user: UserORM = Depends(get_user_with_bulk_import),
+):
+    """Exporta planilha Excel template para importação em massa de materiais."""
+    buf = build_template_xlsx()
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=template_importacao_materiais.xlsx"},
+    )
+
+
+@app.post("/api/database/materials/import")
+async def import_materials(
+    file: UploadFile = File(..., description="Planilha Excel para importação"),
+    dry_run: bool = Query(True, description="Se True, apenas valida sem gravar"),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_bulk_import),
+):
+    """
+    Importa materiais a partir de planilha Excel.
+    dry_run=True: valida e retorna resultado sem gravar.
+    dry_run=False: grava se não houver erros críticos.
+    """
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Arquivo deve ser planilha Excel (.xlsx)")
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler arquivo: {e}")
+
+    try:
+        result = parse_and_validate_excel(content, db, MaterialDatabaseORM, PDMOrm)
+    except Exception as e:
+        logging.getLogger(__name__).exception("Erro ao processar Excel")
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido ou corrompido: {e}")
+
+    if "_error" in result:
+        raise HTTPException(status_code=400, detail=result["_error"])
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "total_rows": result["total_rows"],
+            "valid_rows": result["valid_rows"],
+            "error_rows": result["error_rows"],
+            "warning_rows": result["warning_rows"],
+            "rows": result["rows"],
+        }
+
+    # dry_run=False: verificar se há erros críticos
+    has_critical = any(r.get("status") == "error" for r in result["rows"])
+    if has_critical:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Existem erros críticos nas linhas. Corrija e tente novamente.",
+                "rows": result["rows"],
+            },
+        )
+
+    # Executar importação
+    created = 0
+    updated = 0
+    max_id = db.query(func.max(MaterialDatabaseORM.id)).scalar() or 0
+    next_sap = max_id + 1
+
+    pdm_cache: dict[str, str] = {}
+    for r in db.query(PDMOrm).all():
+        pdm_cache[r.internal_code] = r.name
+
+    for row_info in result["rows"]:
+        if row_info.get("status") == "error":
+            continue
+        op = row_info.get("operacao")
+        data = row_info.get("data", {})
+        if op == "C":
+            pdm_code = str(data.get("pdm_code", "")).strip()
+            pdm_name = pdm_cache.get(pdm_code, pdm_code)
+            sap_code = f"{next_sap:08d}"
+            next_sap += 1
+            kwargs = _row_to_create_kwargs(data, sap_code, pdm_name)
+            db.add(MaterialDatabaseORM(**kwargs))
+            created += 1
+        elif op == "E":
+            codigo = row_info.get("codigo_material")
+            if not codigo:
+                continue
+            row = db.query(MaterialDatabaseORM).filter(
+                MaterialDatabaseORM.sap_code == codigo
+            ).first()
+            if not row:
+                continue
+            kwargs = _row_to_update_kwargs(data)
+            for k, v in kwargs.items():
+                if hasattr(row, k):
+                    setattr(row, k, v)
+            updated += 1
+
+    db.commit()
+    log_system_event(
+        db,
+        current_user.id,
+        "material",
+        "bulk_import",
+        f"{created} criados, {updated} atualizados por {current_user.email}",
+    )
+    return {"dry_run": False, "created": created, "updated": updated, "errors": []}
+
+
 @app.get("/api/database/materials/{material_id}")
 def get_material_database(
     material_id: int,
@@ -1573,6 +1751,39 @@ def get_material_database(
     row = db.query(MaterialDatabaseORM).filter(MaterialDatabaseORM.id == material_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Material não encontrado")
+    return _material_db_to_dict(row)
+
+
+@app.patch("/api/database/materials/{material_id}/standardize")
+def standardize_material(
+    material_id: int,
+    payload: MaterialStandardizeBody,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_standardize),
+):
+    """
+    Salva padronização do material. Atualiza campos enviados, define erp_status=pendente_erp,
+    standardized_at e standardized_by.
+    """
+    row = db.query(MaterialDatabaseORM).filter(MaterialDatabaseORM.id == material_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Material não encontrado")
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if hasattr(row, k):
+            setattr(row, k, v)
+    row.erp_status = "pendente_erp"
+    row.standardized_at = datetime.now(timezone.utc)
+    row.standardized_by = current_user.id
+    db.commit()
+    db.refresh(row)
+    log_system_event(
+        db,
+        current_user.id,
+        "material",
+        "standardize",
+        f"Material {material_id} padronizado por {current_user.email}",
+    )
     return _material_db_to_dict(row)
 
 

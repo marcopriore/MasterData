@@ -40,6 +40,10 @@ type Permissions = {
   can_manage_fields: boolean
   can_view_database: boolean
   can_manage_roles: boolean
+
+  // Operações
+  can_standardize: boolean
+  can_bulk_import: boolean
 }
 
 type Role = {
@@ -57,9 +61,9 @@ const PERMISSION_GROUPS: {
   {
     title: 'Solicitações',
     items: [
-      { key: 'can_approve',        label: 'Aprovar',             description: 'Aprovar solicitações de cadastro' },
-      { key: 'can_reject',         label: 'Rejeitar',            description: 'Rejeitar solicitações de cadastro' },
-      { key: 'can_submit_request', label: 'Criar solicitações',  description: 'Abrir novas solicitações de cadastro' },
+      { key: 'can_submit_request', label: 'Criar Solicitações',  description: 'Abrir novas solicitações de cadastro' },
+      { key: 'can_approve',        label: 'Aprovar Solicitações', description: 'Aprovar solicitações de cadastro' },
+      { key: 'can_reject',         label: 'Rejeitar Solicitações', description: 'Rejeitar solicitações de cadastro' },
     ],
   },
   {
@@ -84,6 +88,13 @@ const PERMISSION_GROUPS: {
       { key: 'can_manage_fields', label: 'Dicionário de Dados',  description: 'Gerir dicionário de campos e metadados' },
       { key: 'can_view_database', label: 'Base de Dados',        description: 'Visualizar base de dados de materiais' },
       { key: 'can_manage_roles',  label: 'Perfil de Acesso',     description: 'Gerir perfis e permissões de acesso' },
+    ],
+  },
+  {
+    title: 'Operações',
+    items: [
+      { key: 'can_standardize',   label: 'Padronização de Materiais', description: 'Padronizar materiais e integrar com ERP' },
+      { key: 'can_bulk_import',   label: 'Importação em Massa',       description: 'Importação em massa de materiais' },
     ],
   },
 ]
@@ -116,6 +127,8 @@ function emptyPermissions(): Permissions {
     can_manage_fields: false,
     can_view_database: true,
     can_manage_roles: false,
+    can_standardize: false,
+    can_bulk_import: false,
   }
 }
 

@@ -310,6 +310,14 @@ class MaterialDatabaseORM(Base):
         String(20), nullable=False, default="manual"
     )
 
+    # Padronização e ERP: None | "pendente_erp" | "integrado"
+    erp_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default=None)
+    erp_integrated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    standardized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    standardized_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )

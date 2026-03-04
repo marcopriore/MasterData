@@ -182,3 +182,58 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   }
   return (await res.json()) as T
 }
+
+/**
+ * Upload file with auth header. Used for import endpoints.
+ */
+export async function apiUploadWithAuth<T>(
+  path: string,
+  file: File,
+  accessToken: string | null
+): Promise<T> {
+  const form = new FormData()
+  form.append('file', file)
+  const headers: HeadersInit = {}
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`
+  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: Object.keys(headers).length ? headers : undefined,
+    body: form,
+  })
+  if (!res.ok) {
+    let detail: string | undefined
+    try {
+      const json = await res.json()
+      detail = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json?.detail)
+    } catch { /* ignore */ }
+    throw new Error(detail ?? `HTTP ${res.status}`)
+  }
+  return (await res.json()) as T
+}
+
+/**
+ * Download a file as blob with auth. Triggers browser download.
+ */
+export async function apiDownloadWithAuth(
+  path: string,
+  accessToken: string | null,
+  filename: string
+): Promise<void> {
+  const headers: HeadersInit = {}
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`
+  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: Object.keys(headers).length ? headers : undefined,
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}

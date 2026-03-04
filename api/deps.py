@@ -67,3 +67,25 @@ def get_admin_user(
     if not current_user.role or current_user.role.name.upper() != "ADMIN":
         raise HTTPException(status_code=403, detail="Acesso restrito ao administrador")
     return current_user
+
+
+def get_user_with_standardize(
+    current_user: UserORM = Depends(get_current_user),
+) -> UserORM:
+    """Require authenticated user with can_standardize permission."""
+    from fastapi import HTTPException
+    perms = current_user.role.permissions if current_user.role else {}
+    if not perms.get("can_standardize", False):
+        raise HTTPException(status_code=403, detail="Permissão can_standardize necessária")
+    return current_user
+
+
+def get_user_with_bulk_import(
+    current_user: UserORM = Depends(get_current_user),
+) -> UserORM:
+    """Require authenticated user with can_bulk_import permission."""
+    from fastapi import HTTPException
+    perms = current_user.role.permissions if current_user.role else {}
+    if not perms.get("can_bulk_import", False):
+        raise HTTPException(status_code=403, detail="Permissão can_bulk_import necessária")
+    return current_user

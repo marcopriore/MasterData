@@ -254,6 +254,37 @@ class FieldDictionaryResponse(BaseModel):
 
 # ─── Roles ────────────────────────────────────────────────────────────────────
 
+class MaterialStandardizeBody(BaseModel):
+    """Body for PATCH /api/database/materials/{id}/standardize — partial update."""
+    sap_code: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    pdm_code: Optional[str] = None
+    pdm_name: Optional[str] = None
+    material_group: Optional[str] = None
+    unit_of_measure: Optional[str] = None
+    ncm: Optional[str] = None
+    material_type: Optional[str] = None
+    gross_weight: Optional[float] = None
+    net_weight: Optional[float] = None
+    cfop: Optional[str] = None
+    origin: Optional[str] = None
+    purchase_group: Optional[str] = None
+    lead_time: Optional[int] = None
+    mrp_type: Optional[str] = None
+    min_stock: Optional[float] = None
+    max_stock: Optional[float] = None
+    valuation_class: Optional[str] = None
+    standard_price: Optional[float] = None
+    profit_center: Optional[str] = None
+    source: Optional[str] = None
+
+
+class ErpIntegrateBody(BaseModel):
+    """Body for POST /api/database/materials/erp-integrate."""
+    material_ids: list[int] = Field(default_factory=list)
+
+
 class RolePermissions(BaseModel):
     # Solicitações
     can_approve: bool = False
@@ -274,6 +305,8 @@ class RolePermissions(BaseModel):
     can_manage_fields: bool = False
     can_view_database: bool = True
     can_manage_roles: bool = False
+    can_standardize: bool = False
+    can_bulk_import: bool = False
 
 
 class RoleCreate(BaseModel):

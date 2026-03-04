@@ -256,6 +256,8 @@ def ensure_roles(db) -> dict[str, RoleORM]:
                 "can_manage_fields": True,
                 "can_view_database": True,
                 "can_manage_roles": True,
+                "can_standardize": True,
+                "can_bulk_import": True,
             },
         ),
         (
@@ -274,6 +276,8 @@ def ensure_roles(db) -> dict[str, RoleORM]:
                 "can_manage_fields": False,
                 "can_view_database": True,
                 "can_manage_roles": False,
+                "can_standardize": False,
+                "can_bulk_import": False,
             },
         ),
         (
@@ -292,6 +296,8 @@ def ensure_roles(db) -> dict[str, RoleORM]:
                 "can_manage_fields": False,
                 "can_view_database": True,
                 "can_manage_roles": False,
+                "can_standardize": False,
+                "can_bulk_import": False,
             },
         ),
         (
@@ -310,6 +316,8 @@ def ensure_roles(db) -> dict[str, RoleORM]:
                 "can_manage_fields": False,
                 "can_view_database": True,
                 "can_manage_roles": False,
+                "can_standardize": False,
+                "can_bulk_import": False,
             },
         ),
         (
@@ -328,6 +336,8 @@ def ensure_roles(db) -> dict[str, RoleORM]:
                 "can_manage_fields": True,
                 "can_view_database": True,
                 "can_manage_roles": False,
+                "can_standardize": True,
+                "can_bulk_import": True,
             },
         ),
         (
@@ -346,6 +356,8 @@ def ensure_roles(db) -> dict[str, RoleORM]:
                 "can_manage_fields": False,
                 "can_view_database": True,
                 "can_manage_roles": False,
+                "can_standardize": False,
+                "can_bulk_import": False,
             },
         ),
     ]
