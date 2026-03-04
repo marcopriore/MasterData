@@ -460,8 +460,9 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         )
     role_name = row.role.name if row.role else "SOLICITANTE"
     role_type = getattr(row.role, "role_type", "sistema") if row.role else "sistema"
+    permissions = row.role.permissions if row.role else {}
     return {
         "ok": True,
         "user": _user_to_dict(row),
-        "access_token": create_access_token(row.id, role_name, role_type),
+        "access_token": create_access_token(row.id, role_name, role_type, permissions),
     }

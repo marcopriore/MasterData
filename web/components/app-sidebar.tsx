@@ -69,8 +69,16 @@ function NavLink({
 export function AppSidebar() {
   const pathname = usePathname()
   const { setTheme, resolvedTheme } = useTheme()
-  const { isAdmin, user, logout } = useUser()
+  const { isAdmin, user, logout, can } = useUser()
   const [mounted, setMounted] = useState(false)
+
+  const visibleNavLinks = navLinks.filter((item) => {
+    if (item.href === '/') return true
+    if (item.href === '/request') return isAdmin || can('can_submit_request')
+    if (item.href === '/governance') return isAdmin || can('can_approve')
+    if (item.href === '/admin-pdm') return isAdmin || can('can_edit_pdm')
+    return true
+  })
 
   // Auto-expand Configurações when any child route is active
   const isInsideConfig =
@@ -113,7 +121,7 @@ export function AppSidebar() {
 
       {/* Nav */}
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-        {navLinks.map((item) => (
+        {visibleNavLinks.map((item) => (
           <NavLink key={item.href} {...item} />
         ))}
 
@@ -142,8 +150,10 @@ export function AppSidebar() {
           <CollapsibleContent>
             <div className="mt-1 flex flex-col gap-0.5 pl-4">
 
-              {/* ── Always-visible items ── */}
-              {CONFIG_BASE.map((item) => {
+              {/* ── Meu Perfil (always) + Workflows (ADMIN only) ── */}
+              {CONFIG_BASE.filter((item) =>
+                item.href === '/settings/profile' || (item.href === '/settings/workflow' && isAdmin)
+              ).map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(item.href)
                 return (
                   <Link
@@ -164,8 +174,8 @@ export function AppSidebar() {
                 )
               })}
 
-              {/* ── ADMIN-only items ── */}
-              {isAdmin && (
+              {/* ── ADMIN items (isAdmin or can_manage_users) ── */}
+              {(isAdmin || can('can_manage_users')) && (
                 <>
                   {/* Thin divider to visually separate admin items */}
                   <div

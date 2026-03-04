@@ -431,7 +431,7 @@ def list_requests(
         pass  # no filter — return all
     elif role_name == "SOLICITANTE" and current_user:
         q = q.filter(MaterialRequestORM.user_id == current_user.id)
-    elif role_type == "etapa" and current_user and current_user.role:
+    elif role_type == "etapa" and current_user and current_user.role and role_name:
         q = q.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
 
     return [_request_to_dict(r) for r in q.all()]

@@ -182,7 +182,7 @@ function NavCard({
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user, accessToken, ready } = useUser()
+  const { user, accessToken, ready, isAdmin, can } = useUser()
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -239,31 +239,39 @@ export default function DashboardPage() {
           Acesso Rápido
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <NavCard
-            href="/admin-pdm"
-            icon={Database}
-            label="Gestão de PDMs"
-            description="Configure padrões de descrição"
-          />
-          <NavCard
-            href="/governance"
-            icon={ShieldCheck}
-            label="Governança"
-            description="Políticas e controle de qualidade"
-          />
-          <NavCard
-            href="/settings/workflow"
-            icon={GitBranch}
-            label="Workflows"
-            description="Etapas de aprovação"
-          />
-          <NavCard
-            href="/request"
-            icon={FilePlus}
-            label="Nova Requisição"
-            description="Criar nova solicitação"
-            gold
-          />
+          {(isAdmin || can('can_edit_pdm')) && (
+            <NavCard
+              href="/admin-pdm"
+              icon={Database}
+              label="Gestão de PDMs"
+              description="Configure padrões de descrição"
+            />
+          )}
+          {(isAdmin || can('can_approve')) && (
+            <NavCard
+              href="/governance"
+              icon={ShieldCheck}
+              label="Governança"
+              description="Políticas e controle de qualidade"
+            />
+          )}
+          {isAdmin && (
+            <NavCard
+              href="/settings/workflow"
+              icon={GitBranch}
+              label="Workflows"
+              description="Etapas de aprovação"
+            />
+          )}
+          {(isAdmin || can('can_submit_request')) && (
+            <NavCard
+              href="/request"
+              icon={FilePlus}
+              label="Nova Requisição"
+              description="Criar nova solicitação"
+              gold
+            />
+          )}
         </div>
       </div>
 

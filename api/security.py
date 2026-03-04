@@ -20,15 +20,22 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(user_id: int, role_name: str, role_type: str = "sistema") -> str:
+def create_access_token(
+    user_id: int,
+    role_name: str,
+    role_type: str = "sistema",
+    permissions: dict | None = None,
+) -> str:
     """Create a JWT for the authenticated user."""
-    payload = {
+    payload: dict = {
         "sub": str(user_id),
         "role": role_name,
         "role_type": role_type,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS),
         "iat": datetime.now(timezone.utc),
     }
+    if permissions is not None:
+        payload["permissions"] = permissions
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 

@@ -101,7 +101,7 @@ def get_dashboard_stats(
         pass  # no filter
     elif role_name == "SOLICITANTE" and current_user:
         base = base.filter(MaterialRequestORM.user_id == current_user.id)
-    elif role_type == "etapa" and current_user and current_user.role:
+    elif role_type == "etapa" and current_user and current_user.role and role_name:
         base = base.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
 
     # ── Total ──────────────────────────────────────────────────────────────────
