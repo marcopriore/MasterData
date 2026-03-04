@@ -316,6 +316,57 @@ class MaterialDatabaseORM(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+# ─── Notifications ───────────────────────────────────────────────────────────
+
+
+class NotificationORM(Base):
+    """Notificações in-app por usuário."""
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    request_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("material_requests.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    user: Mapped["UserORM"] = relationship("UserORM", foreign_keys=[user_id])
+
+
+class UserNotificationPrefsORM(Base):
+    """Preferências de notificação por usuário."""
+    __tablename__ = "user_notification_prefs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, unique=True
+    )
+    notify_request_created: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_request_assigned: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_request_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_request_rejected: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notify_request_completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_request_created: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_request_assigned: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_request_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_request_rejected: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_request_completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    user: Mapped["UserORM"] = relationship("UserORM", foreign_keys=[user_id])
+
+
+# ─── Products ────────────────────────────────────────────────────────────────
+
+
 class ProductORM(Base):
     __tablename__ = "products"
 

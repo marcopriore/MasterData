@@ -190,6 +190,20 @@ class RejectPayload(BaseModel):
     justification: Optional[str] = None
 
 
+class NotificationPrefsUpdate(BaseModel):
+    """Body for PATCH /api/notifications/prefs."""
+    notify_request_created: Optional[bool] = None
+    notify_request_assigned: Optional[bool] = None
+    notify_request_approved: Optional[bool] = None
+    notify_request_rejected: Optional[bool] = None
+    notify_request_completed: Optional[bool] = None
+    email_request_created: Optional[bool] = None
+    email_request_assigned: Optional[bool] = None
+    email_request_approved: Optional[bool] = None
+    email_request_rejected: Optional[bool] = None
+    email_request_completed: Optional[bool] = None
+
+
 class AttributesPayload(BaseModel):
     """Body for PATCH /api/requests/{id}/attributes - merge into technical_attributes."""
     attributes: dict[str, str] = Field(default_factory=dict)

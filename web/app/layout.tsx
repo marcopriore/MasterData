@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { UserProvider } from "@/contexts/user-context";
+import { NotificationsProvider } from "@/contexts/notifications-context";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
@@ -33,7 +34,9 @@ export default function RootLayout({
       >
         <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false}>
           <UserProvider>
-            <AppShell>{children}</AppShell>
+            <NotificationsProvider>
+              <AppShell>{children}</AppShell>
+            </NotificationsProvider>
           </UserProvider>
         </ThemeProvider>
       </body>

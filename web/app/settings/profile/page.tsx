@@ -1,16 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useUser } from '@/contexts/user-context'
-import { apiPatch } from '@/lib/api'
+import { apiPatch, apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { toast, Toaster } from 'sonner'
 import {
+  Bell,
   ChevronLeft,
   UserCircle,
   Lock,
@@ -130,8 +132,33 @@ function LangOption({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+export type NotificationPrefs = {
+  notify_request_created: boolean
+  notify_request_assigned: boolean
+  notify_request_approved: boolean
+  notify_request_rejected: boolean
+  notify_request_completed: boolean
+  email_request_created: boolean
+  email_request_assigned: boolean
+  email_request_approved: boolean
+  email_request_rejected: boolean
+  email_request_completed: boolean
+}
+
+const NOTIFICATION_PREF_ROWS: {
+  notifyKey: keyof NotificationPrefs
+  emailKey: keyof NotificationPrefs
+  label: string
+}[] = [
+  { notifyKey: 'notify_request_created', emailKey: 'email_request_created', label: 'Solicitação criada' },
+  { notifyKey: 'notify_request_assigned', emailKey: 'email_request_assigned', label: 'Atendimento iniciado' },
+  { notifyKey: 'notify_request_approved', emailKey: 'email_request_approved', label: 'Aprovação de etapa' },
+  { notifyKey: 'notify_request_rejected', emailKey: 'email_request_rejected', label: 'Rejeição (com motivo)' },
+  { notifyKey: 'notify_request_completed', emailKey: 'email_request_completed', label: 'Solicitação concluída' },
+]
+
 export default function ProfilePage() {
-  const { user, setUser, ready } = useUser()
+  const { user, setUser, ready, accessToken } = useUser()
   const { setTheme } = useTheme()
 
   // ── Meus Dados ──────────────────────────────────────────────────────────────
@@ -149,6 +176,58 @@ export default function ProfilePage() {
   const [theme, setThemeLocal] = useState<'light' | 'dark'>('light')
   const [language, setLanguage] = useState<'pt' | 'en'>('pt')
   const [savingPrefs, setSavingPrefs] = useState(false)
+
+  // ── Preferências de Notificação ─────────────────────────────────────────────
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs | null>(null)
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(true)
+  const saveNotifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Fetch notification prefs on load
+  useEffect(() => {
+    if (!accessToken || !user) {
+      setNotifPrefsLoading(false)
+      return
+    }
+    setNotifPrefsLoading(true)
+    apiGetWithAuth<NotificationPrefs>('/api/notifications/prefs', accessToken)
+      .then(setNotifPrefs)
+      .catch(() => setNotifPrefs(null))
+      .finally(() => setNotifPrefsLoading(false))
+  }, [accessToken, user])
+
+  const saveNotifPrefs = useCallback(
+    async (updates: Partial<NotificationPrefs>) => {
+      if (!accessToken) return
+      try {
+        await apiPatchWithAuth('/api/notifications/prefs', updates, accessToken)
+        toast.success('Preferências salvas')
+      } catch {
+        toast.error('Falha ao salvar preferências de notificação')
+      }
+    },
+    [accessToken]
+  )
+
+  const handleNotifPrefChange = useCallback(
+    (key: keyof NotificationPrefs, value: boolean) => {
+      if (!notifPrefs) return
+      const next = { ...notifPrefs, [key]: value }
+      setNotifPrefs(next)
+
+      if (saveNotifTimeoutRef.current) clearTimeout(saveNotifTimeoutRef.current)
+      saveNotifTimeoutRef.current = setTimeout(() => {
+        saveNotifPrefs({ [key]: value })
+        saveNotifTimeoutRef.current = null
+      }, 500)
+    },
+    [notifPrefs, saveNotifPrefs]
+  )
+
+  useEffect(() => {
+    return () => {
+      if (saveNotifTimeoutRef.current) clearTimeout(saveNotifTimeoutRef.current)
+    }
+  }, [])
 
   // Populate fields once the user session is ready
   useEffect(() => {
@@ -510,6 +589,55 @@ export default function ProfilePage() {
               </div>
 
             </div>
+          </Section>
+
+          {/* ── Preferências de Notificação ───────────────────────────────────── */}
+          <Section
+            icon={Bell}
+            title="Preferências de Notificação"
+            description="Configure quais notificações deseja receber"
+          >
+            {notifPrefsLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                <Loader2 className="size-5 animate-spin" />
+                <span>Carregando...</span>
+              </div>
+            ) : notifPrefs ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="pb-3 pr-4 text-left font-medium text-foreground">Evento</th>
+                      <th className="pb-3 px-2 text-center font-medium text-foreground">In-app</th>
+                      <th className="pb-3 pl-2 text-center font-medium text-foreground">E-mail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {NOTIFICATION_PREF_ROWS.map(({ notifyKey, emailKey, label }) => (
+                      <tr key={notifyKey} className="border-b last:border-0">
+                        <td className="py-3 pr-4 text-foreground">{label}</td>
+                        <td className="px-2 py-3 text-center">
+                          <Switch
+                            checked={notifPrefs[notifyKey]}
+                            onCheckedChange={(v) => handleNotifPrefChange(notifyKey, !!v)}
+                          />
+                        </td>
+                        <td className="pl-2 py-3 text-center">
+                          <Switch
+                            checked={notifPrefs[emailKey]}
+                            onCheckedChange={(v) => handleNotifPrefChange(emailKey, !!v)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="py-4 text-sm text-muted-foreground">
+                Não foi possível carregar as preferências.
+              </p>
+            )}
           </Section>
 
         </div>

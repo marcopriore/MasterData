@@ -24,8 +24,11 @@ from orm_models import (
     RoleORM,
     UserORM,
     FieldDictionaryORM,
+    NotificationORM,
+    UserNotificationPrefsORM,
 )
 from audit import log_request_event, log_system_event
+from notifications import notify_request_event
 from security import hash_password
 
 app = FastAPI(title="MasterData API", version="1.8.0")
@@ -211,6 +214,7 @@ from models import (
     PDMCreate,
     RequestCreate,
     RejectPayload,
+    NotificationPrefsUpdate,
     AttributesPayload,
     StatusUpdatePayload,
     WorkflowConfigUpdate,
@@ -665,6 +669,10 @@ def assign_request(
         db, current_user.id, "requests", "request_assigned",
         f"Solicitação #{row.id} atribuída a {current_user.name}",
     )
+    try:
+        notify_request_event(db, "request_assigned", row, current_user, stage=row.status)
+    except Exception:
+        pass
     return _request_to_dict(row)
 
 
@@ -826,6 +834,10 @@ def create_request(
         db, current_user.id if current_user else None, "requests", "request_created",
         f"Solicitação #{row.id} criada por {requester_name}",
     )
+    try:
+        notify_request_event(db, "request_created", row, current_user)
+    except Exception:
+        pass
 
     # Eager-load relationships for the response
     row = (
@@ -951,6 +963,11 @@ def update_request_status(
         f"Solicitação #{row.id} aprovada por {approver_name}",
         event_data={"from_stage": from_status, "to_stage": next_status},
     )
+    try:
+        event_type = "request_completed" if next_status == "completed" else "request_approved"
+        notify_request_event(db, event_type, row, current_user, stage=next_step_label)
+    except Exception:
+        pass
     return _request_to_dict(row)
 
 
@@ -992,6 +1009,10 @@ def reject_request(
         f"Solicitação #{row.id} rejeitada por {rejector_name}",
         event_data={"justification": justification},
     )
+    try:
+        notify_request_event(db, "request_rejected", row, current_user, justification=justification)
+    except Exception:
+        pass
     return _request_to_dict(row)
 
 
@@ -1541,6 +1562,130 @@ def get_material_database(
     if not row:
         raise HTTPException(status_code=404, detail="Material não encontrado")
     return _material_db_to_dict(row)
+
+
+# -------------------------------
+# NOTIFICAÇÕES
+# -------------------------------
+
+
+@app.get("/api/notifications")
+def list_notifications(
+    unread_only: bool = Query(False, description="Apenas não lidas"),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """Lista notificações do usuário logado."""
+    q = db.query(NotificationORM).filter(NotificationORM.user_id == current_user.id)
+    if unread_only:
+        q = q.filter(NotificationORM.is_read == False)
+    q = q.order_by(NotificationORM.created_at.desc()).limit(limit)
+    notifications = q.all()
+    unread_count = (
+        db.query(func.count(NotificationORM.id))
+        .filter(NotificationORM.user_id == current_user.id, NotificationORM.is_read == False)
+        .scalar() or 0
+    )
+    return {
+        "unread_count": unread_count,
+        "notifications": [
+            {
+                "id": n.id,
+                "event_type": n.event_type,
+                "title": n.title,
+                "message": n.message,
+                "is_read": n.is_read,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+                "request_id": n.request_id,
+            }
+            for n in notifications
+        ],
+    }
+
+
+@app.patch("/api/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """Marca uma notificação como lida. Apenas o próprio usuário."""
+    row = db.query(NotificationORM).filter(
+        NotificationORM.id == notification_id,
+        NotificationORM.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Notificação não encontrada")
+    row.is_read = True
+    db.commit()
+    return {"ok": True}
+
+
+@app.patch("/api/notifications/read-all")
+def mark_all_notifications_read(
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """Marca todas as notificações do usuário como lidas."""
+    rows = db.query(NotificationORM).filter(
+        NotificationORM.user_id == current_user.id,
+        NotificationORM.is_read == False,
+    ).all()
+    for r in rows:
+        r.is_read = True
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/notifications/prefs")
+def get_notification_prefs(
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """Retorna preferências do usuário. Cria com todos True se não existir."""
+    prefs = db.query(UserNotificationPrefsORM).filter(
+        UserNotificationPrefsORM.user_id == current_user.id
+    ).first()
+    if not prefs:
+        prefs = UserNotificationPrefsORM(user_id=current_user.id)
+        db.add(prefs)
+        db.commit()
+        db.refresh(prefs)
+    return {
+        "notify_request_created": prefs.notify_request_created,
+        "notify_request_assigned": prefs.notify_request_assigned,
+        "notify_request_approved": prefs.notify_request_approved,
+        "notify_request_rejected": prefs.notify_request_rejected,
+        "notify_request_completed": prefs.notify_request_completed,
+        "email_request_created": prefs.email_request_created,
+        "email_request_assigned": prefs.email_request_assigned,
+        "email_request_approved": prefs.email_request_approved,
+        "email_request_rejected": prefs.email_request_rejected,
+        "email_request_completed": prefs.email_request_completed,
+    }
+
+
+@app.patch("/api/notifications/prefs")
+def update_notification_prefs(
+    payload: NotificationPrefsUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """Atualiza preferências de notificação do usuário."""
+    prefs = db.query(UserNotificationPrefsORM).filter(
+        UserNotificationPrefsORM.user_id == current_user.id
+    ).first()
+    if not prefs:
+        prefs = UserNotificationPrefsORM(user_id=current_user.id)
+        db.add(prefs)
+        db.flush()
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if hasattr(prefs, k):
+            setattr(prefs, k, v)
+    db.commit()
+    return {"ok": True}
 
 
 # -------------------------------

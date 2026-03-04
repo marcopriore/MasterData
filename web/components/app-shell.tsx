@@ -1,12 +1,13 @@
 'use client'
 
 /**
- * AppShell — renders the sidebar + main content wrapper.
+ * AppShell — renders the sidebar + topbar + main content wrapper.
  * Hidden entirely on the /login route so the login page is full-screen.
  */
 
 import { usePathname } from 'next/navigation'
 import { AppSidebar } from '@/components/app-sidebar'
+import { Topbar } from '@/components/topbar'
 
 const SIDEBAR_HIDDEN_PATHS = ['/login']
 
@@ -23,7 +24,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <AppSidebar />
-      <main className="min-h-screen p-8 ml-0 md:ml-[14rem]">{children}</main>
+      <Topbar />
+      <main className="min-h-screen p-8 pt-[4.5rem] ml-0 md:ml-[14rem]">{children}</main>
     </>
   )
 }
