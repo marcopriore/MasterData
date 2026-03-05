@@ -1,6 +1,8 @@
 """Testes do fluxo de onboarding de novo tenant."""
+import os
 import uuid
 import pytest
+from sqlalchemy import create_engine, text
 
 from tests.conftest import client, auth_headers
 
@@ -120,3 +122,22 @@ class TestOnboarding:
             headers=auth_headers(token_admin_empresa_demo),
         )
         assert resp.status_code == 403
+
+    @pytest.fixture(scope="class", autouse=True)
+    def cleanup_tenant(self):
+        yield
+        # Após todos os testes da classe, deletar o tenant criado
+        if TestOnboarding.tenant_id_criado:
+            db_url = os.environ.get(
+                "DATABASE_URL",
+                "postgresql+psycopg://postgres:postgres@localhost:5432/masterdata",
+            )
+            if "@db:" in db_url:
+                db_url = db_url.replace("@db:", "@localhost:")
+            engine = create_engine(db_url)
+            with engine.connect() as conn:
+                conn.execute(
+                    text("DELETE FROM tenants WHERE id = :id"),
+                    {"id": TestOnboarding.tenant_id_criado},
+                )
+                conn.commit()

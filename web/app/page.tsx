@@ -46,6 +46,7 @@ type DashboardStats = {
   user_count?: number
   section_title?: string
   show_user_count?: boolean
+  user_name?: string | null
 }
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -213,8 +214,9 @@ export default function DashboardPage() {
     router.push(`/governance?status=${encodeURIComponent(entry.name)}`)
   }
 
-  const greeting = user
-    ? `Olá, ${user.name.split(' ')[0]}.`
+  const displayName = stats?.user_name?.split(' ')[0] || user?.name?.split(' ')[0] || 'Usuário'
+  const greeting = (stats?.user_name ?? user?.name)
+    ? `Olá, ${displayName}.`
     : 'Bem-vindo ao MDM Platform.'
 
   return (

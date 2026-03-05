@@ -31,18 +31,22 @@ _URGENCY_LABELS = {
 # Canonical display name for any status that might exist in legacy data.
 # Keys are lower-cased for case-insensitive lookup.
 _STATUS_CANONICAL: dict[str, str] = {
-    # English legacy → Portuguese canonical
-    "pending":    "Triagem",
-    "approved":   "Finalizado",
-    "rejected":   "Finalizado",
-    # Lowercase variants of workflow step names
-    "triagem":    "Triagem",
-    "fiscal":     "Fiscal",
-    "master":     "Master",
-    "mrp":        "MRP",
-    "pendente":   "MRP",
-    "finalizado": "Finalizado",
-    "compras":    "Triagem",
+    # Novos status do workflow
+    "cadastro":               "Central de Cadastro",
+    "compras":                "Compras",
+    "mrp":                    "MRP",
+    "fiscal":                 "Fiscal",
+    "contabilidade":          "Contabilidade",
+    "finalizado":             "Finalizado",
+    "rejeitado":              "Rejeitado",
+    "aguardando_complemento": "Aguardando Complemento",
+    # Legacy
+    "pending":   "Central de Cadastro",
+    "approved":  "Finalizado",
+    "rejected":  "Rejeitado",
+    "triagem":   "Central de Cadastro",
+    "master":    "Central de Cadastro",
+    "pendente":  "Central de Cadastro",
 }
 
 
@@ -83,9 +87,9 @@ def get_dashboard_stats(
     Returns aggregated datasets for the home dashboard.
 
     When authenticated, data is filtered by role:
-    - **ADMIN**       : all data
-    - **SOLICITANTE** : requests created by the user (user_id match)
-    - **TRIAGEM/FISCAL/MASTER/MRP** (role_type=etapa): status == role name
+    - **ADMIN** / **MASTER** : all data (no filter)
+    - **SOLICITANTE**        : requests created by the user (user_id match)
+    - **CADASTRO/COMPRAS/MRP/FISCAL/CONTABILIDADE** (role_type=etapa): status == role name
 
     When unauthenticated, returns all data (legacy behavior).
 
@@ -97,11 +101,16 @@ def get_dashboard_stats(
     role_name = current_user.role.name.upper() if (current_user and current_user.role) else None
     role_type = current_user.role.role_type if (current_user and current_user.role) else None
 
-    if role_name == "ADMIN":
-        pass  # no filter
+    is_master = (
+        (current_user and current_user.role and current_user.role.name.upper() == "MASTER")
+        or (current_user and getattr(current_user, "is_master", False))
+    )
+
+    if is_master or role_name == "ADMIN":
+        pass  # sem filtro — vê tudo do tenant
     elif role_name == "SOLICITANTE" and current_user:
         base = base.filter(MaterialRequestORM.user_id == current_user.id)
-    elif role_type == "etapa" and current_user and current_user.role and role_name:
+    elif role_type == "etapa" and current_user and role_name:
         base = base.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
 
     # ── Total ──────────────────────────────────────────────────────────────────
@@ -148,11 +157,14 @@ def get_dashboard_stats(
     )
 
     section_title = (
-        "Minha Fila" if role_type == "etapa"
+        "Atividade Recente" if (is_master or role_name == "ADMIN")
+        else "Minha Fila" if role_type == "etapa"
         else "Minhas Solicitações" if role_name == "SOLICITANTE"
         else "Atividade Recente"
     )
-    show_user_count = role_name == "ADMIN" if role_name else True  # unauthenticated: legacy (show all)
+    show_user_count = is_master or role_name == "ADMIN" if role_name else True  # unauthenticated: legacy (show all)
+
+    user_name = current_user.name if current_user else None
 
     return {
         "total_requests": total,
@@ -163,4 +175,5 @@ def get_dashboard_stats(
         "user_count": user_count,
         "section_title": section_title,
         "show_user_count": show_user_count,
+        "user_name": user_name,
     }
