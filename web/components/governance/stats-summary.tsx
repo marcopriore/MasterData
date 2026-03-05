@@ -8,35 +8,53 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  Timer,
 } from "lucide-react"
 import type { MaterialRequest } from "./request-card"
+
+export type GovernanceStats = {
+  total: number
+  em_andamento: number
+  atrasadas: number
+  taxa_rejeicao: number
+  tempo_medio_ciclo: number
+  sla_por_etapa: Record<string, number>
+}
 
 interface StatsSummaryProps {
   requests: MaterialRequest[]
   variant?: "default" | "governance"
+  governanceStats?: GovernanceStats | null
+  governanceStatsLoading?: boolean
 }
 
-export function StatsSummary({ requests, variant = "default" }: StatsSummaryProps) {
+export function StatsSummary({ requests, variant = "default", governanceStats, governanceStatsLoading }: StatsSummaryProps) {
   if (variant === "governance") {
-    const pendente = requests.filter((r) => {
-      const s = (r.statusLabel || r.status || "").toLowerCase()
-      return s === "pending" || s === "pendente" || r.status === "draft"
-    }).length
-    const aprovado = requests.filter((r) => {
-      const s = (r.statusLabel || r.status || "").toLowerCase()
-      return s === "approved" || s === "aprovado" || r.status === "completed"
-    }).length
-    const rejeitado = requests.filter((r) => {
-      const s = (r.statusLabel || r.status || "").toLowerCase()
-      return s === "rejected" || s === "rejeitado"
-    }).length
-    const stats = [
-      { label: "PENDENTE", value: pendente, icon: <Clock className="size-5" />, color: "text-blue-300", bgColor: "bg-blue-500/25", labelColor: "text-blue-300" },
-      { label: "APROVADO", value: aprovado, icon: <CheckCircle2 className="size-5" />, color: "text-green-300", bgColor: "bg-green-500/25", labelColor: "text-green-300" },
-      { label: "REJEITADO", value: rejeitado, icon: <XCircle className="size-5" />, color: "text-red-300", bgColor: "bg-red-500/25", labelColor: "text-red-300" },
-    ]
+    const stats = governanceStats
+      ? [
+          { label: "EM ANDAMENTO", value: governanceStats.em_andamento, icon: <Clock className="size-5" />, color: "text-blue-300", bgColor: "bg-blue-500/25", labelColor: "text-blue-300" },
+          { label: "ATRASADAS", value: governanceStats.atrasadas, icon: <AlertTriangle className="size-5" />, color: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300", bgColor: governanceStats.atrasadas > 0 ? "bg-red-500/25" : "bg-green-500/25", labelColor: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300" },
+          { label: "TAXA DE REJEIÇÃO", value: `${governanceStats.taxa_rejeicao}%`, icon: <XCircle className="size-5" />, color: "text-orange-300", bgColor: "bg-orange-500/25", labelColor: "text-orange-300" },
+          { label: "TEMPO MÉDIO DE CICLO", value: `${governanceStats.tempo_medio_ciclo} dias`, icon: <Timer className="size-5" />, color: "text-purple-300", bgColor: "bg-purple-500/25", labelColor: "text-purple-300" },
+        ]
+      : []
+    if (governanceStatsLoading || stats.length === 0) {
+      return (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-4 rounded-xl border border-[#192D50]/30 bg-[#0F1C38] p-4 shadow-sm dark:border-zinc-400/40 dark:bg-[#0F1C38] animate-pulse">
+              <div className="size-12 shrink-0 rounded-full bg-white/10" />
+              <div className="flex-1">
+                <div className="h-8 w-12 rounded bg-white/10" />
+                <div className="mt-2 h-4 w-24 rounded bg-white/10" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
     return (
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((stat) => (
           <div
             key={stat.label}

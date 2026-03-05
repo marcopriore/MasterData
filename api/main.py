@@ -310,11 +310,13 @@ from models import (
 
 from routes.admin import router as admin_router
 from routes.dashboard import router as dashboard_router
+from routes.governance import router as governance_router
 from routes.uploads import router as uploads_router
 from orm_models import RequestAttachmentORM  # noqa: F401 — ensures table is registered
 
 app.include_router(admin_router)
 app.include_router(dashboard_router)
+app.include_router(governance_router)
 app.include_router(uploads_router)
 
 # Serve uploaded files at  GET /uploads/<request_id>/<filename>

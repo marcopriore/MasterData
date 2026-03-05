@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -99,7 +99,7 @@ function SortableCard({
       <RequestCard
         request={request}
         variant="kanban"
-        invalidStatus={!allValidStatuses.has(request.status)}
+        invalidStatus={!allValidStatuses.has((request.status || "").toLowerCase())}
         onCompleteData={onCompleteData}
         onViewDetails={onViewDetails}
         showActionButtons={showActionButtons}
@@ -190,16 +190,23 @@ export function KanbanBoard({
     })
   )
 
-  const allValidStatuses = new Set(columns.map((c) => c.id))
-
-  // Build a lookup: status_key → column id (same thing here, but explicit)
+  const allStatusesSet = useMemo(() => {
+    const s = new Set(columns.map((c) => c.id.toLowerCase()))
+    s.add("rejeitado")
+    return s
+  }, [columns])
   const cardsByColumn = useCallback(
     (colId: string) => {
-      const matched = localRequests.filter((r) => r.status === colId)
+      const colLower = colId.toLowerCase()
+      const matched = localRequests.filter(
+        (r) => (r.status || "").toLowerCase() === colLower
+      )
       // Orphaned cards (unknown status) fall into the first column
       const orphans =
         columns.length > 0 && colId === columns[0].id
-          ? localRequests.filter((r) => !allValidStatuses.has(r.status))
+          ? localRequests.filter(
+              (r) => !allStatusesSet.has((r.status || "").toLowerCase())
+            )
           : []
       return [...matched, ...orphans]
     },
@@ -290,9 +297,12 @@ export function KanbanBoard({
     )
   }
 
-  const columnsToRender = showActionButtons
-    ? columns.filter((col) => cardsByColumn(col.id).length > 0)
-    : columns
+  // Sempre exibir todas as colunas do workflow (ordem fixa). Adicionar Rejeitadas ao final se houver.
+  const hasRejeitadas = localRequests.some((r) => (r.status || "").toLowerCase() === "rejeitado")
+  const rejeitadasColumn: KanbanColumn | null = hasRejeitadas
+    ? { id: "rejeitado", label: "Rejeitadas", ...FIXED_COLORS.rejected }
+    : null
+  const columnsToRender = rejeitadasColumn ? [...columns, rejeitadasColumn] : columns
 
   return (
     <DndContext
@@ -353,7 +363,7 @@ export function KanbanBoard({
                         <SortableCard
                           key={req.id}
                           request={req}
-                          allValidStatuses={allValidStatuses}
+                          allValidStatuses={allStatusesSet}
                           onCompleteData={onCompleteData}
                           onViewDetails={onViewDetails}
                           showActionButtons={showActionButtons}
@@ -378,7 +388,7 @@ export function KanbanBoard({
             <RequestCard
               request={activeCard}
               variant="kanban"
-              invalidStatus={!allValidStatuses.has(activeCard.status)}
+              invalidStatus={!allStatusesSet.has((activeCard.status || "").toLowerCase())}
             />
           </div>
         ) : null}

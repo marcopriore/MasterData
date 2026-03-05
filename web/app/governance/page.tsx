@@ -6,7 +6,7 @@ import { apiGet, apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { KanbanBoard } from '@/components/governance/kanban-board'
 import { ListView } from '@/components/governance/list-view'
 import { FiltersBar } from '@/components/governance/filters-bar'
-import { StatsSummary } from '@/components/governance/stats-summary'
+import { StatsSummary, type GovernanceStats } from '@/components/governance/stats-summary'
 import { EmptyColumn } from '@/components/governance/request-card'
 import type { MaterialRequest } from '@/components/governance/request-card'
 import { Button } from '@/components/ui/button'
@@ -189,6 +189,20 @@ export default function GovernancePage() {
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyFetched, setHistoryFetched] = useState(false)
+  const [governanceStats, setGovernanceStats] = useState<GovernanceStats | null>(null)
+  const [governanceStatsLoading, setGovernanceStatsLoading] = useState(true)
+
+  useEffect(() => {
+    if (!ready || !accessToken) {
+      if (ready && !accessToken) setGovernanceStatsLoading(false)
+      return
+    }
+    setGovernanceStatsLoading(true)
+    apiGetWithAuth<GovernanceStats>('/api/governance/stats', accessToken)
+      .then((data) => setGovernanceStats(data ?? null))
+      .catch(() => setGovernanceStats(null))
+      .finally(() => setGovernanceStatsLoading(false))
+  }, [ready, accessToken])
 
   useEffect(() => {
     if (!accessToken) return
@@ -520,8 +534,13 @@ export default function GovernancePage() {
       <div className="mx-auto max-w-7xl mt-4">
 
         <div className="space-y-6">
-          {/* Stats Summary – cards carry their own dark background */}
-          <StatsSummary requests={materialRequests} variant="governance" />
+          {/* Stats Summary – indicadores de SLA e gestão */}
+          <StatsSummary
+            requests={materialRequests}
+            variant="governance"
+            governanceStats={governanceStats}
+            governanceStatsLoading={governanceStatsLoading}
+          />
 
           {/* Card container - same as AttributesTable Card */}
           <Card className="gap-0 rounded-2xl border pt-0 dark:border-zinc-700/50">
