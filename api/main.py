@@ -44,8 +44,24 @@ from bulk_import_pdm import (
 )
 from notifications import notify_request_event
 from security import hash_password
+from slowapi.errors import RateLimitExceeded
+
+from limiter import limiter
+
+
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Handler customizado que adiciona o header Retry-After na resposta 429."""
+    retry_after = getattr(exc, "retry_after", 60)
+    return JSONResponse(
+        status_code=429,
+        content={"error": f"Rate limit exceeded: {exc.detail}"},
+        headers={"Retry-After": str(retry_after)},
+    )
+
 
 app = FastAPI(title="MasterData API", version="1.8.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
 
 @app.exception_handler(IntegrityError)

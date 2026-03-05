@@ -31,12 +31,13 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from deps import get_db, get_db_always_raw, get_admin_user, get_current_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs, require_master, set_tenant_in_session
+from limiter import limiter
 from orm_models import (
     FieldDictionaryORM,
     MaterialRequestORM,
@@ -333,7 +334,9 @@ def get_user_import_template(
     "/users/import",
     summary="Importar usuários em massa via Excel",
 )
+@limiter.limit("10/minute")
 async def import_users(
+    request: Request,
     file: UploadFile = File(..., description="Planilha Excel para importação"),
     dry_run: bool = Query(True, description="Se True, apenas valida sem gravar"),
     db: Session = Depends(get_db),
@@ -706,7 +709,12 @@ def delete_user(
     summary="Autenticação por e-mail e senha",
     response_description="Dados do usuário autenticado com perfil e permissões",
 )
-def login(payload: LoginRequest, db: Session = Depends(get_db_always_raw)):
+@limiter.limit("10/minute")
+def login(
+    request: Request,
+    payload: LoginRequest,
+    db: Session = Depends(get_db_always_raw),
+):
     """
     Valida as credenciais e retorna os dados completos do usuário,
     incluindo o perfil e todas as flags de permissão.
@@ -780,7 +788,9 @@ def auth_me(current_user: UserORM = Depends(get_current_user)):
     "/auth/switch-tenant",
     summary="Chaveia contexto de tenant (apenas MASTER)",
 )
+@limiter.limit("30/minute")
 def switch_tenant(
+    request: Request,
     payload: SwitchTenantBody,
     db: Session = Depends(get_db_always_raw),
     current_user: UserORM = Depends(require_master),
@@ -815,7 +825,9 @@ def switch_tenant(
     "/auth/switch-tenant/back",
     summary="Retorna ao tenant próprio do MASTER",
 )
+@limiter.limit("30/minute")
 def switch_tenant_back(
+    request: Request,
     db: Session = Depends(get_db_always_raw),
     current_user: UserORM = Depends(require_master),
 ):
@@ -876,7 +888,9 @@ def list_tenants(
     status_code=status.HTTP_201_CREATED,
     summary="Onboarding completo: tenant + admin + roles + workflow + field dictionary",
 )
+@limiter.limit("5/minute")
 def onboard_tenant(
+    request: Request,
     body: TenantOnboardingRequest,
     db: Session = Depends(get_db_always_raw),
     _: UserORM = Depends(require_master),

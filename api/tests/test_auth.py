@@ -66,3 +66,21 @@ class TestAuthMe:
         data = resp.json()
         assert data["email"] == "master@masterdata.com"
         assert data["is_master"] is True
+
+
+class TestRateLimit:
+    """Testes de rate limiting — executados por último (ordem alfabética)."""
+
+    def test_rate_limit_login(self):
+        """Deve retornar 429 após 10 tentativas de login por minuto, com Retry-After."""
+        for _ in range(10):
+            client.post(
+                "/admin/auth/login",
+                json={"email": "teste@teste.com", "password": "errada"},
+            )
+        resp = client.post(
+            "/admin/auth/login",
+            json={"email": "teste@teste.com", "password": "errada"},
+        )
+        assert resp.status_code == 429
+        assert any(k.lower() == "retry-after" for k in resp.headers)

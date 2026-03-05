@@ -71,3 +71,22 @@ def token_master_viewing_empresa_demo(token_master):
 @pytest.fixture(scope="session")
 def http_client():
     return client
+
+
+@pytest.fixture(autouse=True)
+def reset_limiter():
+    """Limpa o rate limit storage entre testes para evitar que testes de rate limit
+    esgotem o limite e quebrem fixtures (token_master, etc.) que dependem de login."""
+    from limiter import limiter
+
+    try:
+        limiter.reset()
+    except (NotImplementedError, AttributeError):
+        storage = getattr(limiter, "_storage", None)
+        if storage is not None and hasattr(storage, "storage"):
+            storage.storage.clear()
+    yield
+    try:
+        limiter.reset()
+    except (NotImplementedError, AttributeError):
+        pass
