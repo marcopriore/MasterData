@@ -27,6 +27,7 @@ from pathlib import Path
 # ── Garante que o .env seja carregado antes de importar ───────────────────────
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
+# noqa: E402 — imports abaixo dependem das variáveis de ambiente carregadas acima
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

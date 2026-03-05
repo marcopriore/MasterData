@@ -23,7 +23,6 @@ Max file size     : 10 MB (enforced in the endpoint body).
 from __future__ import annotations
 
 import mimetypes
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path

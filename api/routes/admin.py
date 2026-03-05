@@ -284,7 +284,7 @@ def list_users(
 
 
 # Import/export must be defined before /users/{user_id} to match correctly
-DEFAULT_PASSWORD = "Mudar@1234"
+DEFAULT_PASSWORD = "Mudar@1234"  # nosec B105 — senha temporária, alterada no primeiro acesso
 
 
 @router.get(
@@ -752,7 +752,7 @@ def switch_tenant(
     """
     tenant = db.query(TenantORM).filter(
         TenantORM.id == payload.tenant_id,
-        TenantORM.is_active == True,
+        TenantORM.is_active,
     ).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant não encontrado ou inativo")

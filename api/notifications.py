@@ -82,7 +82,7 @@ def get_email_template(
         "request_created": (
             f"Solicitação {request_number} criada",
             header
-            + f"  <p>Olá,</p>"
+            + "  <p>Olá,</p>"
             + f"  <p>A solicitação <strong>{request_number}</strong> foi criada por {requester_name}.</p>"
             + highlight
             + footer,
@@ -90,7 +90,7 @@ def get_email_template(
         "request_assigned": (
             f"Solicitação {request_number} em atendimento",
             header
-            + f"  <p>Olá,</p>"
+            + "  <p>Olá,</p>"
             + f"  <p>{actor_name} iniciou o atendimento da solicitação <strong>{request_number}</strong>.</p>"
             + highlight
             + footer,
@@ -98,7 +98,7 @@ def get_email_template(
         "request_approved": (
             f"Solicitação {request_number} aprovada - {stage}",
             header
-            + f"  <p>Olá,</p>"
+            + "  <p>Olá,</p>"
             + f"  <p>{actor_name} aprovou a solicitação <strong>{request_number}</strong>, que avançou para {stage}.</p>"
             + highlight
             + footer,
@@ -106,7 +106,7 @@ def get_email_template(
         "request_rejected": (
             f"Solicitação {request_number} rejeitada",
             header
-            + f"  <p>Olá,</p>"
+            + "  <p>Olá,</p>"
             + f"  <p>{actor_name} rejeitou a solicitação <strong>{request_number}</strong>.</p>"
             + (f"  <p><em>Justificativa: {justification}</em></p>" if justification else "")
             + highlight
@@ -115,7 +115,7 @@ def get_email_template(
         "request_completed": (
             f"Solicitação {request_number} concluída",
             header
-            + f"  <p>Olá,</p>"
+            + "  <p>Olá,</p>"
             + f"  <p>A solicitação <strong>{request_number}</strong> foi concluída por {actor_name}.</p>"
             + highlight
             + footer,

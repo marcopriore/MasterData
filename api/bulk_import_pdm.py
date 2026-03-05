@@ -13,7 +13,7 @@ from io import BytesIO
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
 from bulk_import import HEADER_FILL, HEADER_FONT, EXAMPLE_FILL

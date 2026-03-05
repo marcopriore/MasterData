@@ -144,7 +144,7 @@ def get_dashboard_stats(
     # ── PDMs and users (always total) ──────────────────────────────────────────
     pdm_count: int = db.query(func.count(PDMOrm.id)).scalar() or 0
     user_count: int = (
-        db.query(func.count(UserORM.id)).filter(UserORM.is_active == True).scalar() or 0
+        db.query(func.count(UserORM.id)).filter(UserORM.is_active).scalar() or 0
     )
 
     section_title = (

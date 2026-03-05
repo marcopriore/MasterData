@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 load_dotenv(Path(__file__).parent / ".env")
+# noqa: E402 — imports abaixo dependem das variáveis de ambiente carregadas acima
 
 from sqlalchemy import create_engine, text
 

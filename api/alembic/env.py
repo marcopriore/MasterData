@@ -15,7 +15,6 @@ load_dotenv(BASE_DIR / ".env")
 
 # now it's safe
 from db import Base  # noqa: E402
-import orm_models  # noqa: E402  (garante carregar models)
 
 config = context.config
 

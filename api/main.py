@@ -1,6 +1,7 @@
 import logging
 from dotenv import load_dotenv
 load_dotenv()
+# noqa: E402 — imports abaixo dependem das variáveis de ambiente carregadas acima
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -270,7 +271,6 @@ async def debug_tenant(
 
 
 from models import (
-    Product,
     ProductCreate,
     PDMCreate,
     RequestCreate,
@@ -285,11 +285,9 @@ from models import (
     WorkflowMigratePayload,
     WorkflowUpdate,
     WorkflowHeaderCreate,
-    RequestOut,
     MoveToPayload,
     FieldDictionaryCreate,
     FieldDictionaryUpdate,
-    FieldDictionaryResponse,
     MaterialStandardizeBody,
     ErpIntegrateBody,
 )
@@ -371,7 +369,7 @@ def list_my_fields(
     role_name = current_user.role.name.strip()
     q = (
         db.query(FieldDictionaryORM)
-        .filter(FieldDictionaryORM.is_active == True)
+        .filter(FieldDictionaryORM.is_active)
         .filter(func.lower(FieldDictionaryORM.responsible_role) == role_name.lower())
         .order_by(FieldDictionaryORM.display_order, FieldDictionaryORM.id)
     )
@@ -390,7 +388,7 @@ def list_field_labels(
     """
     rows = (
         db.query(FieldDictionaryORM)
-        .filter(FieldDictionaryORM.is_active == True)
+        .filter(FieldDictionaryORM.is_active)
         .all()
     )
     return [{"field_name": r.field_name, "field_label": r.field_label} for r in rows]
@@ -763,7 +761,7 @@ def create_pdm(payload: PDMCreate, db: Session = Depends(get_db)):
 # -------------------------------
 # HELPERS
 def _get_active_workflow_id(db: Session) -> int | None:
-    row = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.is_active == True).first()
+    row = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.is_active).first()
     return row.id if row else None
 
 
@@ -773,7 +771,7 @@ def _get_first_step_status_key(workflow_id: int, db: Session) -> str:
         db.query(WorkflowConfigORM)
         .filter(
             WorkflowConfigORM.workflow_id == workflow_id,
-            WorkflowConfigORM.is_active == True,
+            WorkflowConfigORM.is_active,
         )
         .order_by(WorkflowConfigORM.order.asc())
         .first()
@@ -955,8 +953,8 @@ def assign_request(
     )
     try:
         notify_request_event(db, "request_assigned", row, current_user, stage=row.status)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 
 
@@ -1011,7 +1009,7 @@ def update_request_attributes(
             db.query(FieldDictionaryORM)
             .filter(
                 FieldDictionaryORM.field_name == field_name,
-                FieldDictionaryORM.is_active == True,
+                FieldDictionaryORM.is_active,
             )
             .first()
         )
@@ -1126,8 +1124,8 @@ def create_request(
     )
     try:
         notify_request_event(db, "request_created", row, current_user)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
 
     # Eager-load relationships for the response
     row = (
@@ -1166,7 +1164,7 @@ def get_next_status(current_status: str, workflow_id: int, db: Session) -> str |
         db.query(WorkflowConfigORM)
         .filter(
             WorkflowConfigORM.workflow_id == workflow_id,
-            WorkflowConfigORM.is_active == True,
+            WorkflowConfigORM.is_active,
         )
         .order_by(WorkflowConfigORM.order.asc())
         .all()
@@ -1258,8 +1256,8 @@ def update_request_status(
     try:
         event_type = "request_completed" if next_status == "completed" else "request_approved"
         notify_request_event(db, event_type, row, current_user, stage=next_step_label)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 
 
@@ -1305,8 +1303,8 @@ def reject_request(
     )
     try:
         notify_request_event(db, "request_rejected", row, current_user, justification=justification)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 
 
@@ -2121,12 +2119,12 @@ def list_notifications(
     """Lista notificações do usuário logado."""
     q = db.query(NotificationORM).filter(NotificationORM.user_id == current_user.id)
     if unread_only:
-        q = q.filter(NotificationORM.is_read == False)
+        q = q.filter(~NotificationORM.is_read)
     q = q.order_by(NotificationORM.created_at.desc()).limit(limit)
     notifications = q.all()
     unread_count = (
         db.query(func.count(NotificationORM.id))
-        .filter(NotificationORM.user_id == current_user.id, NotificationORM.is_read == False)
+        .filter(NotificationORM.user_id == current_user.id, ~NotificationORM.is_read)
         .scalar() or 0
     )
     return {
@@ -2172,7 +2170,7 @@ def mark_all_notifications_read(
     """Marca todas as notificações do usuário como lidas."""
     rows = db.query(NotificationORM).filter(
         NotificationORM.user_id == current_user.id,
-        NotificationORM.is_read == False,
+        ~NotificationORM.is_read,
     ).all()
     for r in rows:
         r.is_read = True

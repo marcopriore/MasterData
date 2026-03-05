@@ -69,7 +69,7 @@ def get_current_user_optional(
     user = (
         db.query(UserORM)
         .options(joinedload(UserORM.role), joinedload(UserORM.tenant))
-        .filter(UserORM.id == user_id, UserORM.is_active == True)
+        .filter(UserORM.id == user_id, UserORM.is_active)
         .first()
     )
     return user
