@@ -1010,6 +1010,7 @@ def assign_request(
     try:
         notify_request_event(db, "request_assigned", row, current_user, stage=row_status)
     except Exception as e:
+        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 
@@ -1212,6 +1213,7 @@ def create_request(
     try:
         notify_request_event(db, "request_created", row, current_user)
     except Exception as e:
+        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
 
     # Eager-load relationships for the response
@@ -1351,7 +1353,54 @@ def update_request_status(
         event_type = "request_completed" if next_status == "completed" else "request_approved"
         notify_request_event(db, event_type, row, current_user, stage=next_step_label)
     except Exception as e:
+        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
+
+    # ── Auto-criar material na Base de Dados ao finalizar ─────────────────────
+    FINAL_STATUSES = {"completed", "finalizado"}
+    if next_status and next_status.lower() in FINAL_STATUSES:
+        try:
+            prov_sap_code = f"PROV-{row_id:08d}"
+            existing = db.query(MaterialDatabaseORM).filter(
+                MaterialDatabaseORM.sap_code == prov_sap_code
+            ).first()
+            print(f"[DEBUG] next_status={next_status!r} | prov_sap_code={prov_sap_code!r} | existing={existing}")
+            if not existing:
+                pdm = db.query(PDMOrm).filter(PDMOrm.id == row.pdm_id).first()
+                pdm_code = pdm.internal_code if pdm else None
+                pdm_name = pdm.name if pdm else None
+                description = row.generated_description or prov_sap_code
+                material = MaterialDatabaseORM(
+                    tenant_id=tid,
+                    sap_code=prov_sap_code,
+                    description=description,
+                    status="Ativo",
+                    pdm_code=pdm_code,
+                    pdm_name=pdm_name,
+                    source="mdm_request",
+                    erp_status="integrado",
+                    erp_integrated_at=datetime.now(timezone.utc),
+                    standardized_at=datetime.now(timezone.utc),
+                    standardized_by=current_user.id if current_user else None,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                db.add(material)
+                db.commit()
+                refresh_with_rls(db, material, tid, getattr(current_user, "is_master", False) if current_user else False)
+                log_system_event(
+                    db,
+                    current_user.id if current_user else None,
+                    "material",
+                    "auto_created",
+                    f"Material criado automaticamente na Base de Dados para solicitação #{row_id} (sap_code provisório: {prov_sap_code})",
+                    tid,
+                    is_master=getattr(current_user, "is_master", False) if current_user else False,
+                )
+        except Exception as e:
+            db.rollback()
+            print(f"[WARN] Falha ao criar material na Base de Dados para request #{row_id}: {e}")
+
     return _request_to_dict(row)
 
 
@@ -1402,6 +1451,7 @@ def reject_request(
     try:
         notify_request_event(db, "request_rejected", row, current_user, justification=justification)
     except Exception as e:
+        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 

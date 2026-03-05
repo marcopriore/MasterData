@@ -89,7 +89,7 @@ def get_dashboard_stats(
     When authenticated, data is filtered by role:
     - **ADMIN** / **MASTER** : all data (no filter)
     - **SOLICITANTE**        : requests created by the user (user_id match)
-    - **CADASTRO/COMPRAS/MRP/FISCAL/CONTABILIDADE** (role_type=etapa): status == role name
+    - **CADASTRO/COMPRAS/MRP/FISCAL/CONTABILIDADE** (role_type etapa/operacional): status == role name
 
     When unauthenticated, returns all data (legacy behavior).
 
@@ -110,7 +110,7 @@ def get_dashboard_stats(
         pass  # sem filtro — vê tudo do tenant
     elif role_name == "SOLICITANTE" and current_user:
         base = base.filter(MaterialRequestORM.user_id == current_user.id)
-    elif role_type == "etapa" and current_user and role_name:
+    elif role_type in ("etapa", "operacional") and current_user and role_name:
         base = base.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
 
     # ── Total ──────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ def get_dashboard_stats(
 
     section_title = (
         "Atividade Recente" if (is_master or role_name == "ADMIN")
-        else "Minha Fila" if role_type == "etapa"
+        else "Minha Fila" if role_type in ("etapa", "operacional")
         else "Minhas Solicitações" if role_name == "SOLICITANTE"
         else "Atividade Recente"
     )

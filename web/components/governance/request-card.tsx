@@ -368,6 +368,9 @@ export function RequestCard({
   }
 
   // Kanban card
+  const FINAL_STATUSES = ['completed', 'finalizado', 'rejected', 'rejeitado']
+  const isFinalStatus = FINAL_STATUSES.includes((request.status ?? '').toLowerCase())
+
   const descriptionText = request.generated_description || request.description || '—'
   const assignedToId = request.assigned_to_id ?? null
   const isAssignedToMe = assignedToId !== null && currentUserId !== null && assignedToId === currentUserId
@@ -437,7 +440,7 @@ export function RequestCard({
         </div>
 
         {/* Assignment badge and Iniciar Atendimento — Aprovar/Rejeitar só no modal de detalhes */}
-        {showActionButtons && (
+        {showActionButtons && !isFinalStatus && (
           <div className="pt-2" onClick={(e) => e.stopPropagation()}>
             {isAssignedToMe && (
               <div className="text-[10px] font-medium text-primary/90">Você está atendendo</div>

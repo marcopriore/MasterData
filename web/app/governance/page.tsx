@@ -297,6 +297,9 @@ export default function GovernancePage() {
 
   const canEditPdmAttributes = isAssignedToMe && user?.role_name === 'CADASTRO'
 
+  const FINAL_STATUSES = ['completed', 'finalizado', 'rejected', 'rejeitado']
+  const isSelectedFinal = FINAL_STATUSES.includes((selectedRequest?.status ?? '').toLowerCase())
+
   const hasTechnicalAttributes =
     selectedRequest?.technical_attributes &&
     Object.keys(selectedRequest.technical_attributes).length > 0
@@ -929,7 +932,7 @@ export default function GovernancePage() {
             </Tabs>
 
               <DialogFooter className="sticky bottom-0 flex-col items-stretch gap-2 border-t border-slate-200 bg-white px-6 py-4 pt-2 dark:border-zinc-700/50 dark:bg-card">
-                {showActionButtons && isAssignedToMe && (
+                {showActionButtons && isAssignedToMe && !isSelectedFinal && (
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
