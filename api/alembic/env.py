@@ -1,22 +1,36 @@
+"""
+Alembic env — executa migrações com DATABASE_URL (postgres/admin).
+"""
 from __future__ import annotations
 
 import os
+import sys
 from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
-# --- load .env BEFORE importing db ---
-from dotenv import load_dotenv
+# Adicionar api/ ao path para importar os models
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # ...\api
+BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env")
 
-# now it's safe
-from db import Base  # noqa: E402
+from db import Base
+import orm_models  # noqa: F401 — registra models em Base.metadata
 
 config = context.config
+
+# Usar DATABASE_URL do .env (conexão postgres/admin, não mdm_app)
+database_url = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg://postgres:postgres@localhost:5432/masterdata",
+)
+if database_url and "@db:" in database_url:
+    database_url = database_url.replace("@db:", "@localhost:")
+config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -24,44 +38,35 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def get_url() -> str:
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise RuntimeError("DATABASE_URL não definido (api/.env)")
-    return url
-
-
 def run_migrations_offline() -> None:
-    url = get_url()
+    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_schemas=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
 
 def run_migrations_online() -> None:
-    configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = get_url()
-
+    section = config.get_section(config.config_ini_section) or {}
+    section["sqlalchemy.url"] = config.get_main_option("sqlalchemy.url") or database_url
     connectable = engine_from_config(
-        configuration,
+        section,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_schemas=True,
         )
-
         with context.begin_transaction():
             context.run_migrations()
 
