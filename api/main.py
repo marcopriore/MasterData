@@ -5,10 +5,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from fastapi import Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi import Body, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
@@ -245,6 +245,30 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/debug/tenant")
+async def debug_tenant(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Endpoint temporário para debug do RLS."""
+    result = db.execute(text(
+        "SELECT current_setting('app.tenant_id', true) as tid, "
+        "current_setting('app.is_master', true) as is_master"
+    )).fetchone()
+
+    count = db.execute(text(
+        "SELECT COUNT(*) FROM material_database"
+    )).scalar()
+
+    auth = request.headers.get("Authorization", "none")
+    return {
+        "session_tenant_id": result[0] if result else None,
+        "session_is_master": result[1] if result else None,
+        "visible_materials": count,
+        "auth_header": auth[:50] + "..." if len(auth) > 50 else auth,
+    }
+
+
 from models import (
     Product,
     ProductCreate,
@@ -379,6 +403,7 @@ def create_field(
     current_user: UserORM = Depends(get_admin_user),
 ):
     row = FieldDictionaryORM(
+        tenant_id=current_user.tenant_id,
         field_name=payload.field_name,
         field_label=payload.field_label,
         sap_field=payload.sap_field,
@@ -396,6 +421,7 @@ def create_field(
     log_system_event(
         db, current_user.id, "fields", "field_created",
         f"Campo '{payload.field_label}' ({payload.field_name}) criado por {current_user.name}",
+        current_user.tenant_id,
     )
     return _field_to_dict(row)
 
@@ -447,6 +473,7 @@ def update_field(
     log_system_event(
         db, current_user.id, "fields", "field_updated",
         f"Campo #{field_id} ({row.field_label}) atualizado por {current_user.name}",
+        current_user.tenant_id,
     )
     return _field_to_dict(row)
 
@@ -466,6 +493,7 @@ def delete_field(
     log_system_event(
         db, current_user.id, "fields", "field_deactivated",
         f"Campo #{field_id} ({row.field_label}) desativado por {current_user.name}",
+        row.tenant_id,
     )
     return _field_to_dict(row)
 
@@ -671,6 +699,7 @@ async def import_pdm(
         "pdm",
         "bulk_import",
         f"PDM: {pdm_created} criados, {pdm_updated} atualizados. Atributos: {attr_created} criados, {attr_updated} atualizados, {attr_deleted} deletados por {current_user.email}",
+        current_user.tenant_id,
     )
     return {
         "dry_run": False,
@@ -916,11 +945,13 @@ def assign_request(
     log_request_event(
         db, row.id, current_user.id, "assigned",
         f"Atendimento iniciado por {current_user.name}",
+        row.tenant_id,
         stage=row.status,
     )
     log_system_event(
         db, current_user.id, "requests", "request_assigned",
         f"Solicitação #{row.id} atribuída a {current_user.name}",
+        row.tenant_id,
     )
     try:
         notify_request_event(db, "request_assigned", row, current_user, stage=row.status)
@@ -993,12 +1024,14 @@ def update_request_attributes(
         log_request_event(
             db, row.id, current_user.id, "fields_saved",
             f"Campos atualizados por {current_user.name}",
+            row.tenant_id,
             event_data={"fields_changed": fields_changed},
             stage=row.status,
         )
         log_system_event(
             db, current_user.id, "requests", "request_fields_saved",
             f"Campos da solicitação #{row.id} salvos por {current_user.name}",
+            row.tenant_id,
             event_data={"fields_changed": fields_changed},
         )
     return _request_to_dict(row)
@@ -1049,7 +1082,9 @@ def create_request(
                 parts.append(f"[{attr.get('abbreviation', attr_id)}]")
         generated_description = " ".join(parts)
 
+    tenant_id = pdm.tenant_id
     row = MaterialRequestORM(
+        tenant_id=tenant_id,
         pdm_id=payload.pdm_id,
         workflow_id=wf_id,
         status=initial_status,
@@ -1081,11 +1116,13 @@ def create_request(
     log_request_event(
         db, row.id, current_user.id if current_user else None, "created",
         f"Solicitação criada por {requester_name}",
+        tenant_id,
         stage=initial_status,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_created",
         f"Solicitação #{row.id} criada por {requester_name}",
+        tenant_id,
     )
     try:
         notify_request_event(db, "request_created", row, current_user)
@@ -1208,12 +1245,14 @@ def update_request_status(
     log_request_event(
         db, row.id, current_user.id if current_user else None, "approved",
         f"Aprovado por {approver_name} — avançou para {next_step_label}",
+        row.tenant_id,
         event_data={"from_stage": from_status, "to_stage": next_status},
         stage=next_status,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_approved",
         f"Solicitação #{row.id} aprovada por {approver_name}",
+        row.tenant_id,
         event_data={"from_stage": from_status, "to_stage": next_status},
     )
     try:
@@ -1254,12 +1293,14 @@ def reject_request(
     log_request_event(
         db, row.id, current_user.id if current_user else None, "rejected",
         f"Rejeitado por {rejector_name}",
+        row.tenant_id,
         event_data={"justification": justification},
         stage="Rejected",
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_rejected",
         f"Solicitação #{row.id} rejeitada por {rejector_name}",
+        row.tenant_id,
         event_data={"justification": justification},
     )
     try:
@@ -1316,12 +1357,14 @@ def move_request_to_status(
     log_request_event(
         db, row.id, current_user.id if current_user else None, "status_changed",
         f"Status alterado por {mover_name}: {from_status} → {payload.status_key}",
+        row.tenant_id,
         event_data={"from_stage": from_status, "to_stage": payload.status_key},
         stage=payload.status_key,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_status_changed",
         f"Solicitação #{row.id} movida por {mover_name} para {payload.status_key}",
+        row.tenant_id,
         event_data={"from_stage": from_status, "to_stage": payload.status_key},
     )
     return _request_to_dict(row)
@@ -1846,6 +1889,7 @@ def erp_integrate_materials(
         "erp",
         "integrate",
         f"{len(integrated)} materiais integrados por {current_user.email}: IDs {material_ids_str}",
+        current_user.tenant_id,
     )
     return {"integrated": integrated, "skipped": skipped, "total": len(integrated)}
 
@@ -2010,6 +2054,7 @@ async def import_materials(
         "material",
         "bulk_import",
         f"{created} criados, {updated} atualizados por {current_user.email}",
+        current_user.tenant_id,
     )
     return {"dry_run": False, "created": created, "updated": updated, "errors": []}
 
@@ -2056,6 +2101,7 @@ def standardize_material(
         "material",
         "standardize",
         f"Material {material_id} padronizado por {current_user.email}",
+        current_user.tenant_id,
     )
     return _material_db_to_dict(row)
 

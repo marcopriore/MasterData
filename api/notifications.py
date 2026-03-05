@@ -217,6 +217,7 @@ def notify_request_event(
 
     if getattr(prefs, notify_key, True):
         notification = NotificationORM(
+            tenant_id=request.tenant_id,
             user_id=requester_user.id,
             request_id=request.id,
             event_type=event_type,

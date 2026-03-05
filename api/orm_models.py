@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime, Float
+from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime, Float, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
@@ -9,19 +9,39 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from db import Base
 
 
+# ─── Multi-Tenant ─────────────────────────────────────────────────────────────
+
+class TenantORM(Base):
+    """Tenant (cliente) — isolamento multi-tenant."""
+    __tablename__ = "tenants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
 # ─── Access Control ───────────────────────────────────────────────────────────
 
 class RoleORM(Base):
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
     role_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="sistema"
     )  # "sistema" | "etapa"
     # JSON flags: { "can_approve": true, "can_edit_pdm": true, "can_manage_users": true, ... }
     permissions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_roles_tenant_name"),)
+    tenant: Mapped["TenantORM"] = relationship("TenantORM", foreign_keys=[tenant_id])
     users: Mapped[list["UserORM"]] = relationship("UserORM", back_populates="role")
 
 
@@ -29,8 +49,11 @@ class UserORM(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    email: Mapped[str] = mapped_column(String(254), nullable=False, unique=True)
+    email: Mapped[str] = mapped_column(String(254), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -46,6 +69,8 @@ class UserORM(Base):
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
 
+    __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),)
+    tenant: Mapped["TenantORM"] = relationship("TenantORM", foreign_keys=[tenant_id])
     role: Mapped["RoleORM"] = relationship("RoleORM", back_populates="users")
     material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
         "MaterialRequestORM", back_populates="user", foreign_keys="MaterialRequestORM.user_id"
@@ -59,6 +84,9 @@ class WorkflowHeaderORM(Base):
     __tablename__ = "workflow_header"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -75,6 +103,9 @@ class WorkflowConfigORM(Base):
     __tablename__ = "workflow_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     workflow_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("workflow_header.id", ondelete="CASCADE"), nullable=False
     )
@@ -92,6 +123,9 @@ class MaterialRequestORM(Base):
     __tablename__ = "material_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     pdm_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("pdm_templates.id", ondelete="RESTRICT"), nullable=False
     )
@@ -156,6 +190,9 @@ class RequestHistoryORM(Base):
     __tablename__ = "request_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     request_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("material_requests.id", ondelete="CASCADE"), nullable=False
     )
@@ -179,6 +216,9 @@ class SystemLogORM(Base):
     __tablename__ = "system_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     user_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -236,6 +276,9 @@ class PDMOrm(Base):
     __tablename__ = "pdm_templates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     internal_code: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -251,6 +294,9 @@ class FieldDictionaryORM(Base):
     __tablename__ = "field_dictionary"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     field_name: Mapped[str] = mapped_column(String(100), nullable=False)
     field_label: Mapped[str] = mapped_column(String(150), nullable=False)
     sap_field: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -271,11 +317,12 @@ class MaterialDatabaseORM(Base):
     __tablename__ = "material_database"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
 
     # Identificação SAP
-    sap_code: Mapped[str] = mapped_column(
-        String(50), nullable=False, unique=True, index=True
-    )
+    sap_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     description: Mapped[str] = mapped_column(String(200), nullable=False)
 
     # Status: "Ativo", "Bloqueado", "Obsoleto"
@@ -323,6 +370,8 @@ class MaterialDatabaseORM(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    __table_args__ = (UniqueConstraint("tenant_id", "sap_code", name="uq_material_db_tenant_sap"),)
+
 
 # ─── Notifications ───────────────────────────────────────────────────────────
 
@@ -332,6 +381,9 @@ class NotificationORM(Base):
     __tablename__ = "notifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
@@ -354,6 +406,9 @@ class UserNotificationPrefsORM(Base):
     __tablename__ = "user_notification_prefs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False, unique=True

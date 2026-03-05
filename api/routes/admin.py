@@ -32,10 +32,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from deps import get_db, get_admin_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs
-from orm_models import RoleORM, UserORM, SystemLogORM
+from deps import get_db, get_db_always_raw, get_admin_user, get_current_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs, require_master
+from orm_models import MaterialRequestORM, MaterialDatabaseORM, RoleORM, TenantORM, UserORM, SystemLogORM
 from security import create_access_token, hash_password, verify_password
 from audit import log_system_event
 from bulk_import import HEADER_FILL, HEADER_FONT
@@ -48,6 +49,9 @@ from models import (
     LoginRequest,
     RoleCreate,
     RoleUpdate,
+    SwitchTenantBody,
+    TenantCreate,
+    TenantUpdate,
     UserCreate,
     UserPasswordChange,
     UserPreferences,
@@ -70,18 +74,24 @@ def _role_to_dict(r: RoleORM) -> dict:
 
 
 def _user_to_dict(u: UserORM) -> dict:
-    return {
+    role_name = u.role.name if u.role else None
+    is_master = (role_name or "").upper() == "MASTER"
+    out: dict = {
         "id": u.id,
         "name": u.name,
         "email": u.email,
         "role_id": u.role_id,
-        "role_name": u.role.name if u.role else None,
+        "role_name": role_name,
         "role_type": getattr(u.role, "role_type", "sistema") if u.role else "sistema",
         "role_permissions": u.role.permissions if u.role else {},
         "is_active": u.is_active,
         "preferences": u.preferences or {"theme": "light", "language": "pt"},
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
+    out["tenant_id"] = getattr(u, "tenant_id", None)
+    out["tenant_name"] = u.tenant.name if u.tenant else None
+    out["is_master"] = is_master
+    return out
 
 
 def _load_user(user_id: int, db: Session) -> UserORM:
@@ -156,12 +166,16 @@ def create_role(
     exceto `can_submit_request`).
     """
     name_upper = payload.name.strip().upper()
-    if db.query(RoleORM).filter(RoleORM.name == name_upper).first():
+    tenant_id = current_user.tenant_id if current_user else None
+    if tenant_id is None:
+        raise HTTPException(status_code=401, detail="Autenticação necessária para criar perfil")
+    if db.query(RoleORM).filter(RoleORM.tenant_id == tenant_id, RoleORM.name == name_upper).first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Perfil '{name_upper}' já existe",
         )
     row = RoleORM(
+        tenant_id=tenant_id,
         name=name_upper,
         role_type=payload.role_type,
         permissions=payload.permissions.model_dump(),
@@ -173,6 +187,7 @@ def create_role(
     log_system_event(
         db, current_user.id if current_user else None, "roles", "role_created",
         f"Perfil '{name_upper}' criado por {creator}",
+        tenant_id,
     )
     return _role_to_dict(_load_role(row.id, db))
 
@@ -211,6 +226,7 @@ def update_role(
     log_system_event(
         db, current_user.id if current_user else None, "roles", "role_updated",
         f"Perfil #{role_id} ({row.name}) atualizado por {updater}",
+        row.tenant_id,
     )
     return _role_to_dict(_load_role(row.id, db))
 
@@ -354,6 +370,7 @@ async def import_users(
 
         if op == "C":
             row = UserORM(
+                tenant_id=current_user.tenant_id,
                 name=nome,
                 email=email,
                 hashed_password=hash_password(DEFAULT_PASSWORD),
@@ -379,6 +396,7 @@ async def import_users(
         "users",
         "bulk_import",
         f"Importação em massa: {created} criados, {updated} atualizados por {current_user.email}",
+        current_user.tenant_id,
     )
 
     return {"dry_run": False, "created": created, "updated": updated}
@@ -440,7 +458,11 @@ def create_user(
     A senha é recebida em texto plano e armazenada como hash bcrypt.
     O campo `role_id` deve referenciar um perfil existente.
     """
-    if db.query(UserORM).filter(UserORM.email == payload.email).first():
+    tenant_id = current_user.tenant_id if current_user else None
+    if tenant_id is None:
+        raise HTTPException(status_code=401, detail="Autenticação necessária para criar usuário")
+    email_lower = payload.email.lower().strip()
+    if db.query(UserORM).filter(UserORM.tenant_id == tenant_id, UserORM.email == email_lower).first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"E-mail '{payload.email}' já está cadastrado",
@@ -450,8 +472,9 @@ def create_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perfil não encontrado")
 
     row = UserORM(
+        tenant_id=tenant_id,
         name=payload.name.strip(),
-        email=payload.email.lower().strip(),
+        email=email_lower,
         hashed_password=hash_password(payload.password),
         role_id=payload.role_id,
         is_active=True,
@@ -465,6 +488,7 @@ def create_user(
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_created",
         f"Usuário {row.email} criado por {creator}",
+        tenant_id,
     )
     return _user_to_dict(_load_user(row.id, db))
 
@@ -513,6 +537,7 @@ def replace_user(
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_updated",
         f"Usuário #{user_id} ({row.email}) atualizado por {updater}",
+        row.tenant_id,
     )
     return _user_to_dict(_load_user(row.id, db))
 
@@ -567,6 +592,7 @@ def update_user(
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_updated",
         f"Usuário #{user_id} ({row.email}) atualizado por {updater}",
+        row.tenant_id,
     )
     return _user_to_dict(_load_user(row.id, db))
 
@@ -641,7 +667,7 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     summary="Autenticação por e-mail e senha",
     response_description="Dados do usuário autenticado com perfil e permissões",
 )
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, db: Session = Depends(get_db_always_raw)):
     """
     Valida as credenciais e retorna os dados completos do usuário,
     incluindo o perfil e todas as flags de permissão.
@@ -651,14 +677,16 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     """
     row = (
         db.query(UserORM)
-        .options(joinedload(UserORM.role))
+        .options(joinedload(UserORM.role), joinedload(UserORM.tenant))
         .filter(UserORM.email == payload.email.lower().strip())
         .first()
     )
     if not row or not verify_password(payload.password, row.hashed_password):
+        _tid = row.tenant_id if row else 1
         log_system_event(
             db, None, "auth", "login_failed",
             f"Tentativa de login falhou para {payload.email}",
+            _tid,
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -669,17 +697,216 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Conta desativada. Entre em contato com o administrador.",
         )
+    if not row.tenant or not row.tenant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sua empresa não está ativa no sistema. Entre em contato com o suporte.",
+        )
     role_name = row.role.name if row.role else "SOLICITANTE"
     role_type = getattr(row.role, "role_type", "sistema") if row.role else "sistema"
     permissions = row.role.permissions if row.role else {}
     log_system_event(
         db, row.id, "auth", "login",
         f"Login realizado com sucesso: {row.email}",
+        row.tenant_id,
     )
+    is_master = (role_name or "").upper() == "MASTER"
     return {
         "ok": True,
         "user": _user_to_dict(row),
-        "access_token": create_access_token(row.id, role_name, role_type, permissions),
+        "access_token": create_access_token(
+            row.id,
+            role_name,
+            role_type,
+            permissions,
+            tenant_id=row.tenant_id,
+            is_master=is_master,
+        ),
+    }
+
+
+@router.get(
+    "/auth/me",
+    summary="Retorna dados do usuário autenticado",
+)
+def auth_me(current_user: UserORM = Depends(get_current_user)):
+    """
+    Retorna o usuário atual com tenant_id, tenant_name e is_master.
+    Requer token JWT.
+    """
+    return _user_to_dict(current_user)
+
+
+@router.post(
+    "/auth/switch-tenant",
+    summary="Chaveia contexto de tenant (apenas MASTER)",
+)
+def switch_tenant(
+    payload: SwitchTenantBody,
+    db: Session = Depends(get_db_always_raw),
+    current_user: UserORM = Depends(require_master),
+):
+    """
+    Gera novo JWT com tenant_id solicitado, mantendo is_master=True.
+    O MASTER continua MASTER mas entra no contexto do tenant.
+    """
+    tenant = db.query(TenantORM).filter(
+        TenantORM.id == payload.tenant_id,
+        TenantORM.is_active == True,
+    ).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant não encontrado ou inativo")
+    role_name = current_user.role.name if current_user.role else "MASTER"
+    role_type = getattr(current_user.role, "role_type", "sistema") if current_user.role else "sistema"
+    permissions = current_user.role.permissions if current_user.role else {}
+    token = create_access_token(
+        current_user.id,
+        role_name,
+        role_type,
+        permissions,
+        tenant_id=payload.tenant_id,
+        is_master=True,
+        master_viewing=True,
+        original_tenant_id=current_user.tenant_id,
+    )
+    return {"access_token": token, "tenant_id": tenant.id, "tenant_name": tenant.name}
+
+
+@router.get(
+    "/auth/switch-tenant/back",
+    summary="Retorna ao tenant próprio do MASTER",
+)
+def switch_tenant_back(
+    db: Session = Depends(get_db_always_raw),
+    current_user: UserORM = Depends(require_master),
+):
+    """Gera JWT com tenant_id original do MASTER."""
+    role_name = current_user.role.name if current_user.role else "MASTER"
+    role_type = getattr(current_user.role, "role_type", "sistema") if current_user.role else "sistema"
+    permissions = current_user.role.permissions if current_user.role else {}
+    token = create_access_token(
+        current_user.id,
+        role_name,
+        role_type,
+        permissions,
+        tenant_id=current_user.tenant_id,
+        is_master=True,
+        master_viewing=False,
+    )
+    tenant = current_user.tenant
+    return {
+        "access_token": token,
+        "tenant_id": current_user.tenant_id,
+        "tenant_name": tenant.name if tenant else None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TENANTS (MASTER only)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _tenant_to_dict(t: TenantORM) -> dict:
+    return {
+        "id": t.id,
+        "name": t.name,
+        "slug": t.slug,
+        "is_active": t.is_active,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+@router.get("/tenants", summary="Lista todos os tenants")
+def list_tenants(
+    db: Session = Depends(get_db_always_raw),
+    _: UserORM = Depends(require_master),
+):
+    rows = db.query(TenantORM).order_by(TenantORM.name.asc()).all()
+    result = []
+    for r in rows:
+        d = _tenant_to_dict(r)
+        d["users_count"] = db.query(func.count(UserORM.id)).filter(UserORM.tenant_id == r.id).scalar() or 0
+        d["materials_count"] = (
+            db.query(func.count(MaterialDatabaseORM.id)).filter(MaterialDatabaseORM.tenant_id == r.id).scalar() or 0
+        )
+        result.append(d)
+    return result
+
+
+@router.post("/tenants", status_code=status.HTTP_201_CREATED, summary="Cria novo tenant")
+def create_tenant(
+    payload: TenantCreate,
+    db: Session = Depends(get_db_always_raw),
+    _: UserORM = Depends(require_master),
+):
+    slug = payload.slug.strip().lower()
+    if db.query(TenantORM).filter(TenantORM.slug == slug).first():
+        raise HTTPException(status_code=400, detail="Slug já existe")
+    row = TenantORM(name=payload.name.strip(), slug=slug, is_active=True)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _tenant_to_dict(row)
+
+
+@router.patch("/tenants/{tenant_id}", summary="Atualiza tenant")
+def update_tenant(
+    tenant_id: int,
+    payload: TenantUpdate,
+    db: Session = Depends(get_db_always_raw),
+    current_user: UserORM = Depends(require_master),
+):
+    row = db.query(TenantORM).filter(TenantORM.id == tenant_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+    if payload.is_active is False and current_user.tenant_id == tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Não é possível desativar o tenant do próprio usuário Master.",
+        )
+    if payload.name is not None:
+        row.name = payload.name.strip()
+    if payload.slug is not None:
+        new_slug = payload.slug.strip().lower()
+        conflict = db.query(TenantORM).filter(
+            TenantORM.slug == new_slug,
+            TenantORM.id != tenant_id,
+        ).first()
+        if conflict:
+            raise HTTPException(status_code=400, detail="Slug já existe")
+        row.slug = new_slug
+    if payload.is_active is not None:
+        row.is_active = payload.is_active
+    db.commit()
+    db.refresh(row)
+    return _tenant_to_dict(row)
+
+
+@router.get("/tenants/{tenant_id}/stats", summary="Estatísticas do tenant")
+def get_tenant_stats(
+    tenant_id: int,
+    db: Session = Depends(get_db_always_raw),
+    _: UserORM = Depends(require_master),
+):
+    row = db.query(TenantORM).filter(TenantORM.id == tenant_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+    users_count = db.query(func.count(UserORM.id)).filter(UserORM.tenant_id == tenant_id).scalar() or 0
+    materials_count = db.query(func.count(MaterialDatabaseORM.id)).filter(
+        MaterialDatabaseORM.tenant_id == tenant_id
+    ).scalar() or 0
+    requests_count = db.query(func.count(MaterialRequestORM.id)).filter(
+        MaterialRequestORM.tenant_id == tenant_id
+    ).scalar() or 0
+    pdm_count = (
+        db.query(func.count(func.distinct(MaterialRequestORM.pdm_id)))
+        .filter(MaterialRequestORM.tenant_id == tenant_id)
+        .scalar() or 0
+    )
+    return {
+        "users_count": users_count,
+        "materials_count": materials_count,
+        "requests_count": requests_count,
+        "pdm_count": pdm_count,
     }
 
 

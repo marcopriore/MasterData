@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight,
   Home, FileText, ShieldCheck, Database, LayoutGrid,
   Settings, GitBranch, Sun, Moon,
-  UserCircle, Users, ShieldHalf, BookOpen, LogOut, ScrollText,
+  UserCircle, Users, ShieldHalf, BookOpen, LogOut, ScrollText, Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -89,7 +89,8 @@ export function AppSidebar() {
     pathname.startsWith('/admin/users') ||
     pathname.startsWith('/admin/roles') ||
     pathname.startsWith('/admin/fields') ||
-    pathname.startsWith('/admin/logs')
+    pathname.startsWith('/admin/logs') ||
+    pathname.startsWith('/admin/tenants')
   const [configExpanded, setConfigExpanded] = useState(isInsideConfig)
 
   useEffect(() => {
@@ -181,13 +182,16 @@ export function AppSidebar() {
 
               {/* ── ADMIN items (driven by granular permissions) ── */}
               {(() => {
-                const adminItems = CONFIG_ADMIN.filter((item) => {
-                  if (item.href === '/admin/users') return can('can_manage_users')
-                  if (item.href === '/admin/roles') return can('can_manage_roles')
-                  if (item.href === '/admin/fields') return can('can_manage_fields')
-                  if (item.href === '/admin/logs') return can('can_view_logs')
-                  return false
-                })
+                const adminItems = [
+                  ...CONFIG_ADMIN.filter((item) => {
+                    if (item.href === '/admin/users') return can('can_manage_users')
+                    if (item.href === '/admin/roles') return can('can_manage_roles')
+                    if (item.href === '/admin/fields') return can('can_manage_fields')
+                    if (item.href === '/admin/logs') return can('can_view_logs')
+                    return false
+                  }),
+                  ...(user?.is_master ? [{ href: '/admin/tenants', label: 'Tenants', icon: Building2 }] as const : []),
+                ]
                 if (adminItems.length === 0) return null
                 return (
                 <>
@@ -202,8 +206,9 @@ export function AppSidebar() {
                   >
                     Administração
                   </p>
-                  {adminItems.map((item) => {
+                  {adminItems.map((item: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href)
+                    const Icon = item.icon
                     return (
                       <Link
                         key={item.href}
@@ -217,7 +222,7 @@ export function AppSidebar() {
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)' }}
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
                       >
-                        <item.icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
+                        <Icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
                         {item.label}
                       </Link>
                     )

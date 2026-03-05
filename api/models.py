@@ -1,6 +1,34 @@
 from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, Literal
 from uuid import UUID, uuid4
+from datetime import datetime
+
+
+# ─── Tenant (Multi-Tenant) ────────────────────────────────────────────────────
+
+class TenantCreate(BaseModel):
+    name: str
+    slug: str
+
+
+class TenantUpdate(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class TenantResponse(BaseModel):
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Products ─────────────────────────────────────────────────────────────────
 
 class ProductCreate(BaseModel):
     name: str
@@ -371,6 +399,10 @@ class UserOut(BaseModel):
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
+
+class SwitchTenantBody(BaseModel):
+    tenant_id: int
+
 
 class LoginRequest(BaseModel):
     # Plain str so Pydantic never rejects the input before the DB lookup.

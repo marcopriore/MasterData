@@ -5,6 +5,7 @@ Execução:
     cd api
     python seed_data.py
 
+Usa postgres (BYPASSRLS) para operações admin — não usa db.engine.
 Idempotente: pode ser executado múltiplas vezes sem duplicar dados.
 Cada bloco verifica a existência antes de inserir.
 
@@ -23,12 +24,24 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# ── Garante que o .env seja carregado antes de importar db ────────────────────
+# ── Garante que o .env seja carregado antes de importar ───────────────────────
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
-from db import SessionLocal
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+# Engine admin com postgres (BYPASSRLS) — não usa db.engine
+_admin_url = os.getenv("DATABASE_URL", "")
+if "@db:" in _admin_url:
+    _admin_url = _admin_url.replace("@db:", "@localhost:")
+if not _admin_url:
+    raise RuntimeError("DATABASE_URL não definido (api/.env)")
+_admin_engine = create_engine(_admin_url, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=_admin_engine, autoflush=False, autocommit=False)
+from deps import set_tenant_in_session
 from orm_models import (
+    TenantORM,
     RoleORM,
     UserORM,
     PDMOrm,
@@ -42,14 +55,15 @@ from security import hash_password
 
 # ─── Constantes ───────────────────────────────────────────────────────────────
 
-# Usuários e senhas para cada perfil
-_USER_CREDENTIALS = [
-    ("admin@masterdata.com",        "Admin@1234",       "ADMIN",        "Administrador"),
-    ("solicitante@masterdata.com",  "Solicitante@1234", "SOLICITANTE",  "Solicitante"),
-    ("triagem@masterdata.com",      "Triagem@1234",     "TRIAGEM",      "Usuário Triagem"),
-    ("fiscal@masterdata.com",       "Fiscal@1234",      "FISCAL",       "Usuário Fiscal"),
-    ("master@masterdata.com",       "Master@1234",      "MASTER",       "Usuário Master"),
-    ("mrp@masterdata.com",          "Mrp@1234",         "MRP",          "Usuário MRP"),
+# Usuários por tenant: (email, senha, perfil, nome)
+_TENANT1_CREDENTIALS = [
+    ("master@masterdata.com", "Master@1234", "MASTER", "Usuário Master"),
+    ("admin@masterdata.com", "Admin@1234", "ADMIN", "Administrador"),
+]
+_TENANT2_CREDENTIALS = [
+    ("admin@empresa-demo.com", "Admin@1234", "ADMIN", "Administrador"),
+    ("solicitante@empresa-demo.com", "Solicitante@1234", "SOLICITANTE", "Solicitante"),
+    ("triagem@empresa-demo.com", "Triagem@1234", "TRIAGEM", "Usuário Triagem"),
 ]
 
 PDM_NAME          = "Rolamento Industrial"
@@ -237,7 +251,20 @@ def _skip(msg: str) -> None:
 
 # ─── Seed functions ───────────────────────────────────────────────────────────
 
-def ensure_roles(db) -> dict[str, RoleORM]:
+def ensure_tenant(db, name: str, slug: str) -> TenantORM:
+    """Cria tenant se não existir. Retorna o tenant."""
+    row = db.query(TenantORM).filter(TenantORM.slug == slug).first()
+    if row:
+        _skip(f"Tenant {slug}")
+        return row
+    row = TenantORM(name=name, slug=slug, is_active=True)
+    db.add(row)
+    db.flush()
+    _ok(f"Tenant '{name}' (slug: {slug}) criado")
+    return row
+
+
+def ensure_roles(db, tenant_id: int) -> dict[str, RoleORM]:
     """Returns a name→ORM map for ADMIN, SOLICITANTE, TRIAGEM, FISCAL, MASTER, MRP."""
     role_defs = [
         (
@@ -363,11 +390,14 @@ def ensure_roles(db) -> dict[str, RoleORM]:
     ]
     role_map: dict[str, RoleORM] = {}
     for name, role_type, perms in role_defs:
-        row = db.query(RoleORM).filter(RoleORM.name == name).first()
+        row = db.query(RoleORM).filter(
+            RoleORM.tenant_id == tenant_id,
+            RoleORM.name == name,
+        ).first()
         if row:
             _skip(f"Role {name}")
         else:
-            row = RoleORM(name=name, role_type=role_type, permissions=perms)
+            row = RoleORM(tenant_id=tenant_id, name=name, role_type=role_type, permissions=perms)
             db.add(row)
             db.flush()
             _ok(f"Role {name} criado")
@@ -375,11 +405,19 @@ def ensure_roles(db) -> dict[str, RoleORM]:
     return role_map
 
 
-def ensure_users(db, role_map: dict[str, RoleORM]) -> dict[str, UserORM]:
-    """Creates one user per profile if they don't exist. Returns email→UserORM map."""
+def ensure_users(
+    db,
+    tenant_id: int,
+    role_map: dict[str, RoleORM],
+    credentials: list[tuple[str, str, str, str]],
+) -> dict[str, UserORM]:
+    """Creates users from credentials if they don't exist. Returns email→UserORM map."""
     user_map: dict[str, UserORM] = {}
-    for email, password, role_name, display_name in _USER_CREDENTIALS:
-        row = db.query(UserORM).filter(UserORM.email == email).first()
+    for email, password, role_name, display_name in credentials:
+        row = db.query(UserORM).filter(
+            UserORM.tenant_id == tenant_id,
+            UserORM.email == email,
+        ).first()
         if row:
             _skip(f"Usuário {email}")
         else:
@@ -387,6 +425,7 @@ def ensure_users(db, role_map: dict[str, RoleORM]) -> dict[str, UserORM]:
             if role is None:
                 raise RuntimeError(f"Role {role_name} não encontrada — execute ensure_roles primeiro.")
             row = UserORM(
+                tenant_id=tenant_id,
                 name=display_name,
                 email=email,
                 hashed_password=hash_password(password),
@@ -402,14 +441,18 @@ def ensure_users(db, role_map: dict[str, RoleORM]) -> dict[str, UserORM]:
     return user_map
 
 
-def ensure_pdm(db) -> PDMOrm:
+def ensure_pdm(db, tenant_id: int) -> PDMOrm:
     """Creates the 'Rolamento Industrial' PDM template if it doesn't exist."""
-    row = db.query(PDMOrm).filter(PDMOrm.name == PDM_NAME).first()
+    row = db.query(PDMOrm).filter(
+        PDMOrm.tenant_id == tenant_id,
+        PDMOrm.name == PDM_NAME,
+    ).first()
     if row:
         _skip(f"PDM '{PDM_NAME}'")
         return row
 
     row = PDMOrm(
+        tenant_id=tenant_id,
         name=PDM_NAME,
         internal_code=PDM_INTERNAL_CODE,
         is_active=True,
@@ -473,14 +516,18 @@ def ensure_pdm(db) -> PDMOrm:
     return row
 
 
-def ensure_workflow(db) -> WorkflowHeaderORM:
+def ensure_workflow(db, tenant_id: int) -> WorkflowHeaderORM:
     """Creates the standard workflow with 5 steps if it doesn't exist."""
-    row = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.name == WORKFLOW_NAME).first()
+    row = db.query(WorkflowHeaderORM).filter(
+        WorkflowHeaderORM.tenant_id == tenant_id,
+        WorkflowHeaderORM.name == WORKFLOW_NAME,
+    ).first()
     if row:
         _skip(f"Workflow '{WORKFLOW_NAME}'")
         return row
 
     row = WorkflowHeaderORM(
+        tenant_id=tenant_id,
         name=WORKFLOW_NAME,
         description="Fluxo padrão: Triagem → Fiscal → Master → Pendente → Finalizado",
         is_active=True,
@@ -490,6 +537,7 @@ def ensure_workflow(db) -> WorkflowHeaderORM:
 
     for step in WORKFLOW_STEPS:
         db.add(WorkflowConfigORM(
+            tenant_id=tenant_id,
             workflow_id=row.id,
             step_name=step["step_name"],
             status_key=step["status_key"],
@@ -502,7 +550,7 @@ def ensure_workflow(db) -> WorkflowHeaderORM:
     return row
 
 
-def seed_requests(db, pdm: PDMOrm, workflow: WorkflowHeaderORM, user: UserORM) -> int:
+def seed_requests(db, tenant_id: int, pdm: PDMOrm, workflow: WorkflowHeaderORM, user: UserORM) -> int:
     """Inserts the 15 sample requests. Skips if the table already has rows."""
     existing = db.query(MaterialRequestORM).count()
     if existing >= len(_REQUESTS):
@@ -513,6 +561,7 @@ def seed_requests(db, pdm: PDMOrm, workflow: WorkflowHeaderORM, user: UserORM) -
     inserted = 0
     for req in _REQUESTS:
         db.add(MaterialRequestORM(
+            tenant_id=tenant_id,
             pdm_id=pdm.id,
             workflow_id=workflow.id,
             status=req["status"],
@@ -697,25 +746,25 @@ _MATERIAL_DATABASE_ENTRIES: list[dict] = [
 ]
 
 
-def ensure_material_database(db) -> int:
+def ensure_material_database(db, tenant_id: int) -> int:
     """Insere 20 materiais mockados de rolamentos se a tabela estiver vazia."""
-    if db.query(MaterialDatabaseORM).count() > 0:
+    if db.query(MaterialDatabaseORM).filter(MaterialDatabaseORM.tenant_id == tenant_id).count() > 0:
         _skip("Material database")
         return 0
     for entry in _MATERIAL_DATABASE_ENTRIES:
-        db.add(MaterialDatabaseORM(**entry))
+        db.add(MaterialDatabaseORM(tenant_id=tenant_id, **entry))
     db.flush()
     _ok(f"{len(_MATERIAL_DATABASE_ENTRIES)} materiais inseridos na base de dados")
     return len(_MATERIAL_DATABASE_ENTRIES)
 
 
-def ensure_field_dictionary(db) -> int:
+def ensure_field_dictionary(db, tenant_id: int) -> int:
     """Insere campos do dicionário SAP MM01 se a tabela estiver vazia."""
-    if db.query(FieldDictionaryORM).count() > 0:
+    if db.query(FieldDictionaryORM).filter(FieldDictionaryORM.tenant_id == tenant_id).count() > 0:
         _skip("Field dictionary")
         return 0
     for entry in _FIELD_DICT_ENTRIES:
-        db.add(FieldDictionaryORM(**entry))
+        db.add(FieldDictionaryORM(tenant_id=tenant_id, **entry))
     db.flush()
     _ok(f"{len(_FIELD_DICT_ENTRIES)} campos do dicionário SAP MM01 inseridos")
     return len(_FIELD_DICT_ENTRIES)
@@ -728,27 +777,27 @@ def main() -> None:
 
     db = SessionLocal()
     try:
-        print("1. Roles")
-        role_map = ensure_roles(db)
+        print("0. Tenants")
+        t1 = ensure_tenant(db, "Master Data Sistemas", "masterdata")
+        t2 = ensure_tenant(db, "Empresa Demo", "empresa-demo")
 
-        print("\n2. Usuários")
-        user_map = ensure_users(db, role_map)
-        admin_user = user_map["admin@masterdata.com"]
+        print("\n1. Tenant 1: roles, usuários, PDM, workflow, requests, field dict, materiais")
+        set_tenant_in_session(db, t1.id, is_master=False)
+        role_map1 = ensure_roles(db, t1.id)
+        user_map1 = ensure_users(db, t1.id, role_map1, _TENANT1_CREDENTIALS)
+        admin_user1 = user_map1.get("admin@masterdata.com")
+        pdm = ensure_pdm(db, t1.id)
+        workflow1 = ensure_workflow(db, t1.id)
+        seed_requests(db, t1.id, pdm, workflow1, admin_user1 or user_map1["master@masterdata.com"])
+        ensure_field_dictionary(db, t1.id)
+        ensure_material_database(db, t1.id)
 
-        print("\n3. PDM Template")
-        pdm = ensure_pdm(db)
-
-        print("\n4. Workflow")
-        workflow = ensure_workflow(db)
-
-        print("\n5. Material Requests")
-        seed_requests(db, pdm, workflow, admin_user)
-
-        print("\n6. Field Dictionary (SAP MM01)")
-        ensure_field_dictionary(db)
-
-        print("\n7. Base de Dados de Materiais")
-        ensure_material_database(db)
+        print("\n2. Tenant 2: roles, usuários, workflow, field dict (sem PDM/materiais)")
+        set_tenant_in_session(db, t2.id, is_master=False)
+        role_map2 = ensure_roles(db, t2.id)
+        ensure_users(db, t2.id, role_map2, _TENANT2_CREDENTIALS)
+        ensure_workflow(db, t2.id)
+        ensure_field_dictionary(db, t2.id)
 
         db.commit()
         print("\n=== Seed concluido com sucesso! ===\n")

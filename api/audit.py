@@ -12,12 +12,14 @@ def log_request_event(
     user_id: int | None,
     event_type: str,
     message: str,
+    tenant_id: int,
     event_data: dict | None = None,
     stage: str | None = None,
 ) -> None:
     entry = RequestHistoryORM(
         request_id=request_id,
         user_id=user_id,
+        tenant_id=tenant_id,
         event_type=event_type,
         message=message,
         event_data=event_data,
@@ -34,11 +36,13 @@ def log_system_event(
     category: str,
     action: str,
     description: str,
+    tenant_id: int,
     event_data: dict | None = None,
     ip_address: str | None = None,
 ) -> None:
     entry = SystemLogORM(
         user_id=user_id,
+        tenant_id=tenant_id,
         category=category,
         action=action,
         description=description,

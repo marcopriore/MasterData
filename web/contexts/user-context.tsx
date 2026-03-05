@@ -59,6 +59,12 @@ export type CurrentUser = {
   is_active: boolean
   preferences: UserPreferences
   created_at: string | null
+  /** Multi-tenant: id do tenant (empresa) do usuário */
+  tenant_id?: number
+  /** Multi-tenant: nome da empresa */
+  tenant_name?: string
+  /** True se for o usuário Master (dono do sistema) */
+  is_master?: boolean
 }
 
 type LoginResult =
@@ -78,6 +84,10 @@ type UserContextValue = {
   /** Low-level setter used by the profile page to update in-memory + storage */
   setUser: (u: CurrentUser) => void
   clearUser: () => void
+  /** (MASTER only) Chaveia o contexto de tenant e recarrega a página */
+  switchTenant: (tenantId: number) => Promise<void>
+  /** (MASTER only) Volta ao tenant próprio do MASTER */
+  switchTenantBack: () => Promise<void>
   isAdmin: boolean
   can: (permission: keyof RolePermissions) => boolean
 }
@@ -111,6 +121,8 @@ const UserContext = createContext<UserContextValue>({
   logout: () => {},
   setUser: () => {},
   clearUser: () => {},
+  switchTenant: async () => {},
+  switchTenantBack: async () => {},
   isAdmin: false,
   can: () => false,
 })
@@ -209,6 +221,61 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }, [persistUser])
 
+  // ── switchTenant (MASTER only) ──────────────────────────────────────────────
+
+  const switchTenant = useCallback(async (tenantId: number) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
+    if (!token) throw new Error('Sessão expirada')
+    const BASE_URL = process.env.NEXT_PUBLIC_API_URL
+    const res = await fetch(`${BASE_URL}/admin/auth/switch-tenant`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ tenant_id: tenantId }),
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const json = await res.json()
+        if (typeof json?.detail === 'string') detail = json.detail
+      } catch {}
+      throw new Error(detail)
+    }
+    const data = (await res.json()) as { access_token: string; tenant_id: number; tenant_name: string }
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
+    const current = raw ? (JSON.parse(raw) as CurrentUser) : null
+    const updated: CurrentUser = current
+      ? { ...current, tenant_id: data.tenant_id, tenant_name: data.tenant_name, is_master: true }
+      : { id: 0, name: '', email: '', role_id: 0, role_name: '', role_permissions: {} as RolePermissions, is_active: true, preferences: { theme: 'light', language: 'pt' }, created_at: null, tenant_id: data.tenant_id, tenant_name: data.tenant_name, is_master: true }
+    persistUser(updated, data.access_token)
+    window.location.reload()
+  }, [persistUser])
+
+  const switchTenantBack = useCallback(async () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
+    if (!token) throw new Error('Sessão expirada')
+    const BASE_URL = process.env.NEXT_PUBLIC_API_URL
+    const res = await fetch(`${BASE_URL}/admin/auth/switch-tenant/back`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const json = await res.json()
+        if (typeof json?.detail === 'string') detail = json.detail
+      } catch {}
+      throw new Error(detail)
+    }
+    const data = (await res.json()) as { access_token: string; tenant_id: number; tenant_name: string }
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
+    const current = raw ? (JSON.parse(raw) as CurrentUser) : null
+    const updated: CurrentUser = current
+      ? { ...current, tenant_id: data.tenant_id, tenant_name: data.tenant_name ?? '', is_master: true }
+      : { id: 0, name: '', email: '', role_id: 0, role_name: '', role_permissions: {} as RolePermissions, is_active: true, preferences: { theme: 'light', language: 'pt' }, created_at: null, tenant_id: data.tenant_id, tenant_name: data.tenant_name ?? '', is_master: true }
+    persistUser(updated, data.access_token)
+    window.location.reload()
+  }, [persistUser])
+
   // ── logout ─────────────────────────────────────────────────────────────────
 
   const logout = useCallback(() => {
@@ -228,7 +295,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider
-      value={{ user, accessToken, ready, login, logout, setUser, clearUser, isAdmin, can }}
+      value={{ user, accessToken, ready, login, logout, setUser, clearUser, switchTenant, switchTenantBack, isAdmin, can }}
     >
       {children}
     </UserContext.Provider>
