@@ -142,7 +142,10 @@ def _load_role(role_id: int, db: Session) -> RoleORM:
     summary="Lista todos os perfis de acesso",
     response_description="Array de perfis com suas permissões e contagem de usuários",
 )
-def list_roles(db: Session = Depends(get_db)):
+def list_roles(
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     """
     Retorna todos os perfis cadastrados (ADMIN, SOLICITANTE, TRIAGEM, FISCAL, MASTER, MRP, …)
     com o conjunto de flags de permissão e o número de usuários vinculados.
@@ -160,7 +163,11 @@ def list_roles(db: Session = Depends(get_db)):
     "/roles/{role_id}",
     summary="Detalha um perfil de acesso",
 )
-def get_role(role_id: int, db: Session = Depends(get_db)):
+def get_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     return _role_to_dict(_load_role(role_id, db))
 
 
@@ -249,7 +256,11 @@ def update_role(
     "/roles/{role_id}",
     summary="Remove um perfil de acesso",
 )
-def delete_role(role_id: int, db: Session = Depends(get_db)):
+def delete_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     """
     Bloqueado se houver usuários vinculados ao perfil.
     Reatribua-os antes de excluir.
@@ -279,6 +290,7 @@ def list_users(
     is_active: Optional[bool] = Query(None, description="Filtrar por status (ativo/inativo)"),
     search: Optional[str] = Query(None, description="Busca por nome ou e-mail (case-insensitive)"),
     db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
 ):
     """
     Retorna todos os usuários com seus respectivos perfis de acesso.
@@ -454,7 +466,11 @@ def export_users(
     "/users/{user_id}",
     summary="Detalha um usuário",
 )
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     return _user_to_dict(_load_user(user_id, db))
 
 
@@ -649,6 +665,7 @@ def update_preferences(
     user_id: int,
     payload: UserPreferences,
     db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
 ):
     row = db.query(UserORM).filter(UserORM.id == user_id).first()
     if not row:
@@ -662,7 +679,11 @@ def update_preferences(
     "/users/{user_id}",
     summary="Desativa um usuário (soft-delete)",
 )
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     """
     Não remove o registro do banco — apenas define `is_active = false`.
     Isso preserva o histórico de solicitações vinculadas ao usuário.
