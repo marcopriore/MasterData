@@ -861,7 +861,7 @@ def list_requests(
     role_name = current_user.role.name.upper() if (current_user and current_user.role) else None
     role_type = current_user.role.role_type if (current_user and current_user.role) else None
 
-    if role_name == "ADMIN":
+    if role_name in ("ADMIN", "MASTER"):
         pass  # no filter — return all
     elif role_name == "SOLICITANTE" and current_user:
         q = q.filter(MaterialRequestORM.user_id == current_user.id)
@@ -2188,7 +2188,10 @@ def get_notification_prefs(
         UserNotificationPrefsORM.user_id == current_user.id
     ).first()
     if not prefs:
-        prefs = UserNotificationPrefsORM(user_id=current_user.id)
+        prefs = UserNotificationPrefsORM(
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+        )
         db.add(prefs)
         db.commit()
         db.refresh(prefs)
@@ -2217,7 +2220,10 @@ def update_notification_prefs(
         UserNotificationPrefsORM.user_id == current_user.id
     ).first()
     if not prefs:
-        prefs = UserNotificationPrefsORM(user_id=current_user.id)
+        prefs = UserNotificationPrefsORM(
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+        )
         db.add(prefs)
         db.flush()
     data = payload.model_dump(exclude_unset=True)

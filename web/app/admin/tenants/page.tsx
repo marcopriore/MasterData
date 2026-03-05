@@ -33,7 +33,224 @@ type Tenant = {
 
 type ModalMode = 'create' | 'edit'
 
-// ─── Modal ────────────────────────────────────────────────────────────────────
+type OnboardingResponse = {
+  success: boolean
+  tenant_id: number
+  tenant_name: string
+  admin_email: string
+  email_sent: boolean
+  message: string
+}
+
+const SLUG_REGEX = /^[a-z0-9-]+$/
+
+// ─── Onboarding Modal ─────────────────────────────────────────────────────────
+
+interface OnboardingModalProps {
+  onClose: () => void
+  onSuccess: () => void
+}
+
+function OnboardingModal({ onClose, onSuccess }: OnboardingModalProps) {
+  const [tenantName, setTenantName] = useState('')
+  const [tenantSlug, setTenantSlug] = useState('')
+  const [adminName, setAdminName] = useState('')
+  const [adminEmail, setAdminEmail] = useState('')
+  const [tempPassword, setTempPassword] = useState('')
+  const [sendEmailChecked, setSendEmailChecked] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const { accessToken } = useUser()
+
+  const handleSlugChange = (v: string) => {
+    const lower = v.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+    setTenantSlug(lower)
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!tenantName.trim()) {
+      toast.error('Nome da empresa é obrigatório.')
+      return
+    }
+    if (!tenantSlug.trim()) {
+      toast.error('Slug é obrigatório.')
+      return
+    }
+    if (!SLUG_REGEX.test(tenantSlug)) {
+      toast.error('Slug deve conter apenas letras minúsculas, números e hífens.')
+      return
+    }
+    if (!adminName.trim()) {
+      toast.error('Nome do administrador é obrigatório.')
+      return
+    }
+    if (!adminEmail.trim()) {
+      toast.error('Email do administrador é obrigatório.')
+      return
+    }
+    if (!accessToken) {
+      toast.error('Sessão expirada. Faça login novamente.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const body = {
+        tenant_name: tenantName.trim(),
+        tenant_slug: tenantSlug.trim(),
+        admin_name: adminName.trim(),
+        admin_email: adminEmail.trim(),
+        temp_password: tempPassword.trim() || undefined,
+      }
+      const res = await apiPostWithAuth<OnboardingResponse>(
+        '/admin/tenants/onboarding',
+        body,
+        accessToken
+      )
+      if (res.email_sent) {
+        toast.success(`Tenant criado! Email enviado para ${res.admin_email}`)
+      } else {
+        toast.success('Tenant criado! Falha no envio do email — verifique as configurações SMTP')
+      }
+      onSuccess()
+      onClose()
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border shadow-2xl p-0 overflow-hidden"
+        style={{
+          borderColor: 'var(--sidebar-border, #e2e8f0)',
+          backgroundColor: 'var(--card, #ffffff)',
+        }}
+      >
+        <div
+          className="flex items-center justify-between border-b px-6 py-4"
+          style={{ borderColor: 'var(--sidebar-border)' }}
+        >
+          <div className="flex items-center gap-2">
+            <Building2 className="size-4" style={{ color: 'var(--sidebar-text)' }} />
+            <h2 className="text-base font-semibold" style={{ color: 'var(--sidebar-text)' }}>
+              Novo Tenant
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 transition-colors opacity-70 hover:opacity-100"
+            style={{ color: 'var(--sidebar-text)' }}
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
+          <div>
+            <p className="text-xs font-medium opacity-70 mb-3" style={{ color: 'var(--sidebar-text)' }}>
+              Dados da Empresa
+            </p>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ob-tenant-name">Nome da empresa</Label>
+                <Input
+                  id="ob-tenant-name"
+                  value={tenantName}
+                  onChange={(e) => setTenantName(e.target.value)}
+                  placeholder="Ex: Empresa ABC"
+                  className="h-10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ob-tenant-slug">Slug</Label>
+                <Input
+                  id="ob-tenant-slug"
+                  value={tenantSlug}
+                  onChange={(e) => handleSlugChange(e.target.value)}
+                  placeholder="empresa-abc"
+                  className="h-10 font-mono"
+                />
+                <p className="text-xs opacity-70">Apenas letras minúsculas, números e hífens</p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium opacity-70 mb-3" style={{ color: 'var(--sidebar-text)' }}>
+              Administrador do Tenant
+            </p>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ob-admin-name">Nome completo</Label>
+                <Input
+                  id="ob-admin-name"
+                  value={adminName}
+                  onChange={(e) => setAdminName(e.target.value)}
+                  placeholder="Ex: João Silva"
+                  className="h-10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ob-admin-email">Email</Label>
+                <Input
+                  id="ob-admin-email"
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="admin@empresa.com"
+                  className="h-10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ob-temp-password">Senha temporária (opcional)</Label>
+                <Input
+                  id="ob-temp-password"
+                  type="password"
+                  value={tempPassword}
+                  onChange={(e) => setTempPassword(e.target.value)}
+                  placeholder="Gerada automaticamente"
+                  className="h-10"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="ob-send-email"
+              checked={sendEmailChecked}
+              onChange={(e) => setSendEmailChecked(e.target.checked)}
+              className="rounded"
+            />
+            <Label htmlFor="ob-send-email" className="text-sm cursor-pointer">
+              Enviar email de boas-vindas com as credenciais
+            </Label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={loading}>
+              {loading && <Loader2 className="size-4 animate-spin mr-2" />}
+              Criar Tenant
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
 
 interface TenantModalProps {
   mode: ModalMode
@@ -41,8 +258,6 @@ interface TenantModalProps {
   onClose: () => void
   onSaved: (t: Tenant) => void
 }
-
-const SLUG_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
@@ -188,7 +403,8 @@ export default function TenantsPage() {
   const { resolvedTheme } = useTheme()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState<{ mode: ModalMode; tenant?: Tenant | null } | null>(null)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [editModal, setEditModal] = useState<Tenant | null>(null)
 
   const fetchTenants = useCallback(async () => {
     if (!accessToken) return
@@ -232,7 +448,7 @@ export default function TenantsPage() {
           Gestão de Tenants
         </h1>
         <Button
-          onClick={() => setModal({ mode: 'create' })}
+          onClick={() => setOnboardingOpen(true)}
           className="gap-2"
         >
           <Plus className="size-4" />
@@ -311,7 +527,7 @@ export default function TenantsPage() {
                           variant="ghost"
                           size="sm"
                           className="gap-1"
-                          onClick={() => setModal({ mode: 'edit', tenant: t })}
+                          onClick={() => setEditModal(t)}
                         >
                           <Pencil className="size-3.5" />
                           Editar
@@ -326,18 +542,21 @@ export default function TenantsPage() {
         </div>
       )}
 
-      {modal && (
+      {onboardingOpen && (
+        <OnboardingModal
+          onClose={() => setOnboardingOpen(false)}
+          onSuccess={() => fetchTenants()}
+        />
+      )}
+
+      {editModal && (
         <TenantModal
-          mode={modal.mode}
-          initial={modal.tenant ?? null}
-          onClose={() => setModal(null)}
+          mode="edit"
+          initial={editModal}
+          onClose={() => setEditModal(null)}
           onSaved={(saved) => {
-            if (modal.mode === 'create') {
-              setTenants((prev) => [...prev, saved])
-            } else {
-              setTenants((prev) => prev.map((t) => (t.id === saved.id ? { ...t, ...saved } : t)))
-            }
-            setModal(null)
+            setTenants((prev) => prev.map((t) => (t.id === saved.id ? { ...t, ...saved } : t)))
+            setEditModal(null)
           }}
         />
       )}

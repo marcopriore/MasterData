@@ -184,6 +184,7 @@ export function AppSidebar() {
               {(() => {
                 const adminItems = [
                   ...CONFIG_ADMIN.filter((item) => {
+                    if (user?.is_master) return true
                     if (item.href === '/admin/users') return can('can_manage_users')
                     if (item.href === '/admin/roles') return can('can_manage_roles')
                     if (item.href === '/admin/fields') return can('can_manage_fields')

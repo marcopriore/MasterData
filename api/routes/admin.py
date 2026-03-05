@@ -27,6 +27,7 @@ Auth
   POST   /admin/auth/login             Credential check → user + role payload
 """
 
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -35,8 +36,20 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from deps import get_db, get_db_always_raw, get_admin_user, get_current_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs, require_master
-from orm_models import MaterialRequestORM, MaterialDatabaseORM, RoleORM, TenantORM, UserORM, SystemLogORM
+from deps import get_db, get_db_always_raw, get_admin_user, get_current_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs, require_master, set_tenant_in_session
+from orm_models import (
+    FieldDictionaryORM,
+    MaterialRequestORM,
+    MaterialDatabaseORM,
+    RoleORM,
+    TenantORM,
+    UserORM,
+    WorkflowConfigORM,
+    WorkflowHeaderORM,
+    SystemLogORM,
+)
+from constants import ONBOARDING_FIELD_DICT, ONBOARDING_ROLE_DEFS, ONBOARDING_WORKFLOW_STEPS
+from email_service import send_welcome_email
 from security import create_access_token, hash_password, verify_password
 from audit import log_system_event
 from bulk_import import HEADER_FILL, HEADER_FONT
@@ -51,6 +64,7 @@ from models import (
     RoleUpdate,
     SwitchTenantBody,
     TenantCreate,
+    TenantOnboardingRequest,
     TenantUpdate,
     UserCreate,
     UserPasswordChange,
@@ -605,19 +619,23 @@ def change_password(
     user_id: int,
     payload: UserPasswordChange,
     db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
 ):
     """
-    Requer a senha atual para confirmar a identidade.
-    A nova senha é armazenada como hash bcrypt.
+    Usuário comum: requer a senha atual para confirmar a identidade.
+    MASTER e ADMIN: podem redefinir senha de qualquer usuário sem informar a senha atual.
     """
-    row = db.query(UserORM).filter(UserORM.id == user_id).first()
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
-    if not verify_password(payload.current_password, row.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Senha atual incorreta",
-        )
+    row = _load_user(user_id, db)
+
+    is_admin_reset = current_user.role and (current_user.role.name or "").upper() in ("MASTER", "ADMIN")
+
+    if not is_admin_reset:
+        if not payload.current_password or not verify_password(payload.current_password, row.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Senha atual incorreta",
+            )
+
     row.hashed_password = hash_password(payload.new_password)
     db.commit()
     return {"ok": True, "message": "Senha alterada com sucesso"}
@@ -830,6 +848,123 @@ def list_tenants(
         )
         result.append(d)
     return result
+
+
+@router.post(
+    "/tenants/onboarding",
+    status_code=status.HTTP_201_CREATED,
+    summary="Onboarding completo: tenant + admin + roles + workflow + field dictionary",
+)
+def onboard_tenant(
+    body: TenantOnboardingRequest,
+    db: Session = Depends(get_db_always_raw),
+    _: UserORM = Depends(require_master),
+):
+    """
+    Cria tenant completo: tenant, roles, admin, workflow padrão, field dictionary.
+    Envia email de boas-vindas se SMTP configurado.
+    """
+    try:
+        slug = body.tenant_slug.strip().lower()
+        if db.query(TenantORM).filter(TenantORM.slug == slug).first():
+            raise HTTPException(status_code=400, detail="Slug já existe")
+
+        email_lower = body.admin_email.strip().lower()
+        if db.query(UserORM).filter(UserORM.email == email_lower).first():
+            raise HTTPException(status_code=400, detail="E-mail já cadastrado em outro tenant")
+
+        tenant = TenantORM(name=body.tenant_name.strip(), slug=slug, is_active=True)
+        db.add(tenant)
+        db.flush()
+
+        set_tenant_in_session(db, tenant.id, is_master=False)
+
+        for name, role_type, perms in ONBOARDING_ROLE_DEFS:
+            r = RoleORM(tenant_id=tenant.id, name=name, role_type=role_type, permissions=perms)
+            db.add(r)
+        db.flush()
+
+        role_admin = db.query(RoleORM).filter(
+            RoleORM.tenant_id == tenant.id, RoleORM.name == "ADMIN"
+        ).first()
+
+        if body.temp_password and len(body.temp_password) >= 6:
+            temp_password = body.temp_password
+        else:
+            temp_password = secrets.token_urlsafe(10) + "A1!"
+
+        admin_user = UserORM(
+            name=body.admin_name.strip(),
+            email=email_lower,
+            hashed_password=hash_password(temp_password),
+            role_id=role_admin.id,
+            tenant_id=tenant.id,
+            is_active=True,
+            preferences={"theme": "light", "language": "pt"},
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(admin_user)
+        db.flush()
+
+        wh = WorkflowHeaderORM(
+            tenant_id=tenant.id,
+            name="Fluxo Padrão de Cadastro",
+            description="Fluxo padrão: Triagem → Fiscal → Master → MRP → Finalizado",
+            is_active=True,
+        )
+        db.add(wh)
+        db.flush()
+
+        for step in ONBOARDING_WORKFLOW_STEPS:
+            db.add(WorkflowConfigORM(
+                tenant_id=tenant.id,
+                workflow_id=wh.id,
+                step_name=step["step_name"],
+                status_key=step["status_key"],
+                order=step["order"],
+                is_active=True,
+            ))
+
+        for entry in ONBOARDING_FIELD_DICT:
+            fd = FieldDictionaryORM(
+                tenant_id=tenant.id,
+                field_name=entry["field_name"],
+                field_label=entry["field_label"],
+                sap_field=entry.get("sap_field"),
+                sap_view=entry["sap_view"],
+                field_type=entry["field_type"],
+                options=entry.get("options"),
+                responsible_role=entry["responsible_role"],
+                is_required=entry["is_required"],
+                is_active=True,
+                display_order=entry["display_order"],
+            )
+            db.add(fd)
+
+        db.commit()
+
+        email_sent = send_welcome_email(
+            to=email_lower,
+            admin_name=body.admin_name.strip(),
+            tenant_name=tenant.name,
+            temp_password=temp_password,
+        )
+
+        return {
+            "success": True,
+            "tenant_id": tenant.id,
+            "tenant_name": tenant.name,
+            "admin_email": email_lower,
+            "email_sent": email_sent,
+            "message": "Tenant criado com sucesso.",
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/tenants", status_code=status.HTTP_201_CREATED, summary="Cria novo tenant")

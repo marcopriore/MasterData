@@ -17,6 +17,15 @@ class TenantUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class TenantOnboardingRequest(BaseModel):
+    """Body para POST /admin/tenants/onboarding — cria tenant completo com admin e dados padrão."""
+    tenant_name: str
+    tenant_slug: str
+    admin_name: str
+    admin_email: EmailStr
+    temp_password: Optional[str] = None  # Se omitido, gera automaticamente
+
+
 class TenantResponse(BaseModel):
     id: int
     name: str
@@ -381,7 +390,7 @@ class UserUpdate(BaseModel):
 
 
 class UserPasswordChange(BaseModel):
-    current_password: str
+    current_password: Optional[str] = None  # opcional para admin reset (MASTER/ADMIN)
     new_password: str
 
 

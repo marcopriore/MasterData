@@ -21,7 +21,7 @@ import { Search, Plus, FileText, FileDown, Upload, Loader2, X, FileSpreadsheet, 
 import { Toaster, toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useUser } from "@/contexts/user-context"
-import { apiDownloadWithAuth, apiUploadWithAuth, apiGetWithAuth } from "@/lib/api"
+import { apiDownloadWithAuth, apiUploadWithAuth, apiGetWithAuth, apiPostWithAuth, apiPutWithAuth } from "@/lib/api"
 
 export default function MDMDashboard() {
   const { accessToken, can } = useUser()
@@ -62,20 +62,21 @@ export default function MDMDashboard() {
 
   useEffect(() => {
     const fetchPdms = async () => {
+      if (!accessToken) {
+        setPdmsLoading(false)
+        return
+      }
       try {
-        const res = await fetch("http://localhost:8000/api/pdm")
-        if (res.ok) {
-          const data = await res.json()
-          setPdms(data)
-        }
+        const data = await apiGetWithAuth<PDMTemplate[]>("/api/pdm", accessToken)
+        setPdms(Array.isArray(data) ? data : [])
       } catch {
-        // ignore
+        setPdms([])
       } finally {
         setPdmsLoading(false)
       }
     }
     fetchPdms()
-  }, [])
+  }, [accessToken])
 
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return pdms
@@ -170,29 +171,26 @@ export default function MDMDashboard() {
       })),
     }
 
-    const url =
-      selectedPdmId != null
-        ? `http://localhost:8000/api/pdm/${selectedPdmId}`
-        : "http://localhost:8000/api/pdm"
-    const method = selectedPdmId != null ? "PUT" : "POST"
+    if (!accessToken) {
+      toast.error("Autenticação necessária para salvar.")
+      return
+    }
 
     try {
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        const detail = err.detail
-        const msg = Array.isArray(detail)
-          ? detail.map((d: { msg?: string }) => d.msg).join(", ")
-          : detail ?? `HTTP ${res.status}`
-        throw new Error(msg)
+      let saved: PDMTemplate
+      if (selectedPdmId != null) {
+        saved = await apiPutWithAuth<PDMTemplate>(
+          `/api/pdm/${selectedPdmId}`,
+          payload,
+          accessToken
+        )
+      } else {
+        saved = await apiPostWithAuth<PDMTemplate>(
+          "/api/pdm",
+          payload,
+          accessToken
+        )
       }
-
-      const saved = await res.json()
       toast.success("Estrutura salva com sucesso!", {
         description: `PDM "${pdmName}" foi salvo.`,
       })
@@ -341,20 +339,10 @@ export default function MDMDashboard() {
         is_active: true,
         attributes: clonedAttributes,
       }
-      const res = await fetch("http://localhost:8000/api/pdm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        const detail = err.detail
-        const msg = Array.isArray(detail)
-          ? detail.map((d: { msg?: string }) => d.msg).join(", ")
-          : detail ?? `HTTP ${res.status}`
-        throw new Error(msg)
+      if (!accessToken) {
+        throw new Error("Autenticação necessária para clonar PDM.")
       }
-      const saved = await res.json()
+      const saved = await apiPostWithAuth<PDMTemplate>("/api/pdm", payload, accessToken)
       toast.success("PDM clonado!", {
         description: `"${saved.name}" foi criado com sucesso.`,
       })

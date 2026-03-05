@@ -13,12 +13,12 @@ def set_tenant_in_session(session: Session, tenant_id: int, is_master: bool = Fa
     """Configura o contexto de tenant na sessão PostgreSQL para RLS."""
     if is_master and tenant_id == -1:
         # Master vendo tudo — bypass total do RLS
-        session.execute(text("SET LOCAL app.is_master = 'true'"))
-        session.execute(text("SET LOCAL app.tenant_id = '-1'"))
+        session.execute(text("SET app.is_master = 'true'"))
+        session.execute(text("SET app.tenant_id = '-1'"))
     else:
         # Qualquer usuário (inclusive master chaveado) vê apenas o tenant
-        session.execute(text("SET LOCAL app.is_master = 'false'"))
-        session.execute(text(f"SET LOCAL app.tenant_id = '{tenant_id}'"))
+        session.execute(text("SET app.is_master = 'false'"))
+        session.execute(text(f"SET app.tenant_id = '{tenant_id}'"))
 
 
 def get_db_for_tenant(
@@ -96,39 +96,24 @@ def get_db(
 ) -> Generator[Session, None, None]:
     """
     Sessão com contexto de tenant para RLS.
-    Se há usuário logado: aplica tenant_id e is_master conforme JWT (master_viewing).
-    Se não há (ex: login): retorna sessão sem tenant (get_db_raw).
+    Nunca bypassa RLS — usa tenant_id do JWT (ou do usuário).
+    Bypass total só em get_db_always_raw (auth, tenants, onboarding).
     """
     if current_user is None:
         yield from get_db_raw()
         return
-    role_is_master = bool(current_user.role and (current_user.role.name or "").upper() == "MASTER")
-    tenant_id = current_user.tenant_id
-    is_master_bypass = False
     if authorization and authorization.startswith("Bearer "):
         payload = decode_access_token(authorization[7:].strip())
         if payload:
             jwt_tenant = payload.get("tenant_id")
-            master_viewing = payload.get("master_viewing", False)
-            jwt_is_master = payload.get("is_master", False)
-            if jwt_is_master and master_viewing:
-                tenant_id = jwt_tenant if jwt_tenant is not None else current_user.tenant_id
-                is_master_bypass = False
-            elif jwt_is_master and not master_viewing:
-                tenant_id = -1
-                is_master_bypass = True
-            else:
-                tenant_id = jwt_tenant if jwt_tenant is not None else current_user.tenant_id
-                is_master_bypass = False
+            # Sempre usar o tenant_id do JWT — sem bypass em get_db.
+            # O bypass total só existe em get_db_always_raw.
+            tenant_id = jwt_tenant if jwt_tenant is not None else current_user.tenant_id
         else:
-            is_master_bypass = role_is_master
-            if role_is_master:
-                tenant_id = -1
+            tenant_id = current_user.tenant_id
     else:
-        is_master_bypass = role_is_master
-        if role_is_master:
-            tenant_id = -1
-    yield from get_db_for_tenant(tenant_id=tenant_id, is_master=is_master_bypass)
+        tenant_id = current_user.tenant_id
+    yield from get_db_for_tenant(tenant_id=tenant_id, is_master=False)
 
 
 def get_db_always_raw() -> Generator[Session, None, None]:
@@ -139,9 +124,12 @@ def get_db_always_raw() -> Generator[Session, None, None]:
 def get_admin_user(
     current_user: UserORM = Depends(get_current_user),
 ) -> UserORM:
-    """Require authenticated user with ADMIN role."""
+    """Require authenticated user with ADMIN or MASTER role."""
     from fastapi import HTTPException
-    if not current_user.role or current_user.role.name.upper() != "ADMIN":
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
+    if role != "ADMIN":
         raise HTTPException(status_code=403, detail="Acesso restrito ao administrador")
     return current_user
 
@@ -151,6 +139,9 @@ def get_user_with_standardize(
 ) -> UserORM:
     """Require authenticated user with can_standardize permission."""
     from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
     perms = current_user.role.permissions if current_user.role else {}
     if not perms.get("can_standardize", False):
         raise HTTPException(status_code=403, detail="Permissão can_standardize necessária")
@@ -162,6 +153,9 @@ def get_user_with_bulk_import(
 ) -> UserORM:
     """Require authenticated user with can_bulk_import permission."""
     from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
     perms = current_user.role.permissions if current_user.role else {}
     if not perms.get("can_bulk_import", False):
         raise HTTPException(status_code=403, detail="Permissão can_bulk_import necessária")
@@ -173,6 +167,9 @@ def get_user_with_view_database(
 ) -> UserORM:
     """Require authenticated user with can_view_database permission."""
     from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
     perms = current_user.role.permissions if current_user.role else {}
     if not perms.get("can_view_database", False):
         raise HTTPException(status_code=403, detail="Permissão can_view_database necessária")
@@ -184,6 +181,9 @@ def get_user_with_edit_pdm(
 ) -> UserORM:
     """Require authenticated user with can_edit_pdm permission."""
     from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
     perms = current_user.role.permissions if current_user.role else {}
     if not perms.get("can_edit_pdm", False):
         raise HTTPException(status_code=403, detail="Permissão can_edit_pdm necessária")
@@ -195,6 +195,9 @@ def get_user_with_manage_users(
 ) -> UserORM:
     """Require authenticated user with can_manage_users permission."""
     from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
     perms = current_user.role.permissions if current_user.role else {}
     if not perms.get("can_manage_users", False):
         raise HTTPException(status_code=403, detail="Permissão can_manage_users necessária")
@@ -206,6 +209,9 @@ def get_user_with_view_logs(
 ) -> UserORM:
     """Require authenticated user with can_view_logs permission."""
     from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
     perms = current_user.role.permissions if current_user.role else {}
     if not perms.get("can_view_logs", False):
         raise HTTPException(status_code=403, detail="Permissão can_view_logs necessária")

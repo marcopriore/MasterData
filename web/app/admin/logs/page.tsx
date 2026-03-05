@@ -163,8 +163,8 @@ function EventDataContent({ data }: { data: Record<string, unknown> }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLogsPage() {
-  const { accessToken, isAdmin, can } = useUser()
-  const canViewLogs = can('can_view_logs')
+  const { accessToken, user, can } = useUser()
+  const canViewLogs = user?.is_master || can('can_view_logs')
   const [logs, setLogs] = useState<LogItem[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
   const [total, setTotal] = useState(0)
@@ -217,11 +217,11 @@ export default function AdminLogsPage() {
   }, [accessToken, page, limit, appliedCategory, appliedUserId, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
-    if (!accessToken || !isAdmin) return
+    if (!accessToken || !canViewLogs) return
     apiGetWithAuth<UserItem[]>('/admin/users', accessToken)
       .then((list) => setUsers(list ?? []))
       .catch(() => setUsers([]))
-  }, [accessToken, isAdmin])
+  }, [accessToken, canViewLogs])
 
   useEffect(() => {
     fetchLogs()
@@ -265,7 +265,7 @@ export default function AdminLogsPage() {
     }
   }
 
-  if (!isAdmin) {
+  if (!canViewLogs) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <p className="text-muted-foreground">Acesso restrito ao administrador.</p>

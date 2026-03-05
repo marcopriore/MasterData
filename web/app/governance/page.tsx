@@ -191,22 +191,24 @@ export default function GovernancePage() {
   const [historyFetched, setHistoryFetched] = useState(false)
 
   useEffect(() => {
-    apiGet<WorkflowHeader[]>('/api/workflows')
+    if (!accessToken) return
+    apiGetWithAuth<WorkflowHeader[]>('/api/workflows', accessToken)
       .then((list) => {
-        setWorkflows(list)
-        if (list.length > 0) {
+        setWorkflows(list ?? [])
+        if (list && list.length > 0) {
           const active = list.find((w) => w.is_active) ?? list[0]
           setSelectedWorkflowId(active.id)
         }
       })
       .catch(() => setWorkflows([]))
-  }, [])
+  }, [accessToken])
 
   useEffect(() => {
-    apiGet<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>('/api/pdm')
+    if (!accessToken) return
+    apiGetWithAuth<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>('/api/pdm', accessToken)
       .then((list) => setPdms((list ?? []).filter((p) => p.is_active)))
       .catch(() => setPdms([]))
-  }, [])
+  }, [accessToken])
 
   const fetchRequests = useCallback((): Promise<ApiRequest[]> => {
     setLoading(true)

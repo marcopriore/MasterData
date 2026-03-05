@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { apiGet, apiPut, apiPost, apiPatch } from '@/lib/api'
+import { useUser } from '@/contexts/user-context'
+import { apiGetWithAuth, apiPutWithAuth, apiPostWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -294,6 +295,7 @@ function SortableStepCard({
 }
 
 export default function WorkflowConfigPage() {
+  const { accessToken } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [steps, setSteps] = useState<WorkflowStep[]>([])
@@ -315,10 +317,11 @@ export default function WorkflowConfigPage() {
   const [archiveLoading, setArchiveLoading] = useState(false)
 
   const fetchWorkflows = useCallback(() => {
-    apiGet<WorkflowHeader[]>('/api/workflows')
+    if (!accessToken) return
+    apiGetWithAuth<WorkflowHeader[]>('/api/workflows', accessToken)
       .then(setWorkflows)
       .catch(() => setWorkflows([]))
-  }, [])
+  }, [accessToken])
 
   useEffect(() => {
     if (workflows.length > 0 && selectedWorkflowId === null) {
@@ -328,20 +331,20 @@ export default function WorkflowConfigPage() {
   }, [workflows, selectedWorkflowId])
 
   const fetchSteps = useCallback(() => {
-    if (!selectedWorkflowId) {
+    if (!selectedWorkflowId || !accessToken) {
       setSteps([])
       setLoading(false)
       return
     }
     setLoading(true)
-    apiGet<WorkflowStep[]>(`/api/workflow/config?workflow_id=${selectedWorkflowId}`)
+    apiGetWithAuth<WorkflowStep[]>(`/api/workflow/config?workflow_id=${selectedWorkflowId}`, accessToken)
       .then(setSteps)
       .catch(() => {
         setSteps([])
         toast.error('Erro ao carregar etapas do workflow')
       })
       .finally(() => setLoading(false))
-  }, [selectedWorkflowId])
+  }, [selectedWorkflowId, accessToken])
 
   useEffect(() => {
     fetchWorkflows()
@@ -382,6 +385,7 @@ export default function WorkflowConfigPage() {
       toast.error('O workflow precisa de pelo menos uma etapa.')
       return
     }
+    if (!accessToken) return
     setSaving(true)
     try {
       const payload = {
@@ -394,7 +398,7 @@ export default function WorkflowConfigPage() {
           is_active: s.is_active ?? true,
         })),
       }
-      await apiPut('/api/workflow/config/bulk', payload)
+      await apiPutWithAuth('/api/workflow/config/bulk', payload, accessToken)
       toast.success('Fluxo salvo com sucesso!')
       fetchSteps()
     } catch {
@@ -454,20 +458,22 @@ export default function WorkflowConfigPage() {
   }
 
   const handleArchiveClick = async () => {
-    if (!selectedWorkflowId) return
+    if (!selectedWorkflowId || !accessToken) return
     setArchiveModalOpen(true)
     setMigrationInfo(null)
     try {
-      const info = await apiGet<MigrationInfo>(
-        `/api/workflows/${selectedWorkflowId}/migration-info`
+      const info = await apiGetWithAuth<MigrationInfo>(
+        `/api/workflows/${selectedWorkflowId}/migration-info`,
+        accessToken
       )
       setMigrationInfo(info)
       if (info.steps_with_requests.length > 0) {
         const others = workflows.filter((w) => w.id !== selectedWorkflowId && w.is_active)
         if (others.length > 0) {
           setTargetWorkflowId(others[0].id)
-          const steps = await apiGet<WorkflowStep[]>(
-            `/api/workflow/config?workflow_id=${others[0].id}`
+          const steps = await apiGetWithAuth<WorkflowStep[]>(
+            `/api/workflow/config?workflow_id=${others[0].id}`,
+            accessToken
           )
           setTargetSteps(steps)
           const initial: Record<string, string> = {}
@@ -488,9 +494,11 @@ export default function WorkflowConfigPage() {
   }
 
   const handleTargetWorkflowChange = async (wfId: number) => {
+    if (!accessToken) return
     setTargetWorkflowId(wfId)
-    const steps = await apiGet<WorkflowStep[]>(
-      `/api/workflow/config?workflow_id=${wfId}`
+    const steps = await apiGetWithAuth<WorkflowStep[]>(
+      `/api/workflow/config?workflow_id=${wfId}`,
+      accessToken
     )
     setTargetSteps(steps)
     if (migrationInfo) {
@@ -505,7 +513,7 @@ export default function WorkflowConfigPage() {
   }
 
   const handleExecuteMigration = async () => {
-    if (!selectedWorkflowId || !targetWorkflowId || !migrationInfo) return
+    if (!selectedWorkflowId || !targetWorkflowId || !migrationInfo || !accessToken) return
     const ms = migrationInfo.steps_with_requests
     const missing = ms.some((s) => !mappings[s.status_key]?.trim())
     if (missing) {
@@ -522,7 +530,7 @@ export default function WorkflowConfigPage() {
           to_status_key: mappings[s.status_key],
         })),
       }
-      await apiPost('/api/workflows/migrate', payload)
+      await apiPostWithAuth('/api/workflows/migrate', payload, accessToken)
       toast.success('Migração executada com sucesso!')
       setArchiveModalOpen(false)
       setMigrationInfo(null)
@@ -545,7 +553,7 @@ export default function WorkflowConfigPage() {
       const created = await apiPost<WorkflowHeader>('/api/workflows', {
         name,
         description: null,
-      })
+      }, accessToken)
       setNewWorkflowModalOpen(false)
       setNewWorkflowName('')
       fetchWorkflows()
@@ -556,12 +564,12 @@ export default function WorkflowConfigPage() {
   }
 
   const handleActiveToggle = async (checked: boolean) => {
-    if (!selectedWorkflowId) return
+    if (!selectedWorkflowId || !accessToken) return
     setActiveToggleLoading(true)
     try {
-      await apiPatch(`/api/workflows/${selectedWorkflowId}`, {
+      await apiPatchWithAuth(`/api/workflows/${selectedWorkflowId}`, {
         is_active: checked,
-      })
+      }, accessToken)
       toast.success(checked ? 'Workflow ativado' : 'Workflow desativado')
       fetchWorkflows()
     } catch {
@@ -572,12 +580,12 @@ export default function WorkflowConfigPage() {
   }
 
   const handleConfirmArchive = async () => {
-    if (!selectedWorkflowId) return
+    if (!selectedWorkflowId || !accessToken) return
     setArchiveLoading(true)
     try {
-      await apiPatch(`/api/workflows/${selectedWorkflowId}`, {
+      await apiPatchWithAuth(`/api/workflows/${selectedWorkflowId}`, {
         is_active: false,
-      })
+      }, accessToken)
       toast.success('Workflow arquivado')
       setArchiveModalOpen(false)
       setMigrationInfo(null)

@@ -364,7 +364,8 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FieldsPage() {
-  const { isAdmin, accessToken } = useUser()
+  const { isAdmin, accessToken, user } = useUser()
+  const canAccess = user?.is_master || isAdmin
   const [fields, setFields] = useState<FieldDictionary[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -437,7 +438,7 @@ export default function FieldsPage() {
     }
   }
 
-  if (!isAdmin) {
+  if (!canAccess) {
     return (
       <div className="mx-auto max-w-2xl py-20 text-center">
         <p className="text-muted-foreground">Acesso restrito ao administrador.</p>

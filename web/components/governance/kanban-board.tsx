@@ -20,7 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
-import { apiGet, apiPatch, apiPatchWithAuth } from "@/lib/api"
+import { apiGetWithAuth, apiPatchWithAuth } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -168,15 +168,20 @@ export function KanbanBoard({
   }
 
   useEffect(() => {
+    if (!accessToken) {
+      setColumnsLoading(false)
+      setColumns([])
+      return
+    }
     setColumnsLoading(true)
     const url = workflowId
       ? `/api/workflow/config?workflow_id=${workflowId}`
       : "/api/workflow/config"
-    apiGet<WorkflowStep[]>(url)
+    apiGetWithAuth<WorkflowStep[]>(url, accessToken)
       .then((steps) => setColumns(workflowToColumns(steps.filter((s) => s.is_active))))
       .catch(() => setColumns([]))
       .finally(() => setColumnsLoading(false))
-  }, [workflowId])
+  }, [workflowId, accessToken])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -241,6 +246,10 @@ export function KanbanBoard({
       : localRequests.find((r) => r.id === over.id)?.status ?? null
 
     if (!targetColumnId || targetColumnId === draggedCard.status) return
+    if (!accessToken) {
+      toast.error("Autenticação necessária para mover solicitação")
+      return
+    }
 
     // ── Optimistic update ─────────────────────────────────────────────────────
     setLocalRequests((prev) =>
@@ -249,9 +258,9 @@ export function KanbanBoard({
 
     // ── Persist to backend ────────────────────────────────────────────────────
     try {
-      await apiPatch(`/api/requests/${draggedCard.id}/move-to`, {
+      await apiPatchWithAuth(`/api/requests/${draggedCard.id}/move-to`, {
         status_key: targetColumnId,
-      })
+      }, accessToken)
       onStatusChanged?.(draggedCard.id, targetColumnId)
     } catch (err: unknown) {
       // Roll back optimistic update

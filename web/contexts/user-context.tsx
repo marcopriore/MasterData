@@ -247,7 +247,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       ? { ...current, tenant_id: data.tenant_id, tenant_name: data.tenant_name, is_master: true }
       : { id: 0, name: '', email: '', role_id: 0, role_name: '', role_permissions: {} as RolePermissions, is_active: true, preferences: { theme: 'light', language: 'pt' }, created_at: null, tenant_id: data.tenant_id, tenant_name: data.tenant_name, is_master: true }
     persistUser(updated, data.access_token)
-    window.location.reload()
+    if (typeof window !== 'undefined') {
+      window.location.reload()
+    }
   }, [persistUser])
 
   const switchTenantBack = useCallback(async () => {
@@ -273,7 +275,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       ? { ...current, tenant_id: data.tenant_id, tenant_name: data.tenant_name ?? '', is_master: true }
       : { id: 0, name: '', email: '', role_id: 0, role_name: '', role_permissions: {} as RolePermissions, is_active: true, preferences: { theme: 'light', language: 'pt' }, created_at: null, tenant_id: data.tenant_id, tenant_name: data.tenant_name ?? '', is_master: true }
     persistUser(updated, data.access_token)
-    window.location.reload()
+    if (typeof window !== 'undefined') {
+      window.location.reload()
+    }
   }, [persistUser])
 
   // ── logout ─────────────────────────────────────────────────────────────────

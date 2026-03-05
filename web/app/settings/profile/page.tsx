@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useUser } from '@/contexts/user-context'
-import { apiPatch, apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
+import { apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -243,13 +243,14 @@ export default function ProfilePage() {
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleSaveProfile = async () => {
-    if (!user) return
+    if (!user || !accessToken) return
     if (!name.trim()) { toast.error('O nome não pode estar vazio.'); return }
     setSavingProfile(true)
     try {
-      const updated = await apiPatch<{ id: number; name: string; email: string }>(
+      const updated = await apiPatchWithAuth<{ id: number; name: string; email: string }>(
         `/admin/users/${user.id}`,
-        { name: name.trim() }
+        { name: name.trim() },
+        accessToken
       )
       setUser({ ...user, name: updated.name })
       toast.success('Dados atualizados com sucesso!')
@@ -263,16 +264,16 @@ export default function ProfilePage() {
   }
 
   const handleSavePassword = async () => {
-    if (!user) return
+    if (!user || !accessToken) return
     if (!currentPassword) { toast.error('Informe a senha atual.'); return }
     if (newPassword.length < 6) { toast.error('A nova senha deve ter pelo menos 6 caracteres.'); return }
     if (newPassword !== confirmPassword) { toast.error('As senhas não coincidem.'); return }
     setSavingPassword(true)
     try {
-      await apiPatch(`/admin/users/${user.id}/password`, {
+      await apiPatchWithAuth(`/admin/users/${user.id}/password`, {
         current_password: currentPassword,
         new_password: newPassword,
-      })
+      }, accessToken)
       toast.success('Senha alterada com sucesso!')
       setCurrentPassword('')
       setNewPassword('')
@@ -290,13 +291,13 @@ export default function ProfilePage() {
     nextTheme: 'light' | 'dark',
     nextLang: 'pt' | 'en'
   ) => {
-    if (!user) return
+    if (!user || !accessToken) return
     setSavingPrefs(true)
     try {
-      await apiPatch(`/admin/users/${user.id}/preferences`, {
+      await apiPatchWithAuth(`/admin/users/${user.id}/preferences`, {
         theme: nextTheme,
         language: nextLang,
-      })
+      }, accessToken)
       // Update context + localStorage
       setUser({ ...user, preferences: { theme: nextTheme, language: nextLang } })
       // Apply theme immediately via next-themes

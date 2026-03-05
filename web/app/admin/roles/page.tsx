@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { apiGet, apiPost, apiPatch } from '@/lib/api'
+import { apiGetWithAuth, apiPostWithAuth, apiPatchWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -164,11 +164,12 @@ function PermToggle({
 interface RoleModalProps {
   mode: 'create' | 'edit'
   initial?: Role | null
+  accessToken: string | null
   onClose: () => void
   onSaved: (r: Role) => void
 }
 
-function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
+function RoleModal({ mode, initial, accessToken, onClose, onSaved }: RoleModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [perms, setPerms] = useState<Permissions>(
     initial?.permissions ?? emptyPermissions()
@@ -182,19 +183,20 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!name.trim()) { toast.error('Informe o nome do perfil.'); return }
+    if (!accessToken) { toast.error('Sessão expirada. Faça login novamente.'); return }
 
     setSaving(true)
     try {
       let saved: Role
       if (mode === 'create') {
-        saved = await apiPost<Role>('/admin/roles', { name: name.trim(), role_type: 'sistema', permissions: perms })
+        saved = await apiPostWithAuth<Role>('/admin/roles', { name: name.trim(), role_type: 'sistema', permissions: perms }, accessToken)
         toast.success('Perfil criado com sucesso.')
       } else {
-        saved = await apiPatch<Role>(`/admin/roles/${initial!.id}`, {
+        saved = await apiPatchWithAuth<Role>(`/admin/roles/${initial!.id}`, {
           name: name.trim(),
           role_type: initial?.role_type ?? 'sistema',
           permissions: perms,
-        })
+        }, accessToken)
         toast.success('Perfil atualizado.')
       }
       onSaved(saved)
@@ -293,7 +295,8 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RolesPage() {
-  const { isAdmin } = useUser()
+  const { accessToken, user, can } = useUser()
+  const canManageRoles = user?.is_master || can('can_manage_roles')
 
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -302,17 +305,20 @@ export default function RolesPage() {
   const [editTarget, setEditTarget] = useState<Role | null>(null)
 
   const fetchRoles = useCallback(async () => {
+    if (!accessToken) return
     setLoading(true)
     try {
-      setRoles(await apiGet<Role[]>('/admin/roles'))
+      setRoles(await apiGetWithAuth<Role[]>('/admin/roles', accessToken))
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [accessToken])
 
-  useEffect(() => { fetchRoles() }, [fetchRoles])
+  useEffect(() => {
+    if (accessToken) fetchRoles()
+  }, [accessToken, fetchRoles])
 
   function openCreate() {
     setEditTarget(null)
@@ -353,7 +359,7 @@ export default function RolesPage() {
             </p>
           </div>
         </div>
-        {isAdmin && (
+        {canManageRoles && (
           <Button
             onClick={openCreate}
             className="bg-[#0F1C38] hover:bg-[#162444] text-white shrink-0"
@@ -411,7 +417,7 @@ export default function RolesPage() {
                       <Users className="size-3" />
                       {role.user_count}
                     </span>
-                    {isAdmin && (
+                    {canManageRoles && (
                       <button
                         onClick={() => openEdit(role)}
                         className="rounded-lg p-1 transition-colors hover:bg-black/10"
@@ -473,6 +479,7 @@ export default function RolesPage() {
         <RoleModal
           mode={modalMode}
           initial={editTarget}
+          accessToken={accessToken}
           onClose={() => setModalOpen(false)}
           onSaved={handleSaved}
         />

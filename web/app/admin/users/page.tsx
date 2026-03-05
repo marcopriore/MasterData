@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { apiGet, apiPost, apiPatch, apiDownloadWithAuth, apiUploadWithAuth } from '@/lib/api'
+import { apiGetWithAuth, apiPostWithAuth, apiPatchWithAuth, apiDownloadWithAuth, apiUploadWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -84,11 +84,12 @@ interface UserModalProps {
   mode: ModalMode
   initial?: User | null
   roles: Role[]
+  accessToken: string | null
   onClose: () => void
   onSaved: (u: User) => void
 }
 
-function UserModal({ mode, initial, roles, onClose, onSaved }: UserModalProps) {
+function UserModal({ mode, initial, roles, onClose, onSaved, accessToken }: UserModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [email, setEmail] = useState(initial?.email ?? '')
   const [password, setPassword] = useState('')
@@ -111,21 +112,25 @@ function UserModal({ mode, initial, roles, onClose, onSaved }: UserModalProps) {
       return
     }
 
+    if (!accessToken) {
+      toast.error('Sessão expirada. Faça login novamente.')
+      return
+    }
     setSaving(true)
     try {
       let saved: User
       if (mode === 'create') {
-        saved = await apiPost<User>('/admin/users', {
+        saved = await apiPostWithAuth<User>('/admin/users', {
           name: name.trim(),
           email: email.trim().toLowerCase(),
           password,
           role_id: roleId,
-        })
+        }, accessToken)
         toast.success('Usuário criado com sucesso.')
       } else {
         const body: Record<string, unknown> = { name: name.trim(), role_id: roleId }
         if (password) body.password = password
-        saved = await apiPatch<User>(`/admin/users/${initial!.id}`, body)
+        saved = await apiPatchWithAuth<User>(`/admin/users/${initial!.id}`, body, accessToken)
         toast.success('Usuário atualizado.')
       }
       onSaved(saved)
@@ -266,8 +271,8 @@ type UserImportRow = {
 }
 
 export default function UsersPage() {
-  const { isAdmin, can, accessToken } = useUser()
-  const canManageUsers = can('can_manage_users')
+  const { can, accessToken, user } = useUser()
+  const canManageUsers = user?.is_master || can('can_manage_users')
 
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
@@ -293,11 +298,12 @@ export default function UsersPage() {
   const [userImportError, setUserImportError] = useState<string | null>(null)
 
   const fetchUsers = useCallback(async () => {
+    if (!accessToken) return
     setLoading(true)
     try {
       const [u, r] = await Promise.all([
-        apiGet<User[]>('/admin/users'),
-        apiGet<Role[]>('/admin/roles'),
+        apiGetWithAuth<User[]>('/admin/users', accessToken),
+        apiGetWithAuth<Role[]>('/admin/roles', accessToken),
       ])
       setUsers(u)
       setRoles(r)
@@ -306,9 +312,11 @@ export default function UsersPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [accessToken])
 
-  useEffect(() => { fetchUsers() }, [fetchUsers])
+  useEffect(() => {
+    if (accessToken) fetchUsers()
+  }, [accessToken, fetchUsers])
 
   function openCreate() {
     setEditTarget(null)
@@ -333,11 +341,12 @@ export default function UsersPage() {
   }
 
   async function toggleActive(u: User) {
+    if (!accessToken) return
     setTogglingId(u.id)
     try {
-      const updated = await apiPatch<User>(`/admin/users/${u.id}`, {
+      const updated = await apiPatchWithAuth<User>(`/admin/users/${u.id}`, {
         is_active: !u.is_active,
-      })
+      }, accessToken)
       setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       toast.success(updated.is_active ? 'Usuário ativado.' : 'Usuário desativado.')
     } catch (err) {
@@ -471,7 +480,7 @@ export default function UsersPage() {
               </Button>
             </>
           )}
-          {isAdmin && (
+          {canManageUsers && (
             <Button
               onClick={openCreate}
               className="bg-[#0F1C38] hover:bg-[#162444] text-white shrink-0"
@@ -522,7 +531,7 @@ export default function UsersPage() {
                   <th className="px-5 py-3 font-semibold text-muted-foreground">E-mail</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Perfil</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Status</th>
-                  {isAdmin && (
+                  {canManageUsers && (
                     <th className="px-5 py-3 font-semibold text-muted-foreground text-right">Ações</th>
                   )}
                 </tr>
@@ -590,7 +599,7 @@ export default function UsersPage() {
                       </td>
 
                       {/* Actions */}
-                      {isAdmin && (
+                      {canManageUsers && (
                         <td className="px-5 py-3.5">
                           <div className="flex items-center justify-end gap-1">
                             <button
@@ -845,6 +854,7 @@ export default function UsersPage() {
           mode={modalMode}
           initial={editTarget}
           roles={roles}
+          accessToken={accessToken}
           onClose={() => setModalOpen(false)}
           onSaved={handleSaved}
         />
