@@ -134,7 +134,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
   const [sapField, setSapField] = useState(initial?.sap_field ?? '')
   const [sapView, setSapView] = useState(initial?.sap_view ?? 'dados_basicos')
   const [fieldType, setFieldType] = useState(initial?.field_type ?? 'text')
-  const [responsibleRole, setResponsibleRole] = useState(initial?.responsible_role ?? 'TRIAGEM')
+  const [responsibleRole, setResponsibleRole] = useState(initial?.responsible_role ?? '')
   const [isRequired, setIsRequired] = useState(initial?.is_required ?? false)
   const [optionsJson, setOptionsJson] = useState(() => {
     const o = initial?.options
@@ -159,6 +159,10 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
     }
     if (!fieldName.trim()) {
       toast.error('Identificador é obrigatório.')
+      return
+    }
+    if (!responsibleRole.trim()) {
+      toast.error('Responsável é obrigatório.')
       return
     }
     if (!/^[a-z][a-z0-9_]*$/.test(fieldName)) {
@@ -212,11 +216,6 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
     }
   }
 
-  const etapasRoles = roles.filter((r) =>
-    ['TRIAGEM', 'FISCAL', 'MASTER', 'MRP'].includes(r.name)
-  )
-  const roleOptions = etapasRoles.length > 0 ? etapasRoles : roles
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-2xl border border-[#B4B9BE] bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -254,7 +253,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
             />
           </div>
           <div>
-            <Label htmlFor="sap_field">Campo SAP</Label>
+            <Label htmlFor="sap_field">Campo ERP</Label>
             <Input
               id="sap_field"
               value={sapField}
@@ -264,7 +263,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
             />
           </div>
           <div>
-            <Label htmlFor="sap_view">Visão SAP *</Label>
+            <Label htmlFor="sap_view">Visão ERP *</Label>
             <select
               id="sap_view"
               value={sapView}
@@ -299,9 +298,10 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
               id="responsible_role"
               value={responsibleRole}
               onChange={(e) => setResponsibleRole(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm dark:border-zinc-700 dark:bg-background dark:text-foreground"
             >
-              {roleOptions.map((r) => (
+              <option value="">Selecione...</option>
+              {roles.map((r) => (
                 <option key={r.id} value={r.name}>
                   {r.name}
                 </option>
@@ -459,7 +459,7 @@ export default function FieldsPage() {
           <div>
             <h1 className="text-xl font-bold text-foreground">Dicionário de Campos</h1>
             <p className="text-sm text-muted-foreground">
-              Campos SAP MM01 e responsabilidades por etapa
+              Campos e responsabilidades por etapa
             </p>
           </div>
         </div>
@@ -511,7 +511,7 @@ export default function FieldsPage() {
               <thead>
                 <tr className="border-b border-[#B4B9BE] text-left">
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Campo</th>
-                  <th className="px-5 py-3 font-semibold text-muted-foreground">Referência SAP</th>
+                  <th className="px-5 py-3 font-semibold text-muted-foreground">Referência ERP</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Visão</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Tipo</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Responsável</th>

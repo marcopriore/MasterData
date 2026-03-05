@@ -554,14 +554,14 @@ def ensure_material_database(db, tenant_id: int) -> int:
 
 
 def ensure_field_dictionary(db, tenant_id: int) -> int:
-    """Insere campos do dicionário SAP MM01 (ONBOARDING_FIELD_DICT) se a tabela estiver vazia."""
+    """Insere campos do dicionário ERP (ONBOARDING_FIELD_DICT) se a tabela estiver vazia."""
     if db.query(FieldDictionaryORM).filter(FieldDictionaryORM.tenant_id == tenant_id).count() > 0:
         _skip("Field dictionary")
         return 0
     for entry in ONBOARDING_FIELD_DICT:
         db.add(FieldDictionaryORM(tenant_id=tenant_id, **entry))
     db.flush()
-    _ok(f"{len(ONBOARDING_FIELD_DICT)} campos do dicionário SAP MM01 inseridos")
+    _ok(f"{len(ONBOARDING_FIELD_DICT)} campos do dicionário ERP inseridos")
     return len(ONBOARDING_FIELD_DICT)
 
 

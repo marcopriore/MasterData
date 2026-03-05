@@ -81,7 +81,7 @@ type MaterialsResponse = {
 type PDMTemplate = { id: number; name: string; internal_code: string }
 
 const COLUMN_KEYS = {
-  sap_code: 'Código SAP',
+  sap_code: 'Código ERP',
   description: 'Descrição',
   status: 'Status',
   pdm_code: 'Código PDM',
@@ -470,7 +470,7 @@ export default function DatabasePage() {
               Colunas sempre visíveis
             </div>
             <DropdownMenuCheckboxItem checked disabled>
-              Código SAP
+              Código ERP
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked disabled>
               Descrição

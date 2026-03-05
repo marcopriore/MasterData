@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field, EmailStr
-from typing import Optional, Literal
+import json
+from pydantic import BaseModel, Field, EmailStr, field_validator
+from typing import Optional, Literal, Union
 from uuid import UUID, uuid4
 from datetime import datetime
 
@@ -246,7 +247,27 @@ class AttributesPayload(BaseModel):
     attributes: dict[str, str] = Field(default_factory=dict)
 
 
-# ─── Field Dictionary (SAP MM01) ───────────────────────────────────────────────
+# ─── Field Dictionary (ERP) ───────────────────────────────────────────────────
+
+def _parse_options(v):
+    """Aceita options como string JSON, list ou dict."""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return None
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, (list, dict)):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        raise ValueError("options deve ser JSON válido")
+    if isinstance(v, (list, dict)):
+        return v
+    return v
+
 
 class FieldDictionaryCreate(BaseModel):
     field_name: str
@@ -254,11 +275,16 @@ class FieldDictionaryCreate(BaseModel):
     sap_field: Optional[str] = None
     sap_view: str
     field_type: str
-    options: Optional[dict] = None
+    options: Optional[Union[list, dict, str]] = None
     responsible_role: str
     is_required: bool = False
     is_active: bool = True
     display_order: int = 0
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def parse_options(cls, v):
+        return _parse_options(v)
 
 
 class FieldDictionaryUpdate(BaseModel):
@@ -267,11 +293,16 @@ class FieldDictionaryUpdate(BaseModel):
     sap_field: Optional[str] = None
     sap_view: Optional[str] = None
     field_type: Optional[str] = None
-    options: Optional[dict] = None
+    options: Optional[Union[list, dict, str]] = None
     responsible_role: Optional[str] = None
     is_required: Optional[bool] = None
     is_active: Optional[bool] = None
     display_order: Optional[int] = None
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def parse_options(cls, v):
+        return _parse_options(v)
 
 
 class FieldDictionaryResponse(BaseModel):

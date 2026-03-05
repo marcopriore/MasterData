@@ -78,7 +78,7 @@ C:\Dev\MasterData\
 | `material_database` | Base de dados de materiais (mock ERP) |
 | `notifications` | Notificações in-app por usuário |
 | `user_notification_prefs` | Preferências de notificação por usuário |
-| `field_dictionary` | Dicionário SAP MM01 (31 campos) |
+| `field_dictionary` | Dicionário de campos ERP (31 campos) |
 
 ---
 
@@ -219,7 +219,7 @@ Ao abrir um card:
 
 Ações disponíveis (por permissão):
   → Iniciar Atendimento (assign)
-  → Salvar campos do dicionário SAP
+  → Salvar campos do dicionário ERP
   → Salvar e Aprovar (avança etapa)
   → Rejeitar (com justificativa)
 ```

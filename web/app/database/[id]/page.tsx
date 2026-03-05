@@ -391,7 +391,7 @@ export default function DatabaseDetailPage() {
             <Row label="Status" value={<Cell value={material.status} />} />
           )}
           <EditableRow
-            label="Código SAP"
+            label="Código ERP"
             isDark={isDark}
             fieldKey="sap_code"
             editMode={editMode}

@@ -291,7 +291,7 @@ class PDMOrm(Base):
 
 
 class FieldDictionaryORM(Base):
-    """Dicionário de campos SAP MM01 — global, não vinculado ao PDM."""
+    """Dicionário de campos ERP — global, não vinculado ao PDM."""
     __tablename__ = "field_dictionary"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -314,7 +314,7 @@ class FieldDictionaryORM(Base):
 
 
 class MaterialDatabaseORM(Base):
-    """Base de dados de materiais — cadastro de materiais SAP."""
+    """Base de dados de materiais — cadastro de materiais ERP."""
     __tablename__ = "material_database"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -322,7 +322,7 @@ class MaterialDatabaseORM(Base):
         Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
 
-    # Identificação SAP
+    # Identificação ERP
     sap_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     description: Mapped[str] = mapped_column(String(200), nullable=False)
 
@@ -339,7 +339,7 @@ class MaterialDatabaseORM(Base):
     ncm: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     material_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
-    # Campos SAP adicionais
+    # Campos ERP adicionais
     gross_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     net_weight: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cfop: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

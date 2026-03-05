@@ -342,7 +342,7 @@ def create_product(payload: ProductCreate, db: Session = Depends(get_db)):
     return {"id": row.id, "name": row.name, "description": row.description}
 
 # -------------------------------
-# FIELD DICTIONARY (SAP MM01) — ADMIN only
+# FIELD DICTIONARY (ERP) — ADMIN only
 def _field_to_dict(r: FieldDictionaryORM) -> dict:
     return {
         "id": r.id,
@@ -362,7 +362,7 @@ def _field_to_dict(r: FieldDictionaryORM) -> dict:
 
 @app.get("/api/fields")
 def list_fields(
-    sap_view: str | None = Query(None, description="Filtrar por visão SAP"),
+    sap_view: str | None = Query(None, description="Filtrar por visão ERP"),
     db: Session = Depends(get_db),
     _: UserORM = Depends(get_admin_user),
 ):
@@ -1893,7 +1893,7 @@ def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
 
 @app.get("/api/database/materials")
 def list_material_database(
-    q: str | None = Query(None, description="Busca por descrição ou sap_code"),
+    q: str | None = Query(None, description="Busca por descrição ou código ERP"),
     status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
     pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
     erp_status: str | None = Query(None, description="Filtrar por erp_status: pendente_erp|integrado"),
@@ -1951,7 +1951,7 @@ def search_material_database(
     db: Session = Depends(get_db),
     _: UserORM = Depends(get_current_user),
 ):
-    """Busca simplificada — retorna top 10 por descrição ou sap_code."""
+    """Busca simplificada — retorna top 10 por descrição ou código ERP."""
     term = f"%{q.strip()}%"
     rows = (
         db.query(MaterialDatabaseORM)
@@ -2011,7 +2011,7 @@ def erp_integrate_materials(
 
 @app.get("/api/database/materials/export")
 def export_materials(
-    q: str | None = Query(None, description="Busca por descrição ou sap_code"),
+    q: str | None = Query(None, description="Busca por descrição ou código ERP"),
     status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
     pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
     erp_status: str | None = Query(None, description="Filtrar por erp_status: pendente_erp|integrado"),

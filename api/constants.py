@@ -176,7 +176,7 @@ ONBOARDING_WORKFLOW_STEPS = [
     {"step_order": 6, "step_name": "Finalizado", "role_name": None, "status_key": "finalizado", "order": 6},
 ]
 
-# Field dictionary padrão SAP MM01 (31 campos) — responsible_role mapeado para novo workflow
+# Field dictionary padrão ERP (31 campos) — responsible_role mapeado para novo workflow
 ONBOARDING_FIELD_DICT = [
     {"field_name": "descricao_basica", "field_label": "Descrição Básica", "sap_field": "MAKTX",
      "sap_view": "dados_basicos", "field_type": "text", "options": None, "responsible_role": "CADASTRO",
