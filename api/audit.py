@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from deps import set_tenant_in_session
 from orm_models import RequestHistoryORM, SystemLogORM
 
 
@@ -15,7 +16,9 @@ def log_request_event(
     tenant_id: int,
     event_data: dict | None = None,
     stage: str | None = None,
+    is_master: bool = False,
 ) -> None:
+    set_tenant_in_session(db, tenant_id, is_master=is_master)
     entry = RequestHistoryORM(
         request_id=request_id,
         user_id=user_id,
@@ -39,7 +42,9 @@ def log_system_event(
     tenant_id: int,
     event_data: dict | None = None,
     ip_address: str | None = None,
+    is_master: bool = False,
 ) -> None:
+    set_tenant_in_session(db, tenant_id, is_master=is_master)
     entry = SystemLogORM(
         user_id=user_id,
         tenant_id=tenant_id,

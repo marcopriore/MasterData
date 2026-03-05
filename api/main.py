@@ -379,16 +379,16 @@ def list_my_fields(
     current_user: UserORM = Depends(get_current_user),
 ):
     """
-    Returns fields where responsible_role matches current user's role (case-insensitive)
+    Returns fields where responsible_role matches current user's role (e.g. CADASTRO)
     and is_active is True. Ordered by display_order.
     """
     if not current_user.role or not current_user.role.name:
         return []
-    role_name = current_user.role.name.strip()
+    role_name = current_user.role.name.strip().upper()
     q = (
         db.query(FieldDictionaryORM)
         .filter(FieldDictionaryORM.is_active)
-        .filter(func.lower(FieldDictionaryORM.responsible_role) == role_name.lower())
+        .filter(FieldDictionaryORM.responsible_role == role_name)
         .order_by(FieldDictionaryORM.display_order, FieldDictionaryORM.id)
     )
     rows = q.all()
@@ -438,6 +438,7 @@ def create_field(
         db, current_user.id, "fields", "field_created",
         f"Campo '{payload.field_label}' ({payload.field_name}) criado por {current_user.name}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return _field_to_dict(row)
 
@@ -491,6 +492,7 @@ def update_field(
         db, current_user.id, "fields", "field_updated",
         f"Campo #{field_id} ({row.field_label}) atualizado por {current_user.name}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return _field_to_dict(row)
 
@@ -512,6 +514,7 @@ def delete_field(
         db, current_user.id, "fields", "field_deactivated",
         f"Campo #{field_id} ({row.field_label}) desativado por {current_user.name}",
         row.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return _field_to_dict(row)
 
@@ -718,6 +721,7 @@ async def import_pdm(
         "bulk_import",
         f"PDM: {pdm_created} criados, {pdm_updated} atualizados. Atributos: {attr_created} criados, {attr_updated} atualizados, {attr_deleted} deletados por {current_user.email}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return {
         "dry_run": False,
@@ -843,6 +847,25 @@ def _request_to_dict(r) -> dict:
         key=lambda v: attr_orders.get(v["attribute_id"], 999),
     )
 
+    pdm_attributes = {}
+    if r.pdm and r.pdm.attributes:
+        for attr in r.pdm.attributes:
+            attr_id = str(attr.get("id", ""))
+            data_type = attr.get("dataType", "text")
+            if data_type == "lov":
+                field_type = "select"
+            elif data_type == "numeric":
+                field_type = "number"
+            else:
+                field_type = "text"
+            allowed = attr.get("allowedValues") or attr.get("options") or []
+            options = [str(av.get("value", av) if isinstance(av, dict) else av) for av in allowed]
+            pdm_attributes[attr_id] = {
+                "label": attr.get("name", attr.get("label", attr_id)),
+                "type": field_type,
+                "options": options,
+            }
+
     return {
         "id": r.id,
         "pdm_id": r.pdm_id,
@@ -860,6 +883,7 @@ def _request_to_dict(r) -> dict:
         "values": values,
         "assigned_to_id": r.assigned_to_id,
         "assigned_to_name": r.assigned_to.name if r.assigned_to else None,
+        "pdm_attributes": pdm_attributes,
     }
 
 
@@ -884,14 +908,15 @@ def list_requests(
     if wf_id is not None:
         q = q.filter(MaterialRequestORM.workflow_id == wf_id)
 
-    role_name = current_user.role.name.upper() if (current_user and current_user.role) else None
-    role_type = current_user.role.role_type if (current_user and current_user.role) else None
+    role_name = current_user.role.name.upper() if (current_user and current_user.role) else ""
+    role_type = current_user.role.role_type if (current_user and current_user.role) else "sistema"
+    is_master = role_name == "MASTER" or getattr(current_user, "is_master", False)
 
-    if role_name in ("ADMIN", "MASTER"):
-        pass  # no filter — return all
-    elif role_name == "SOLICITANTE" and current_user:
+    if is_master or role_name == "ADMIN":
+        pass  # vê tudo
+    elif role_name == "SOLICITANTE":
         q = q.filter(MaterialRequestORM.user_id == current_user.id)
-    elif role_type == "etapa" and current_user and current_user.role and role_name:
+    elif role_type in ("etapa", "operacional") and role_name:
         q = q.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
 
     return [_request_to_dict(r) for r in q.all()]
@@ -964,22 +989,26 @@ def assign_request(
 
     row.assigned_to_id = current_user.id
     row.assigned_at = datetime.now(timezone.utc)
+    row_id = row.id
     tid = row.tenant_id
+    row_status = row.status
     db.commit()
     refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     log_request_event(
-        db, row.id, current_user.id, "assigned",
+        db, row_id, current_user.id, "assigned",
         f"Atendimento iniciado por {current_user.name}",
-        row.tenant_id,
-        stage=row.status,
+        tid,
+        stage=row_status,
+        is_master=getattr(current_user, "is_master", False),
     )
     log_system_event(
         db, current_user.id, "requests", "request_assigned",
-        f"Solicitação #{row.id} atribuída a {current_user.name}",
-        row.tenant_id,
+        f"Solicitação #{row_id} atribuída a {current_user.name}",
+        tid,
+        is_master=getattr(current_user, "is_master", False),
     )
     try:
-        notify_request_event(db, "request_assigned", row, current_user, stage=row.status)
+        notify_request_event(db, "request_assigned", row, current_user, stage=row_status)
     except Exception as e:
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
@@ -1024,7 +1053,33 @@ def update_request_attributes(
         elif k in merged:
             del merged[k]
     row.technical_attributes = merged if merged else None
+    row_id = row.id
     tid = row.tenant_id
+    row_status = row.status
+
+    # Regenerate generated_description from PDM template when attributes changed
+    pdm = row.pdm
+    if pdm and pdm.attributes and merged:
+        parts = [pdm.name.upper()]
+        for attr in sorted(pdm.attributes, key=lambda a: a.get("order", 0)):
+            attr_id = str(attr.get("id", ""))
+            if not attr.get("includeInDescription"):
+                continue
+            val = merged.get(attr_id, "")
+            if val:
+                lov_abbr = next(
+                    (
+                        av.get("abbreviation", "")
+                        for av in (attr.get("allowedValues") or [])
+                        if av.get("value") == val and av.get("abbreviation")
+                    ),
+                    None,
+                )
+                parts.append((lov_abbr or val).upper())
+            else:
+                parts.append(f"[{attr.get('abbreviation', attr_id)}]")
+        row.generated_description = " ".join(parts)
+
     db.commit()
     refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
 
@@ -1048,17 +1103,19 @@ def update_request_attributes(
         }
     if fields_changed:
         log_request_event(
-            db, row.id, current_user.id, "fields_saved",
+            db, row_id, current_user.id, "fields_saved",
             f"Campos atualizados por {current_user.name}",
-            row.tenant_id,
+            tid,
             event_data={"fields_changed": fields_changed},
-            stage=row.status,
+            stage=row_status,
+            is_master=getattr(current_user, "is_master", False),
         )
         log_system_event(
             db, current_user.id, "requests", "request_fields_saved",
-            f"Campos da solicitação #{row.id} salvos por {current_user.name}",
-            row.tenant_id,
+            f"Campos da solicitação #{row_id} salvos por {current_user.name}",
+            tid,
             event_data={"fields_changed": fields_changed},
+            is_master=getattr(current_user, "is_master", False),
         )
     return _request_to_dict(row)
 
@@ -1144,11 +1201,13 @@ def create_request(
         f"Solicitação criada por {requester_name}",
         tenant_id,
         stage=initial_status,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_created",
         f"Solicitação #{row.id} criada por {requester_name}",
         tenant_id,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     try:
         notify_request_event(db, "request_created", row, current_user)
@@ -1255,14 +1314,16 @@ def update_request_status(
         )
     from_status = row.status
     row.status = next_status
+    row_id = row.id
     tid = row.tenant_id
+    wf_id = row.workflow_id
     db.commit()
     refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
 
     next_step = (
         db.query(WorkflowConfigORM)
         .filter(
-            WorkflowConfigORM.workflow_id == row.workflow_id,
+            WorkflowConfigORM.workflow_id == wf_id,
             WorkflowConfigORM.status_key == next_status,
         )
         .first()
@@ -1270,17 +1331,19 @@ def update_request_status(
     next_step_label = next_step.step_name if next_step else next_status
     approver_name = current_user.name if current_user else "Sistema"
     log_request_event(
-        db, row.id, current_user.id if current_user else None, "approved",
+        db, row_id, current_user.id if current_user else None, "approved",
         f"Aprovado por {approver_name} — avançou para {next_step_label}",
-        row.tenant_id,
+        tid,
         event_data={"from_stage": from_status, "to_stage": next_status},
         stage=next_status,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_approved",
-        f"Solicitação #{row.id} aprovada por {approver_name}",
-        row.tenant_id,
+        f"Solicitação #{row_id} aprovada por {approver_name}",
+        tid,
         event_data={"from_stage": from_status, "to_stage": next_status},
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     try:
         event_type = "request_completed" if next_status == "completed" else "request_approved"
@@ -1312,6 +1375,7 @@ def reject_request(
     if not row:
         raise HTTPException(status_code=404, detail="Request not found")
     row.status = "Rejected"
+    row_id = row.id
     tid = row.tenant_id
     db.commit()
     refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
@@ -1319,17 +1383,19 @@ def reject_request(
     justification = (payload.justification or "") if payload else ""
     rejector_name = current_user.name if current_user else "Sistema"
     log_request_event(
-        db, row.id, current_user.id if current_user else None, "rejected",
+        db, row_id, current_user.id if current_user else None, "rejected",
         f"Rejeitado por {rejector_name}",
-        row.tenant_id,
+        tid,
         event_data={"justification": justification},
         stage="Rejected",
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_rejected",
-        f"Solicitação #{row.id} rejeitada por {rejector_name}",
-        row.tenant_id,
+        f"Solicitação #{row_id} rejeitada por {rejector_name}",
+        tid,
         event_data={"justification": justification},
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     try:
         notify_request_event(db, "request_rejected", row, current_user, justification=justification)
@@ -1379,22 +1445,25 @@ def move_request_to_status(
 
     from_status = row.status
     row.status = payload.status_key
+    row_id = row.id
     tid = row.tenant_id
     db.commit()
     refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
     mover_name = current_user.name if current_user else "Sistema"
     log_request_event(
-        db, row.id, current_user.id if current_user else None, "status_changed",
+        db, row_id, current_user.id if current_user else None, "status_changed",
         f"Status alterado por {mover_name}: {from_status} → {payload.status_key}",
-        row.tenant_id,
+        tid,
         event_data={"from_stage": from_status, "to_stage": payload.status_key},
         stage=payload.status_key,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_status_changed",
-        f"Solicitação #{row.id} movida por {mover_name} para {payload.status_key}",
-        row.tenant_id,
+        f"Solicitação #{row_id} movida por {mover_name} para {payload.status_key}",
+        tid,
         event_data={"from_stage": from_status, "to_stage": payload.status_key},
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     return _request_to_dict(row)
 
@@ -1931,6 +2000,7 @@ def erp_integrate_materials(
         "integrate",
         f"{len(integrated)} materiais integrados por {current_user.email}: IDs {material_ids_str}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return {"integrated": integrated, "skipped": skipped, "total": len(integrated)}
 
@@ -2096,6 +2166,7 @@ async def import_materials(
         "bulk_import",
         f"{created} criados, {updated} atualizados por {current_user.email}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return {"dry_run": False, "created": created, "updated": updated, "errors": []}
 
@@ -2144,6 +2215,7 @@ def standardize_material(
         "standardize",
         f"Material {material_id} padronizado por {current_user.email}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
     return _material_db_to_dict(row)
 

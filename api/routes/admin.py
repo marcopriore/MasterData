@@ -210,6 +210,7 @@ def create_role(
         db, current_user.id if current_user else None, "roles", "role_created",
         f"Perfil '{name_upper}' criado por {creator}",
         tenant_id,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     return _role_to_dict(_load_role(row.id, db))
 
@@ -250,6 +251,7 @@ def update_role(
         db, current_user.id if current_user else None, "roles", "role_updated",
         f"Perfil #{role_id} ({row.name}) atualizado por {updater}",
         row.tenant_id,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     return _role_to_dict(_load_role(row.id, db))
 
@@ -427,6 +429,7 @@ async def import_users(
         "bulk_import",
         f"Importação em massa: {created} criados, {updated} atualizados por {current_user.email}",
         current_user.tenant_id,
+        is_master=getattr(current_user, "is_master", False),
     )
 
     return {"dry_run": False, "created": created, "updated": updated}
@@ -523,6 +526,7 @@ def create_user(
         db, current_user.id if current_user else None, "users", "user_created",
         f"Usuário {row.email} criado por {creator}",
         tenant_id,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     return _user_to_dict(_load_user(row.id, db))
 
@@ -573,6 +577,7 @@ def replace_user(
         db, current_user.id if current_user else None, "users", "user_updated",
         f"Usuário #{user_id} ({row.email}) atualizado por {updater}",
         row.tenant_id,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     return _user_to_dict(_load_user(row.id, db))
 
@@ -629,6 +634,7 @@ def update_user(
         db, current_user.id if current_user else None, "users", "user_updated",
         f"Usuário #{user_id} ({row.email}) atualizado por {updater}",
         row.tenant_id,
+        is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     return _user_to_dict(_load_user(row.id, db))
 
@@ -755,12 +761,13 @@ def login(
     role_name = row.role.name if row.role else "SOLICITANTE"
     role_type = getattr(row.role, "role_type", "sistema") if row.role else "sistema"
     permissions = row.role.permissions if row.role else {}
+    is_master = (role_name or "").upper() == "MASTER"
     log_system_event(
         db, row.id, "auth", "login",
         f"Login realizado com sucesso: {row.email}",
         row.tenant_id,
+        is_master=is_master,
     )
-    is_master = (role_name or "").upper() == "MASTER"
     return {
         "ok": True,
         "user": _user_to_dict(row),

@@ -126,11 +126,16 @@ def get_email_template(
     return subject, html
 
 
-def _get_or_create_prefs(db: Session, user_id: int) -> UserNotificationPrefsORM:
+def _get_or_create_prefs(db: Session, user_id: int, tenant_id: int | None = None) -> UserNotificationPrefsORM:
     prefs = db.query(UserNotificationPrefsORM).filter(UserNotificationPrefsORM.user_id == user_id).first()
     if prefs:
         return prefs
-    prefs = UserNotificationPrefsORM(user_id=user_id)
+    if tenant_id is None:
+        user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
+        tenant_id = user_obj.tenant_id if user_obj else None
+    if tenant_id is None:
+        raise ValueError(f"Cannot create UserNotificationPrefsORM for user_id={user_id}: tenant_id unknown")
+    prefs = UserNotificationPrefsORM(user_id=user_id, tenant_id=tenant_id)
     db.add(prefs)
     db.flush()
     return prefs
@@ -212,7 +217,7 @@ def notify_request_event(
     title = titles.get(event_type, f"Solicitação {request_number}")
     message = messages.get(event_type, "")
 
-    prefs = _get_or_create_prefs(db, requester_user.id)
+    prefs = _get_or_create_prefs(db, requester_user.id, getattr(requester_user, "tenant_id", None))
     notify_key, email_key = _get_pref_key(event_type)
 
     if getattr(prefs, notify_key, True):

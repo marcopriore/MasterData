@@ -79,6 +79,7 @@ type ApiRequest = {
   values: RequestValue[]
   assigned_to_id?: number | null
   assigned_to_name?: string | null
+  pdm_attributes?: Record<string, { label: string; type: string; options: string[] }>
 }
 
 function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
@@ -258,6 +259,8 @@ export default function GovernancePage() {
     [materialRequests, search, category, dateRange]
   )
 
+  const lastInitializedRequestIdRef = useRef<number | null>(null)
+
   const handleViewDetails = (id: string) => {
     const req = requests.find((r) => String(r.id) === id)
     setSelectedRequest(req ?? null)
@@ -269,12 +272,22 @@ export default function GovernancePage() {
       const data = await fetchRequests()
       const req = data.find((r) => String(r.id) === requestId)
       if (req) {
+        lastInitializedRequestIdRef.current = null
         setSelectedRequest(req)
         setDetailsOpen(true)
       }
     },
     [fetchRequests]
   )
+
+  const handleCloseModal = useCallback(() => {
+    lastInitializedRequestIdRef.current = null
+    setSelectedRequest(null)
+    setAttributeValues({})
+    setMyFields([])
+    setFieldLabels([])
+    setDetailsOpen(false)
+  }, [])
 
   const isAssignedToMe =
     selectedRequest &&
@@ -285,8 +298,6 @@ export default function GovernancePage() {
   const hasTechnicalAttributes =
     selectedRequest?.technical_attributes &&
     Object.keys(selectedRequest.technical_attributes).length > 0
-
-  const lastInitializedRequestIdRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!detailsOpen || !selectedRequest || !accessToken) return
@@ -339,8 +350,7 @@ export default function GovernancePage() {
     try {
       await apiPatchWithAuth(`/api/requests/${id}/status`, { action: 'approve' }, accessToken)
       toast.success('Solicitação aprovada com sucesso!')
-      setDetailsOpen(false)
-      setSelectedRequest(null)
+      handleCloseModal()
       await fetchRequests()
     } catch {
       toast.error('Falha ao aprovar solicitação')
@@ -405,21 +415,23 @@ export default function GovernancePage() {
     setInvalidFields(new Set())
     setSaveLoading(true)
     try {
-      await apiPatchWithAuth(
+      const res = await apiPatchWithAuth<ApiRequest>(
         `/api/requests/${selectedRequest.id}/attributes`,
         { attributes: attributeValues },
         accessToken
       )
       toast.success('Dados salvos!')
+      const attrs = res?.technical_attributes ?? { ...selectedRequest.technical_attributes, ...attributeValues }
+      const genDesc = res?.generated_description ?? selectedRequest.generated_description
       const updated = requests.map((r) =>
         r.id === selectedRequest.id
-          ? { ...r, technical_attributes: { ...r.technical_attributes, ...attributeValues } }
+          ? { ...r, technical_attributes: attrs, generated_description: genDesc }
           : r
       )
       setRequests(updated)
       setSelectedRequest((prev) =>
         prev && prev.id === selectedRequest.id
-          ? { ...prev, technical_attributes: { ...prev.technical_attributes, ...attributeValues } }
+          ? { ...prev, technical_attributes: attrs, generated_description: genDesc }
           : prev
       )
     } catch {
@@ -446,8 +458,7 @@ export default function GovernancePage() {
         accessToken
       )
       toast.success('Dados salvos e solicitação aprovada!')
-      setDetailsOpen(false)
-      setSelectedRequest(null)
+      handleCloseModal()
       await fetchRequests()
     } catch {
       toast.error('Falha ao salvar ou aprovar')
@@ -485,8 +496,7 @@ export default function GovernancePage() {
       )
       toast.success('Solicitação rejeitada com sucesso!')
       setRejectModalOpen(false)
-      setDetailsOpen(false)
-      setSelectedRequest(null)
+      handleCloseModal()
       await fetchRequests()
     } catch {
       setRejectError('Falha ao rejeitar solicitação')
@@ -598,12 +608,7 @@ export default function GovernancePage() {
       <Dialog
         open={detailsOpen}
         onOpenChange={(open) => {
-          if (!open) {
-            lastInitializedRequestIdRef.current = null
-            setSelectedRequest(null)
-            setAttributeValues({})
-          }
-          setDetailsOpen(open)
+          if (!open) handleCloseModal()
         }}
       >
         <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden border-slate-200 bg-white p-0 text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
@@ -643,10 +648,6 @@ export default function GovernancePage() {
                   <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">{selectedRequest.requester || '—'}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Centro de Custo</p>
-                  <p className="mt-0.5 font-mono font-medium text-slate-800 dark:text-foreground">{selectedRequest.cost_center || '—'}</p>
-                </div>
-                <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Urgência</p>
                   <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground capitalize">{selectedRequest.urgency === 'low' ? 'Baixa' : selectedRequest.urgency === 'medium' ? 'Média' : 'Alta'}</p>
                 </div>
@@ -656,38 +657,92 @@ export default function GovernancePage() {
                 </div>
               </div>
 
-              {/* Dados Preenchidos (technical_attributes com field_label) — visível para todos */}
+              {/* Dados Preenchidos — editável quando assigned_to_id === current_user.id */}
               {hasTechnicalAttributes && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
                     Dados Preenchidos
                   </p>
-                  <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-700/50">
-                    <table className="w-full text-sm">
-                      <tbody>
-                        {Object.entries(selectedRequest.technical_attributes ?? {}).map(
-                          ([key, val]) => {
-                            if (val == null || val === '') return null
-                            const label =
-                              fieldLabels.find((l) => l.field_name === key)?.field_label ?? key
-                            return (
-                              <tr
-                                key={key}
-                                className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40"
+                  {isAssignedToMe ? (
+                    <div className="space-y-3">
+                      {Object.keys(selectedRequest.technical_attributes ?? {}).map((key) => {
+                        const pdmMeta = selectedRequest.pdm_attributes?.[key]
+                        const label = pdmMeta?.label ?? fieldLabels.find((l) => l.field_name === key)?.field_label ?? key
+                        const fieldType = pdmMeta?.type ?? 'text'
+                        const options = pdmMeta?.options ?? []
+                        return (
+                          <div key={key}>
+                            <Label htmlFor={`tech-${key}`} className="text-sm font-medium">{label}</Label>
+                            {fieldType === 'select' ? (
+                              <select
+                                id={`tech-${key}`}
+                                value={attributeValues[key] ?? ''}
+                                onChange={(e) => handleFieldChange(key, e.target.value, 'select')}
+                                className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm border-input dark:border-zinc-700/50 dark:bg-background dark:text-foreground"
                               >
-                                <td className="w-[45%] bg-slate-50 px-4 py-3 font-medium text-slate-800 dark:bg-muted/30 dark:text-foreground">
-                                  {label}
-                                </td>
-                                <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
-                                  {String(val)}
-                                </td>
-                              </tr>
-                            )
-                          }
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                                <option value="">Selecione...</option>
+                                {options.map((opt) => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                            ) : fieldType === 'number' ? (
+                              <Input
+                                id={`tech-${key}`}
+                                type="number"
+                                min={0}
+                                value={attributeValues[key] ?? ''}
+                                onChange={(e) => handleFieldChange(key, e.target.value, 'number')}
+                                className="mt-1"
+                              />
+                            ) : fieldType === 'date' ? (
+                              <Input
+                                id={`tech-${key}`}
+                                type="date"
+                                value={attributeValues[key] ?? ''}
+                                onChange={(e) => handleFieldChange(key, e.target.value, 'date')}
+                                className="mt-1"
+                              />
+                            ) : (
+                              <Input
+                                id={`tech-${key}`}
+                                type="text"
+                                value={attributeValues[key] ?? ''}
+                                onChange={(e) => handleFieldChange(key, e.target.value, 'text')}
+                                className="mt-1"
+                              />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-700/50">
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {Object.entries(selectedRequest.technical_attributes ?? {}).map(
+                            ([key, val]) => {
+                              if (val == null || val === '') return null
+                              const label =
+                                fieldLabels.find((l) => l.field_name === key)?.field_label ?? key
+                              return (
+                                <tr
+                                  key={key}
+                                  className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40"
+                                >
+                                  <td className="w-[45%] bg-slate-50 px-4 py-3 font-medium text-slate-800 dark:bg-muted/30 dark:text-foreground">
+                                    {label}
+                                  </td>
+                                  <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
+                                    {String(val)}
+                                  </td>
+                                </tr>
+                              )
+                            }
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -877,7 +932,7 @@ export default function GovernancePage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setDetailsOpen(false)}
+                      onClick={handleCloseModal}
                       disabled={saveLoading || approveRejectLoading}
                     >
                       Cancelar

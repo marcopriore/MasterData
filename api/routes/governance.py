@@ -29,17 +29,17 @@ def get_governance_stats(
     Filtrado por tenant (RLS) e por role (ADMIN/MASTER: tudo; SOLICITANTE: próprias; etapa: status).
     """
     base = db.query(MaterialRequestORM)
-    role_name = current_user.role.name.upper() if (current_user and current_user.role) else None
-    role_type = current_user.role.role_type if (current_user and current_user.role) else None
+    role_name = current_user.role.name.upper() if (current_user and current_user.role) else ""
+    role_type = current_user.role.role_type if (current_user and current_user.role) else "sistema"
     is_master = (
         role_name == "MASTER"
         or (current_user and getattr(current_user, "is_master", False))
     )
     if is_master or role_name == "ADMIN":
-        pass
-    elif role_name == "SOLICITANTE" and current_user:
+        pass  # vê tudo
+    elif role_name == "SOLICITANTE":
         base = base.filter(MaterialRequestORM.user_id == current_user.id)
-    elif role_type == "etapa" and role_name:
+    elif role_type in ("etapa", "operacional") and role_name:
         base = base.filter(func.lower(MaterialRequestORM.status) == role_name.lower())
     total = base.count()
 
