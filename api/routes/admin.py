@@ -36,7 +36,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from deps import get_db, get_db_always_raw, get_admin_user, get_current_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs, require_master, set_tenant_in_session
+from deps import get_db, get_db_always_raw, get_admin_user, get_current_user, get_current_user_optional, get_user_with_manage_users, get_user_with_view_logs, refresh_with_rls, require_master, set_tenant_in_session
 from limiter import limiter
 from orm_models import (
     FieldDictionaryORM,
@@ -204,7 +204,7 @@ def create_role(
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False))
     creator = current_user.name if current_user else "Sistema"
     log_system_event(
         db, current_user.id if current_user else None, "roles", "role_created",
@@ -242,8 +242,9 @@ def update_role(
         row.name = new_name
     if payload.permissions is not None:
         row.permissions = payload.permissions.model_dump()
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
     updater = current_user.name if current_user else "Sistema"
     log_system_event(
         db, current_user.id if current_user else None, "roles", "role_updated",
@@ -516,7 +517,7 @@ def create_user(
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False))
     creator = current_user.name if current_user else "Sistema"
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_created",
@@ -564,8 +565,9 @@ def replace_user(
     row.hashed_password = hash_password(payload.password)
     row.role_id = payload.role_id
     row.preferences = payload.preferences.model_dump()
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
     updater = current_user.name if current_user else "Sistema"
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_updated",
@@ -619,8 +621,9 @@ def update_user(
     if payload.preferences is not None:
         row.preferences = payload.preferences.model_dump()
 
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
     updater = current_user.name if current_user else "Sistema"
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_updated",
@@ -1011,7 +1014,7 @@ def onboard_tenant(
 def create_tenant(
     payload: TenantCreate,
     db: Session = Depends(get_db_always_raw),
-    _: UserORM = Depends(require_master),
+    current_user: UserORM = Depends(require_master),
 ):
     slug = payload.slug.strip().lower()
     if db.query(TenantORM).filter(TenantORM.slug == slug).first():
@@ -1019,7 +1022,8 @@ def create_tenant(
     row = TenantORM(name=payload.name.strip(), slug=slug, is_active=True)
     db.add(row)
     db.commit()
-    db.refresh(row)
+    tid = current_user.tenant_id if current_user else -1
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else True)
     return _tenant_to_dict(row)
 
 
@@ -1051,8 +1055,9 @@ def update_tenant(
         row.slug = new_slug
     if payload.is_active is not None:
         row.is_active = payload.is_active
+    tid = current_user.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     return _tenant_to_dict(row)
 
 

@@ -263,11 +263,12 @@ export default function NewMaterialRequestPage() {
           }
         }
 
+        const redirectPath = user?.role_name === 'SOLICITANTE' ? '/' : '/governance'
         toast.success(`Solicitação #${requestId} criada com sucesso!`, {
-          description: 'Redirecionando para Governança…',
+          description: user?.role_name === 'SOLICITANTE' ? 'Redirecionando…' : 'Redirecionando para Governança…',
           duration: 3000,
         })
-        setTimeout(() => router.push('/governance'), 1600)
+        setTimeout(() => router.push(redirectPath), 1600)
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Erro desconhecido'
         toast.error('Falha ao enviar solicitação', {

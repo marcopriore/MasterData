@@ -123,6 +123,17 @@ interface KanbanBoardProps {
   showActionButtons?: boolean
   currentUserId?: number | null
   accessToken?: string | null
+  /** Para filtro de colunas: roles operacionais/etapa veem apenas sua coluna */
+  currentUserRoleName?: string | null
+  currentUserRoleType?: string | null
+}
+
+const ROLE_TO_STATUS: Record<string, string> = {
+  CADASTRO: "cadastro",
+  COMPRAS: "compras",
+  MRP: "mrp",
+  FISCAL: "fiscal",
+  CONTABILIDADE: "contabilidade",
 }
 
 export function KanbanBoard({
@@ -135,6 +146,8 @@ export function KanbanBoard({
   showActionButtons = false,
   currentUserId = null,
   accessToken = null,
+  currentUserRoleName = null,
+  currentUserRoleType = null,
 }: KanbanBoardProps) {
   const [columns, setColumns] = useState<KanbanColumn[]>([])
   const [columnsLoading, setColumnsLoading] = useState(true)
@@ -297,12 +310,26 @@ export function KanbanBoard({
     )
   }
 
-  // Sempre exibir todas as colunas do workflow (ordem fixa). Adicionar Rejeitadas ao final se houver.
+  // ADMIN e MASTER veem todas as colunas. Roles operacionais/etapa veem apenas a coluna correspondente.
+  const showAllColumns =
+    currentUserRoleName === "ADMIN" ||
+    currentUserRoleName === "MASTER" ||
+    currentUserRoleType === "sistema"
+
+  let baseColumns = columns
+  if (!showAllColumns && currentUserRoleName) {
+    const myStatusKey = ROLE_TO_STATUS[currentUserRoleName.toUpperCase()]
+    if (myStatusKey) {
+      baseColumns = columns.filter((c) => c.id.toLowerCase() === myStatusKey)
+    }
+  }
+
   const hasRejeitadas = localRequests.some((r) => (r.status || "").toLowerCase() === "rejeitado")
-  const rejeitadasColumn: KanbanColumn | null = hasRejeitadas
-    ? { id: "rejeitado", label: "Rejeitadas", ...FIXED_COLORS.rejected }
-    : null
-  const columnsToRender = rejeitadasColumn ? [...columns, rejeitadasColumn] : columns
+  const rejeitadasColumn: KanbanColumn | null =
+    showAllColumns && hasRejeitadas
+      ? { id: "rejeitado", label: "Rejeitadas", ...FIXED_COLORS.rejected }
+      : null
+  const columnsToRender = rejeitadasColumn ? [...baseColumns, rejeitadasColumn] : baseColumns
 
   return (
     <DndContext

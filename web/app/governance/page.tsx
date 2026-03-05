@@ -246,7 +246,7 @@ export default function GovernancePage() {
   }, [ready, selectedWorkflowId, fetchRequests])
 
   const showActionButtons =
-    (user?.role_type ?? 'sistema') === 'etapa' && user?.role_name !== 'ADMIN'
+    ['etapa', 'operacional'].includes(user?.role_type ?? '') && user?.role_name !== 'ADMIN'
 
   const materialRequests = useMemo(
     () => requests.map(mapToMaterialRequest),
@@ -579,6 +579,8 @@ export default function GovernancePage() {
                   showActionButtons={showActionButtons}
                   currentUserId={user?.id ?? null}
                   accessToken={accessToken}
+                  currentUserRoleName={user?.role_name ?? null}
+                  currentUserRoleType={user?.role_type ?? null}
                 />
               ) : (
                 <ListView

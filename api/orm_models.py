@@ -36,7 +36,7 @@ class RoleORM(Base):
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     role_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="sistema"
-    )  # "sistema" | "etapa"
+    )  # "sistema" | "etapa" | "operacional"
     # JSON flags: { "can_approve": true, "can_edit_pdm": true, "can_manage_users": true, ... }
     permissions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 

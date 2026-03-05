@@ -30,7 +30,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from deps import get_db
+from deps import get_db, get_current_user_optional, refresh_with_rls
 from orm_models import MaterialRequestORM, RequestAttachmentORM
 
 router = APIRouter(prefix="/api/requests", tags=["Attachments"])
@@ -87,6 +87,7 @@ async def upload_attachment(
     request_id: int,
     file: UploadFile = File(..., description="Arquivo a ser anexado (PDF ou imagem, máx 10 MB)"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
 ):
     """
     Saves the uploaded file to ``api/uploads/<request_id>/`` and creates a
@@ -98,7 +99,7 @@ async def upload_attachment(
     - Uses a UUID prefix to avoid filename collisions
     """
     # 1. Validate request exists
-    _load_request(request_id, db)
+    request = _load_request(request_id, db)
 
     # 2. Read content first so we can validate size before touching disk
     content = await file.read()
@@ -152,7 +153,9 @@ async def upload_attachment(
     )
     db.add(attachment)
     db.commit()
-    db.refresh(attachment)
+    tid = current_user.tenant_id if current_user else request.tenant_id
+    is_master = getattr(current_user, "is_master", False) if current_user else False
+    refresh_with_rls(db, attachment, tid, is_master)
 
     return _attachment_to_dict(attachment)
 

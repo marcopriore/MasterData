@@ -320,7 +320,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground">Clique em uma fatia para filtrar</p>
               </div>
               <Link
-                href="/governance"
+                href={user?.role_name === 'SOLICITANTE' ? '/requests' : '/governance'}
                 className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
               >
                 Ver todas <ArrowRight className="size-3" />
@@ -431,7 +431,7 @@ export default function DashboardPage() {
             {stats?.section_title ?? 'Atividade Recente'}
           </h2>
           <Link
-            href="/governance"
+            href={user?.role_name === 'SOLICITANTE' ? '/requests' : '/governance'}
             className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
           >
             Ver todas <ArrowRight className="size-3" />

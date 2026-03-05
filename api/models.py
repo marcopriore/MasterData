@@ -348,13 +348,13 @@ class RolePermissions(BaseModel):
 
 class RoleCreate(BaseModel):
     name: str
-    role_type: Literal["sistema", "etapa"] = "sistema"
+    role_type: Literal["sistema", "etapa", "operacional"] = "sistema"
     permissions: RolePermissions = Field(default_factory=RolePermissions)
 
 
 class RoleUpdate(BaseModel):
     name: Optional[str] = None
-    role_type: Optional[Literal["sistema", "etapa"]] = None
+    role_type: Optional[Literal["sistema", "etapa", "operacional"]] = None
     permissions: Optional[RolePermissions] = None
 
 

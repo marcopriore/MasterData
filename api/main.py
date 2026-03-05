@@ -13,7 +13,7 @@ from fastapi import Body, Depends, File, HTTPException, Query, Request, UploadFi
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
-from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm, refresh_with_rls
 from orm_models import (
     ProductORM,
     PDMOrm,
@@ -338,7 +338,7 @@ def create_product(payload: ProductCreate, db: Session = Depends(get_db)):
     row = ProductORM(name=payload.name, description=payload.description)
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, -1, True)  # products table: no tenant, use master bypass
     return {"id": row.id, "name": row.name, "description": row.description}
 
 # -------------------------------
@@ -433,7 +433,7 @@ def create_field(
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, current_user.tenant_id, getattr(current_user, "is_master", False))
     log_system_event(
         db, current_user.id, "fields", "field_created",
         f"Campo '{payload.field_label}' ({payload.field_name}) criado por {current_user.name}",
@@ -484,8 +484,9 @@ def update_field(
         row.is_active = payload.is_active
     if payload.display_order is not None:
         row.display_order = payload.display_order
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     log_system_event(
         db, current_user.id, "fields", "field_updated",
         f"Campo #{field_id} ({row.field_label}) atualizado por {current_user.name}",
@@ -504,8 +505,9 @@ def delete_field(
     if not row:
         raise HTTPException(status_code=404, detail="Campo não encontrado")
     row.is_active = False
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     log_system_event(
         db, current_user.id, "fields", "field_deactivated",
         f"Campo #{field_id} ({row.field_label}) desativado por {current_user.name}",
@@ -756,9 +758,15 @@ def export_pdm(
 # -------------------------------
 # CRIAR PDM
 @app.post("/api/pdm")
-def create_pdm(payload: PDMCreate, db: Session = Depends(get_db)):
+def create_pdm(
+    payload: PDMCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
     attributes_data = [a.model_dump() for a in payload.attributes]
+    tenant_id = current_user.tenant_id if current_user else -1
     row = PDMOrm(
+        tenant_id=tenant_id,
         name=payload.name,
         internal_code=payload.internal_code,
         is_active=payload.is_active,
@@ -766,7 +774,7 @@ def create_pdm(payload: PDMCreate, db: Session = Depends(get_db)):
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False) if current_user else False)
     return {
         "id": row.id,
         "name": row.name,
@@ -956,8 +964,9 @@ def assign_request(
 
     row.assigned_to_id = current_user.id
     row.assigned_at = datetime.now(timezone.utc)
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     log_request_event(
         db, row.id, current_user.id, "assigned",
         f"Atendimento iniciado por {current_user.name}",
@@ -1015,8 +1024,9 @@ def update_request_attributes(
         elif k in merged:
             del merged[k]
     row.technical_attributes = merged if merged else None
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
 
     fields_changed = {}
     for field_name, new_value in new_attributes.items():
@@ -1126,7 +1136,7 @@ def create_request(
         ))
 
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False) if current_user else False)
 
     requester_name = current_user.name if current_user else payload.requester
     log_request_event(
@@ -1245,8 +1255,9 @@ def update_request_status(
         )
     from_status = row.status
     row.status = next_status
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
 
     next_step = (
         db.query(WorkflowConfigORM)
@@ -1301,8 +1312,9 @@ def reject_request(
     if not row:
         raise HTTPException(status_code=404, detail="Request not found")
     row.status = "Rejected"
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
 
     justification = (payload.justification or "") if payload else ""
     rejector_name = current_user.name if current_user else "Sistema"
@@ -1367,8 +1379,9 @@ def move_request_to_status(
 
     from_status = row.status
     row.status = payload.status_key
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False) if current_user else False)
     mover_name = current_user.name if current_user else "Sistema"
     log_request_event(
         db, row.id, current_user.id if current_user else None, "status_changed",
@@ -1404,15 +1417,21 @@ def list_workflows(db: Session = Depends(get_db)):
 
 
 @app.post("/api/workflows")
-def create_workflow(payload: WorkflowHeaderCreate, db: Session = Depends(get_db)):
+def create_workflow(
+    payload: WorkflowHeaderCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    tenant_id = current_user.tenant_id if current_user else -1
     row = WorkflowHeaderORM(
+        tenant_id=tenant_id,
         name=payload.name.strip(),
         description=payload.description.strip() if payload.description else None,
         is_active=True,
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False) if current_user else False)
     return _workflow_header_to_dict(row)
 
 
@@ -1519,8 +1538,9 @@ def update_workflow(
             db.query(WorkflowHeaderORM).filter(
                 WorkflowHeaderORM.id != workflow_id
             ).update({WorkflowHeaderORM.is_active: False})
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, False)
     return _workflow_header_to_dict(row)
 
 
@@ -1571,6 +1591,8 @@ def add_workflow_step(payload: WorkflowConfigCreate, db: Session = Depends(get_d
             status_code=400,
             detail="Nenhum workflow ativo. Configure um workflow ativo ou informe workflow_id.",
         )
+    wf = db.query(WorkflowHeaderORM).filter(WorkflowHeaderORM.id == wf_id).first()
+    tenant_id = wf.tenant_id if wf else -1
     status_key = payload.status_key or _slugify_status_key(payload.step_name)
     rows = (
         db.query(WorkflowConfigORM)
@@ -1589,6 +1611,7 @@ def add_workflow_step(payload: WorkflowConfigCreate, db: Session = Depends(get_d
             if r.order >= insert_order:
                 r.order = r.order + 1
     row = WorkflowConfigORM(
+        tenant_id=tenant_id,
         workflow_id=wf_id,
         step_name=payload.step_name,
         status_key=status_key,
@@ -1597,7 +1620,7 @@ def add_workflow_step(payload: WorkflowConfigCreate, db: Session = Depends(get_d
     )
     db.add(row)
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tenant_id, False)
     return _workflow_row_to_dict(row)
 
 
@@ -1612,8 +1635,9 @@ def update_workflow_step(
         row.step_name = payload.step_name
     if payload.status_key is not None:
         row.status_key = payload.status_key
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, False)
     return _workflow_row_to_dict(row)
 
 
@@ -1746,8 +1770,9 @@ def update_pdm(
     row.internal_code = payload.internal_code
     row.is_active = payload.is_active
     row.attributes = attributes_data
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, False)
     return {
         "id": row.id,
         "name": row.name,
@@ -2109,8 +2134,9 @@ def standardize_material(
     row.erp_status = "pendente_erp"
     row.standardized_at = datetime.now(timezone.utc)
     row.standardized_by = current_user.id
+    tid = row.tenant_id
     db.commit()
-    db.refresh(row)
+    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     log_system_event(
         db,
         current_user.id,
@@ -2212,7 +2238,7 @@ def get_notification_prefs(
         )
         db.add(prefs)
         db.commit()
-        db.refresh(prefs)
+        refresh_with_rls(db, prefs, current_user.tenant_id, getattr(current_user, "is_master", False))
     return {
         "notify_request_created": prefs.notify_request_created,
         "notify_request_assigned": prefs.notify_request_assigned,

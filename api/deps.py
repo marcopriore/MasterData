@@ -9,6 +9,12 @@ from orm_models import UserORM
 from security import decode_access_token
 
 
+def refresh_with_rls(db: Session, row, tenant_id: int, is_master: bool = False) -> None:
+    """Restaura contexto RLS e faz refresh do objeto após commit."""
+    set_tenant_in_session(db, tenant_id, is_master=is_master)
+    db.refresh(row)
+
+
 def set_tenant_in_session(session: Session, tenant_id: int, is_master: bool = False) -> None:
     """Configura o contexto de tenant na sessão PostgreSQL para RLS."""
     if is_master and tenant_id == -1:
