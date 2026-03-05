@@ -295,6 +295,8 @@ export default function GovernancePage() {
     selectedRequest.assigned_to_id != null &&
     selectedRequest.assigned_to_id === user.id
 
+  const canEditPdmAttributes = isAssignedToMe && user?.role_name === 'CADASTRO'
+
   const hasTechnicalAttributes =
     selectedRequest?.technical_attributes &&
     Object.keys(selectedRequest.technical_attributes).length > 0
@@ -378,9 +380,11 @@ export default function GovernancePage() {
     : null
 
   function validateRequiredFields(): boolean {
+    const SKIP_FIELDS = ['descricao_basica'] // gerado automaticamente
     const invalid = new Set<string>()
     for (const f of myFields) {
       if (!f.is_required) continue
+      if (SKIP_FIELDS.includes(f.field_name)) continue
       const val = attributeValues[f.field_name]?.trim()
       if (!val) invalid.add(f.field_name)
     }
@@ -651,19 +655,15 @@ export default function GovernancePage() {
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Urgência</p>
                   <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground capitalize">{selectedRequest.urgency === 'low' ? 'Baixa' : selectedRequest.urgency === 'medium' ? 'Média' : 'Alta'}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Status</p>
-                  <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">{selectedRequest.status}</p>
-                </div>
               </div>
 
-              {/* Dados Preenchidos — editável quando assigned_to_id === current_user.id */}
+              {/* Dados Preenchidos — editável apenas para CADASTRO atribuído */}
               {hasTechnicalAttributes && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
                     Dados Preenchidos
                   </p>
-                  {isAssignedToMe ? (
+                  {canEditPdmAttributes ? (
                     <div className="space-y-3">
                       {Object.keys(selectedRequest.technical_attributes ?? {}).map((key) => {
                         const pdmMeta = selectedRequest.pdm_attributes?.[key]
@@ -753,7 +753,9 @@ export default function GovernancePage() {
                     CAMPOS DE RESPONSABILIDADE: {user?.role_name ?? '—'}
                   </p>
                   <div className="space-y-3">
-                    {myFields.map((f) => (
+                    {myFields
+                      .filter((f) => f.field_name !== 'descricao_basica')
+                      .map((f) => (
                       <div key={f.id}>
                         <Label htmlFor={`attr-${f.field_name}`} className="text-sm font-medium">
                           {f.field_label}

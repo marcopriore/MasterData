@@ -1314,6 +1314,8 @@ def update_request_status(
         )
     from_status = row.status
     row.status = next_status
+    row.assigned_to_id = None
+    row.assigned_at = None
     row_id = row.id
     tid = row.tenant_id
     wf_id = row.workflow_id
@@ -1445,6 +1447,8 @@ def move_request_to_status(
 
     from_status = row.status
     row.status = payload.status_key
+    row.assigned_to_id = None
+    row.assigned_at = None
     row_id = row.id
     tid = row.tenant_id
     db.commit()
