@@ -914,8 +914,13 @@ def onboard_tenant(
 
         set_tenant_in_session(db, tenant.id, is_master=False)
 
-        for name, role_type, perms in ONBOARDING_ROLE_DEFS:
-            r = RoleORM(tenant_id=tenant.id, name=name, role_type=role_type, permissions=perms)
+        for rdef in ONBOARDING_ROLE_DEFS:
+            r = RoleORM(
+                tenant_id=tenant.id,
+                name=rdef["name"],
+                role_type=rdef["role_type"],
+                permissions=rdef["permissions"],
+            )
             db.add(r)
         db.flush()
 
@@ -944,7 +949,7 @@ def onboard_tenant(
         wh = WorkflowHeaderORM(
             tenant_id=tenant.id,
             name="Fluxo Padrão de Cadastro",
-            description="Fluxo padrão: Triagem → Fiscal → Master → MRP → Finalizado",
+            description="Fluxo padrão: Central de Cadastro → Compras → MRP → Fiscal → Contabilidade → Finalizado",
             is_active=True,
         )
         db.add(wh)

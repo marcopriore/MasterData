@@ -61,7 +61,7 @@ class TestOnboarding:
             headers=auth_headers(token_new),
         ).json()
         role_names = [r["name"] for r in roles]
-        for expected in ["ADMIN", "SOLICITANTE", "TRIAGEM", "FISCAL", "MRP"]:
+        for expected in ["ADMIN", "SOLICITANTE", "CADASTRO", "COMPRAS", "MRP", "FISCAL", "CONTABILIDADE"]:
             assert expected in role_names
 
     def test_onboarding_criou_field_dictionary(self, token_master):

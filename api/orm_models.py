@@ -133,6 +133,7 @@ class MaterialRequestORM(Base):
         Integer, ForeignKey("workflow_header.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(50), default="Pending", nullable=False)
+    erp_material_code: Mapped[str | None] = mapped_column(String(50), nullable=True)  # Código ERP via webhook (Finalizado)
 
     # Requester info — user_id links to the User table when auth is active;
     # requester string is kept for backwards-compat and anonymous submissions
