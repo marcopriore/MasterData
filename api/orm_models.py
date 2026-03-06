@@ -334,6 +334,7 @@ class MaterialDatabaseORM(Base):
     # PDM
     pdm_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     pdm_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    technical_attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Dados adicionais (para tela de detalhe)
     material_group: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

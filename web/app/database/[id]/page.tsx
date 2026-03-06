@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
@@ -17,8 +17,9 @@ type MaterialDetail = {
   id_erp: string | null
   description: string
   status: string
-  pdm_code: string | null
-  pdm_name: string | null
+  technical_attributes?: Record<string, string> | null
+  pdm_code?: string | null
+  pdm_name?: string | null
   material_group: string | null
   unit_of_measure: string | null
   ncm: string | null
@@ -201,6 +202,116 @@ export default function DatabaseDetailPage() {
   const [formData, setFormData] = useState<Record<string, unknown>>({})
   const [isDirty, setIsDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingAttributes, setEditingAttributes] = useState(false)
+  const [attrValues, setAttrValues] = useState<Record<string, string>>({})
+  const [generatedDesc, setGeneratedDesc] = useState<string>('')
+  const [savingAttrs, setSavingAttrs] = useState(false)
+  const [pdmTemplate, setPdmTemplate] = useState<{
+    id: number
+    name: string
+    internal_code: string
+    attributes?: Array<{
+      id: string
+      order?: number
+      name: string
+      dataType?: string
+      isRequired?: boolean
+      includeInDescription?: boolean
+      abbreviation?: string
+      allowedValues?: Array<{ value: string; abbreviation?: string } | string>
+    }>
+  } | null>(null)
+
+  const generateDescription = useCallback(
+    (
+      pdmName: string,
+      attrs: Record<string, string>,
+      template: { name: string; attributes?: Array<{ id: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string } | string> }> } | null
+    ) => {
+      if (!template) return pdmName || ''
+      const parts = [template.name.toUpperCase()]
+      const sorted = [...(template.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      sorted.forEach((attr) => {
+        if (!attr.includeInDescription) return
+        const val = attrs[attr.id]
+        if (val) {
+          const allowed = attr.allowedValues || []
+          const lov = allowed.find((av) =>
+            typeof av === 'object' && av !== null && 'value' in av ? av.value === val : av === val
+          )
+          const abbr = typeof lov === 'object' && lov !== null && 'abbreviation' in lov ? lov.abbreviation : null
+          parts.push((abbr || val).toUpperCase())
+        } else {
+          parts.push(`[${attr.abbreviation || attr.id}]`)
+        }
+      })
+      return parts.join(' ')
+    },
+    []
+  )
+
+  const fetchPdmTemplate = useCallback(
+    async (pdmCode: string | null) => {
+      if (!accessToken || !pdmCode) return
+      try {
+        const pdms = await apiGetWithAuth<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>(
+          '/api/pdm',
+          accessToken
+        )
+        const found = pdms.find((p) => p.internal_code === pdmCode)
+        if (!found) return
+        const full = await apiGetWithAuth<{
+          id: number
+          name: string
+          internal_code: string
+          attributes?: Array<{
+            id: string
+            order?: number
+            name: string
+            dataType?: string
+            isRequired?: boolean
+            includeInDescription?: boolean
+            abbreviation?: string
+            allowedValues?: Array<{ value: string; abbreviation?: string } | string>
+          }>
+        }>(`/api/pdm/${found.id}`, accessToken)
+        setPdmTemplate(full)
+      } catch {
+        setPdmTemplate(null)
+      }
+    },
+    [accessToken]
+  )
+
+  const handleSaveAttributes = useCallback(async () => {
+    if (!material || !accessToken) return
+    setSavingAttrs(true)
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/database/materials/${material.id}/attributes`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          technical_attributes: attrValues,
+          description: generatedDesc,
+          ...(material.pdm_code && { pdm_code: material.pdm_code }),
+          ...(material.pdm_name && { pdm_name: material.pdm_name }),
+        }),
+      })
+      if (!res.ok) throw new Error('Falha ao salvar')
+      const updated = (await res.json()) as MaterialDetail
+      setMaterial(updated)
+      setEditingAttributes(false)
+      toast.success('Atributos salvos com sucesso!')
+    } catch (e) {
+      console.error('Erro ao salvar atributos:', e)
+      toast.error((e as Error)?.message ?? 'Falha ao salvar atributos')
+    } finally {
+      setSavingAttrs(false)
+    }
+  }, [material, accessToken, attrValues, generatedDesc])
 
   useEffect(() => {
     if (!accessToken || !id || Number.isNaN(id)) return
@@ -210,6 +321,8 @@ export default function DatabaseDetailPage() {
       .then((m) => {
         setMaterial(m)
         setFormData({ ...m })
+        setAttrValues((m.technical_attributes as Record<string, string>) || {})
+        setGeneratedDesc(m.description || '')
       })
       .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
       .finally(() => setLoading(false))
@@ -223,8 +336,11 @@ export default function DatabaseDetailPage() {
   const handleCancelEdit = () => {
     if (material) {
       setFormData({ ...material })
+      setAttrValues((material.technical_attributes as Record<string, string>) || {})
+      setGeneratedDesc(material.description || '')
     }
     setEditMode(false)
+    setEditingAttributes(false)
     setIsDirty(false)
   }
 
@@ -335,10 +451,14 @@ export default function DatabaseDetailPage() {
         </div>
         {showActionBar && (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {!editMode ? (
+              {!editMode ? (
               <button
                 type="button"
-                onClick={() => setEditMode(true)}
+                onClick={() => {
+                  setEditMode(true)
+                  setEditingAttributes(true)
+                  fetchPdmTemplate(material.pdm_code ?? null)
+                }}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors duration-150"
               >
                 Iniciar Padronização
@@ -404,15 +524,6 @@ export default function DatabaseDetailPage() {
             onUpdate={handleUpdate}
           />
           <EditableRow
-            label="Descrição"
-            isDark={isDark}
-            fieldKey="description"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <EditableRow
             label="Grupo de Mercadorias"
             isDark={isDark}
             fieldKey="material_group"
@@ -460,6 +571,120 @@ export default function DatabaseDetailPage() {
             formatDisplay={formatNumber}
           />
         </SectionCard>
+
+        {editingAttributes ? (
+          <div className="rounded-xl border-2 border-blue-300 dark:border-blue-700 bg-white dark:bg-card p-6 sm:col-span-2">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">
+              Atributos Técnicos
+            </h3>
+            <div className="mb-4 rounded-lg border border-slate-200 dark:border-border bg-slate-50 dark:bg-muted p-3">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-muted-foreground">
+                Descrição Curta (gerada automaticamente)
+              </p>
+              <p className="font-mono text-sm font-bold text-slate-800 dark:text-foreground">
+                {generatedDesc || '—'}
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {pdmTemplate?.attributes && pdmTemplate.attributes.length > 0 ? pdmTemplate.attributes.map((attr) => {
+                const isLov = attr.dataType === 'lov'
+                const options = (attr.allowedValues || []).map((av) =>
+                  typeof av === 'object' && av !== null && 'value' in av ? av.value : String(av)
+                )
+                const label = attr.name || attr.id
+                return (
+                  <div key={attr.id}>
+                    <label className="text-xs font-medium capitalize text-slate-600 dark:text-muted-foreground">
+                      {label.replace(/_/g, ' ')}
+                      {attr.isRequired && <span className="ml-1 text-red-500">*</span>}
+                    </label>
+                    {isLov && options.length > 0 ? (
+                      <select
+                        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background px-3 py-2 text-sm text-slate-800 dark:text-foreground"
+                        value={attrValues[attr.id] || ''}
+                        onChange={(e) => {
+                          const newVals = { ...attrValues, [attr.id]: e.target.value }
+                          setAttrValues(newVals)
+                          setGeneratedDesc(
+                            generateDescription(material.pdm_name || '', newVals, pdmTemplate)
+                          )
+                        }}
+                      >
+                        <option value="">Selecione...</option>
+                        {options.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background px-3 py-2 text-sm text-slate-800 dark:text-foreground"
+                        value={attrValues[attr.id] || ''}
+                        placeholder={`Informe ${label.toLowerCase()}...`}
+                        onChange={(e) => {
+                          const newVals = { ...attrValues, [attr.id]: e.target.value }
+                          setAttrValues(newVals)
+                          setGeneratedDesc(
+                            generateDescription(material.pdm_name || '', newVals, pdmTemplate)
+                          )
+                        }}
+                      />
+                    )}
+                  </div>
+                )
+              }) : (
+                <p className="col-span-2 text-sm text-slate-500 dark:text-muted-foreground">
+                  {material.pdm_code
+                    ? 'Carregando template PDM...'
+                    : 'Material sem código PDM. Atributos não podem ser editados.'}
+                </p>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 dark:border-border px-4 py-2 text-sm text-slate-600 dark:text-foreground hover:bg-slate-50 dark:hover:bg-muted"
+                onClick={() => {
+                  setEditingAttributes(false)
+                  setAttrValues((material.technical_attributes as Record<string, string>) || {})
+                  setGeneratedDesc(material.description || '')
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-[#0F1C38] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-[#C69A46]"
+                disabled={savingAttrs}
+                onClick={() => handleSaveAttributes()}
+              >
+                {savingAttrs ? 'Salvando...' : 'Salvar Atributos'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <SectionCard title="Atributos Técnicos">
+            <Row label="Descrição Curta" value={material.description} />
+            {material.technical_attributes && Object.keys(material.technical_attributes).length > 0 ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {Object.entries(material.technical_attributes).map(([key, value]) => (
+                  <div key={key}>
+                    <p className="text-xs capitalize text-slate-500 dark:text-muted-foreground">
+                      {key.replace(/_/g, ' ')}
+                    </p>
+                    <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">
+                      {value || '—'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400 dark:text-muted-foreground">
+                Nenhum atributo técnico registrado.
+              </p>
+            )}
+          </SectionCard>
+        )}
 
         <SectionCard title="Classificação Fiscal">
           <EditableRow

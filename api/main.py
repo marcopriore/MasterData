@@ -1402,6 +1402,7 @@ def update_request_status(
                     status="Ativo",
                     pdm_code=pdm_code,
                     pdm_name=pdm_name,
+                    technical_attributes=row.technical_attributes,
                     source="mdm_request",
                     erp_status="pendente_erp",
                     standardized_at=datetime.now(timezone.utc),
@@ -1942,6 +1943,7 @@ def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
         "status": row.status,
         "pdm_code": row.pdm_code,
         "pdm_name": row.pdm_name,
+        "technical_attributes": row.technical_attributes or {},
         "material_group": row.material_group,
         "unit_of_measure": row.unit_of_measure,
         "ncm": row.ncm,
@@ -2310,6 +2312,49 @@ def get_material_database(
     if not row:
         raise HTTPException(status_code=404, detail="Material não encontrado")
     return _material_db_to_dict(row)
+
+
+@app.patch("/api/database/materials/{material_id}/attributes")
+def update_material_attributes(
+    material_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """
+    Atualiza technical_attributes e description de um material na Base de Dados.
+    Payload: { "technical_attributes": {...}, "description": "...", "pdm_code": "...", "pdm_name": "..." }
+    Campos pdm_code e pdm_name são opcionais — usados quando o PDM é trocado.
+    """
+    material = db.query(MaterialDatabaseORM).filter(MaterialDatabaseORM.id == material_id).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material não encontrado")
+
+    tid = material.tenant_id
+
+    if "technical_attributes" in payload:
+        material.technical_attributes = payload["technical_attributes"]
+    if "description" in payload:
+        material.description = payload["description"]
+    if "pdm_code" in payload:
+        material.pdm_code = payload["pdm_code"]
+    if "pdm_name" in payload:
+        material.pdm_name = payload["pdm_name"]
+
+    material.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    refresh_with_rls(db, material, tid, getattr(current_user, "is_master", False))
+
+    log_system_event(
+        db,
+        current_user.id,
+        "material",
+        "attributes_updated",
+        f"Atributos técnicos atualizados para material #{material_id}",
+        tid,
+        is_master=getattr(current_user, "is_master", False),
+    )
+    return _material_db_to_dict(material)
 
 
 @app.patch("/api/database/materials/{material_id}/standardize")
