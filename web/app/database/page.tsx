@@ -123,7 +123,8 @@ export default function DatabasePage() {
   const router = useRouter()
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
-  const { accessToken, can } = useUser()
+  const { user, accessToken, can } = useUser()
+  const maxLength = user?.max_description_length ?? 40
   const [items, setItems] = useState<MaterialItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -373,9 +374,31 @@ export default function DatabasePage() {
     e.stopPropagation()
     const row = items.find((r) => r.id === id)
     if (row?.erp_status !== 'pendente_erp') return
+    if ((row?.description?.length ?? 0) > maxLength) return
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     )
+  }
+
+  const handleOpenIntegrateModal = () => {
+    const overLimit = selectedIds.filter((id) => {
+      const m = items.find((r) => r.id === id)
+      return (m?.description?.length ?? 0) > maxLength
+    })
+    if (overLimit.length > 0) {
+      if (overLimit.length === selectedIds.length) {
+        toast.error(
+          `Todos os itens selecionados possuem descrição acima do limite de ${maxLength} caracteres. Corrija antes de integrar.`
+        )
+        return
+      }
+      const validIds = selectedIds.filter((id) => !overLimit.includes(id))
+      setSelectedIds(validIds)
+      toast.error(
+        `${overLimit.length} item(s) removido(s) da seleção por possuir descrição acima do limite de ${maxLength} caracteres.`
+      )
+    }
+    setShowErpModal(true)
   }
 
   const removeFromSelection = (id: number) => {
@@ -384,6 +407,16 @@ export default function DatabasePage() {
 
   const handleConfirmErpIntegrate = async () => {
     if (!accessToken || selectedIds.length === 0) return
+    const overLimit = selectedIds.filter((id) => {
+      const m = items.find((r) => r.id === id)
+      return (m?.description?.length ?? 0) > maxLength
+    })
+    if (overLimit.length > 0) {
+      toast.error(
+        `${overLimit.length} item(s) com descrição acima do limite. Corrija antes de integrar.`
+      )
+      return
+    }
     setIntegrating(true)
     setErpModalError(null)
     try {
@@ -454,7 +487,7 @@ export default function DatabasePage() {
           {showStandardizeActions && selectedIds.length > 0 && (
             <Button
               size="sm"
-              onClick={() => setShowErpModal(true)}
+              onClick={handleOpenIntegrateModal}
               className="gap-2 bg-violet-600 hover:bg-violet-700 text-white"
             >
               <Upload className="size-4" />
@@ -651,11 +684,27 @@ export default function DatabasePage() {
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(row.id)}
-                          disabled={row.erp_status !== 'pendente_erp'}
+                          disabled={
+                            row.erp_status !== 'pendente_erp' ||
+                            (row.description?.length ?? 0) > maxLength
+                          }
+                          title={
+                            (row.description?.length ?? 0) > maxLength
+                              ? `Descrição acima do limite (${row.description?.length ?? 0}/${maxLength})`
+                              : undefined
+                          }
                           readOnly
-                          tabIndex={row.erp_status === 'pendente_erp' ? 0 : -1}
+                          tabIndex={
+                            row.erp_status === 'pendente_erp' &&
+                            (row.description?.length ?? 0) <= maxLength
+                              ? 0
+                              : -1
+                          }
                           className={`size-4 rounded border-zinc-300 dark:border-zinc-600 text-violet-600 focus:ring-violet-500 ${
-                            row.erp_status !== 'pendente_erp' ? 'opacity-50 cursor-default' : 'cursor-pointer'
+                            row.erp_status !== 'pendente_erp' ||
+                            (row.description?.length ?? 0) > maxLength
+                              ? 'opacity-50 cursor-default'
+                              : 'cursor-pointer'
                           }`}
                         />
                       </td>
@@ -696,6 +745,27 @@ export default function DatabasePage() {
                         return (
                           <td key={key} className="px-4 py-3 font-mono text-xs font-medium">
                             {row.id_sistema ?? '—'}
+                          </td>
+                        )
+                      }
+                      if (key === 'description') {
+                        const desc = row.description ?? ''
+                        const descLen = desc.length
+                        const isOver = descLen > maxLength
+                        return (
+                          <td key={key} className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <span>{desc || '—'}</span>
+                              {isOver && (
+                                <div className="relative group shrink-0">
+                                  <AlertTriangle className="w-4 h-4 text-red-500 dark:text-red-400 cursor-default" />
+                                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 hidden group-hover:flex bg-slate-800 dark:bg-slate-700 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-50 shadow-lg">
+                                    {descLen}/{maxLength} Descrição acima do limite
+                                    <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800 dark:border-t-slate-700" />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </td>
                         )
                       }

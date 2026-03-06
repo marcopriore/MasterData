@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
+import { apiGetWithAuth, apiPatchWithAuth, apiPostWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, Loader2 } from 'lucide-react'
@@ -198,6 +198,7 @@ export default function DatabaseDetailPage() {
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
   const [material, setMaterial] = useState<MaterialDetail | null>(null)
+  const isDescriptionOverLimit = (material?.description?.length ?? 0) > maxLength
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editMode, setEditMode] = useState(false)
@@ -207,7 +208,9 @@ export default function DatabaseDetailPage() {
   const [editingAttributes, setEditingAttributes] = useState(false)
   const [attrValues, setAttrValues] = useState<Record<string, string>>({})
   const [generatedDesc, setGeneratedDesc] = useState<string>('')
+  const isGeneratedDescOverLimit = generatedDesc.length > maxLength
   const [savingAttrs, setSavingAttrs] = useState(false)
+  const [isIntegrating, setIsIntegrating] = useState(false)
   const [pdmTemplate, setPdmTemplate] = useState<{
     id: number
     name: string
@@ -278,33 +281,46 @@ export default function DatabaseDetailPage() {
           }>
         }>(`/api/pdm/${found.id}`, accessToken)
         setPdmTemplate(full)
+
+        const currentAttrs = (material?.technical_attributes as Record<string, string>) || {}
+        const merged: Record<string, string> = {}
+        const sortedAttrs = [...(full.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        sortedAttrs.forEach((attr) => {
+          merged[attr.id] = currentAttrs[attr.id] !== undefined ? currentAttrs[attr.id] : ''
+        })
+        setAttrValues(merged)
+
+        const parts = [full.name?.toUpperCase() || '']
+        sortedAttrs.forEach((attr) => {
+          if (attr.includeInDescription !== false && merged[attr.id]) {
+            parts.push(merged[attr.id].toUpperCase())
+          }
+        })
+        setGeneratedDesc(parts.filter(Boolean).join(' '))
       } catch {
         setPdmTemplate(null)
       }
     },
-    [accessToken]
+    [accessToken, material?.technical_attributes]
   )
 
   const handleSaveAttributes = useCallback(async () => {
     if (!material || !accessToken) return
     setSavingAttrs(true)
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/database/materials/${material.id}/attributes`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
+      const updated = await apiPatchWithAuth<MaterialDetail>(
+        `/api/database/materials/${material.id}/attributes`,
+        {
           technical_attributes: attrValues,
           description: generatedDesc,
           ...(material.pdm_code && { pdm_code: material.pdm_code }),
           ...(material.pdm_name && { pdm_name: material.pdm_name }),
-        }),
-      })
-      if (!res.ok) throw new Error('Falha ao salvar')
-      const updated = (await res.json()) as MaterialDetail
-      setMaterial(updated)
+        },
+        accessToken
+      )
+      setMaterial((prev) => (prev ? { ...prev, ...updated } : updated))
+      setFormData((prev) => ({ ...prev, ...updated }))
+      setIsDirty(true)
       setEditingAttributes(false)
       toast.success('Atributos salvos com sucesso!')
     } catch (e) {
@@ -383,6 +399,28 @@ export default function DatabaseDetailPage() {
 
   const showActionBar = can('can_standardize')
 
+  const handleIntegrate = useCallback(async () => {
+    if (!material || !accessToken) return
+    setIsIntegrating(true)
+    try {
+      const res = await apiPostWithAuth<{ integrated: number[]; skipped: number[] }>(
+        '/api/database/materials/erp-integrate',
+        { material_ids: [material.id] },
+        accessToken
+      )
+      if (res.integrated?.includes(material.id)) {
+        setMaterial((prev) => prev ? { ...prev, erp_status: 'integrado', erp_integrated_at: new Date().toISOString() } : null)
+        toast.success('Material integrado com sucesso!')
+      } else {
+        toast.error('Não foi possível integrar o material.')
+      }
+    } catch (err) {
+      toast.error((err as Error)?.message ?? 'Falha na integração')
+    } finally {
+      setIsIntegrating(false)
+    }
+  }, [material, accessToken])
+
   if (loading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center gap-2 text-muted-foreground">
@@ -453,6 +491,31 @@ export default function DatabaseDetailPage() {
         </div>
         {showActionBar && (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {material.erp_status === 'pendente_erp' && (
+              <div className="relative group inline-block">
+                <button
+                  type="button"
+                  disabled={isDescriptionOverLimit || isIntegrating}
+                  onClick={handleIntegrate}
+                  className="px-4 py-2 text-sm rounded-lg bg-[#0F1C38] dark:bg-[#C69A46] text-white font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
+                >
+                  {isIntegrating ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin inline mr-2" />
+                      Integrando...
+                    </>
+                  ) : (
+                    'Integrar com ERP'
+                  )}
+                </button>
+                {isDescriptionOverLimit && (
+                  <div className="absolute right-0 bottom-full mb-1.5 hidden group-hover:flex bg-slate-800 dark:bg-slate-700 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-50 shadow-lg">
+                    Corrija a Descrição Curta antes de integrar ({material?.description?.length ?? 0}/{maxLength} caracteres)
+                    <div className="absolute right-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800 dark:border-t-slate-700" />
+                  </div>
+                )}
+              </div>
+            )}
               {!editMode ? (
               <button
                 type="button"
@@ -658,14 +721,22 @@ export default function DatabaseDetailPage() {
               >
                 Cancelar
               </button>
-              <button
-                type="button"
-                className="rounded-lg bg-[#0F1C38] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-[#C69A46]"
-                disabled={savingAttrs}
-                onClick={() => handleSaveAttributes()}
-              >
-                {savingAttrs ? 'Salvando...' : 'Salvar Atributos'}
-              </button>
+              <div className="relative group inline-block">
+                <button
+                  type="button"
+                  className="rounded-lg bg-[#0F1C38] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 dark:bg-[#C69A46]"
+                  disabled={savingAttrs}
+                  onClick={() => handleSaveAttributes()}
+                >
+                  {savingAttrs ? 'Salvando...' : 'Salvar Atributos'}
+                </button>
+                {isGeneratedDescOverLimit && !savingAttrs && (
+                  <div className="absolute right-0 bottom-full mb-1.5 hidden group-hover:flex bg-slate-800 dark:bg-slate-700 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-50 shadow-lg">
+                    ⚠️ Descrição acima do limite ({generatedDesc.length}/{maxLength} caracteres) — salvo com alerta
+                    <div className="absolute right-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800 dark:border-t-slate-700" />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (
