@@ -65,6 +65,8 @@ export type CurrentUser = {
   tenant_name?: string
   /** True se for o usuário Master (dono do sistema) */
   is_master?: boolean
+  /** Limite de caracteres da Descrição Curta (padrão 40) */
+  max_description_length?: number
 }
 
 type LoginResult =

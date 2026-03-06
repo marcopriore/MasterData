@@ -26,6 +26,7 @@ type Tenant = {
   name: string
   slug: string
   is_active: boolean
+  max_description_length?: number
   created_at: string | null
   users_count?: number
   materials_count?: number
@@ -263,8 +264,10 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [slug, setSlug] = useState(initial?.slug ?? '')
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
+  const [maxDescLength, setMaxDescLength] = useState(initial?.max_description_length ?? 40)
   const [saving, setSaving] = useState(false)
-  const { accessToken } = useUser()
+  const { accessToken, setUser } = useUser()
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
   const handleSlugChange = (v: string) => {
     const lower = v.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
@@ -306,8 +309,25 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
           { name: name.trim(), slug: slug.trim(), is_active: isActive },
           accessToken
         )
+        const maxVal = Math.max(10, Math.min(200, maxDescLength))
+        const settingsRes = await fetch(`${API_URL}/admin/tenants/${initial!.id}/settings`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ max_description_length: maxVal }),
+        })
+        if (!settingsRes.ok) throw new Error('Falha ao atualizar configurações')
+        onSaved({ ...saved, max_description_length: maxVal })
+        const meRes = await fetch(`${API_URL}/admin/auth/me`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        })
+        if (meRes.ok) {
+          const updatedUser = await meRes.json()
+          setUser(updatedUser)
+        }
         toast.success('Tenant atualizado.')
-        onSaved(saved)
       }
     } catch (err) {
       toast.error((err as Error).message)
@@ -374,10 +394,29 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
           </div>
 
           {mode === 'edit' && (
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="t-active" className="text-sm font-medium">Ativo</Label>
-              <Switch id="t-active" checked={isActive} onCheckedChange={setIsActive} />
-            </div>
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <Label htmlFor="t-active" className="text-sm font-medium">Ativo</Label>
+                <Switch id="t-active" checked={isActive} onCheckedChange={setIsActive} />
+              </div>
+              <div>
+                <Label htmlFor="t-max-desc" className="text-sm font-medium text-slate-700 dark:text-foreground">
+                  Limite de Caracteres — Descrição Curta
+                </Label>
+                <p className="text-xs text-slate-500 dark:text-muted-foreground mb-2">
+                  Itens com descrição acima deste limite receberão um alerta visual. (entre 10 e 200)
+                </p>
+                <Input
+                  id="t-max-desc"
+                  type="number"
+                  min={10}
+                  max={200}
+                  value={maxDescLength}
+                  onChange={(e) => setMaxDescLength(Number(e.target.value))}
+                  className="w-32 border border-slate-200 dark:border-border rounded-lg px-3 py-2 text-sm bg-white dark:bg-background text-slate-800 dark:text-foreground"
+                />
+              </div>
+            </>
           )}
 
           <div className="flex justify-end gap-2 pt-2">

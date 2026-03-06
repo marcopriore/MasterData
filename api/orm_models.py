@@ -19,6 +19,9 @@ class TenantORM(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    max_description_length: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=40, server_default="40"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )

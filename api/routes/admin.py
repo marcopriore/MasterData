@@ -31,7 +31,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -105,6 +105,7 @@ def _user_to_dict(u: UserORM) -> dict:
     }
     out["tenant_id"] = getattr(u, "tenant_id", None)
     out["tenant_name"] = u.tenant.name if u.tenant else None
+    out["max_description_length"] = getattr(u.tenant, "max_description_length", None) or 40
     out["is_master"] = is_master
     return out
 
@@ -872,6 +873,7 @@ def _tenant_to_dict(t: TenantORM) -> dict:
         "name": t.name,
         "slug": t.slug,
         "is_active": t.is_active,
+        "max_description_length": getattr(t, "max_description_length", None) or 40,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }
 
@@ -1066,6 +1068,40 @@ def update_tenant(
     db.commit()
     refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
     return _tenant_to_dict(row)
+
+
+@router.patch("/tenants/{tenant_id}/settings", summary="Atualiza configurações do tenant")
+def update_tenant_settings(
+    tenant_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db_always_raw),
+    current_user: UserORM = Depends(get_admin_user),
+):
+    """
+    Atualiza configurações do tenant.
+    Payload: { "max_description_length": 40 }
+    Apenas MASTER ou ADMIN.
+    """
+    tenant = db.query(TenantORM).filter(TenantORM.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+
+    if "max_description_length" in payload:
+        val = int(payload["max_description_length"])
+        if val < 10 or val > 200:
+            raise HTTPException(
+                status_code=400,
+                detail="Limite deve ser entre 10 e 200 caracteres",
+            )
+        tenant.max_description_length = val
+
+    db.commit()
+    db.refresh(tenant)
+    return {
+        "id": tenant.id,
+        "name": tenant.name,
+        "max_description_length": tenant.max_description_length or 40,
+    }
 
 
 @router.get("/tenants/{tenant_id}/stats", summary="Estatísticas do tenant")

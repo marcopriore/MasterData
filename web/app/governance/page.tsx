@@ -24,6 +24,7 @@ import { ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
 import { Label } from '@/components/ui/label'
+import { DescriptionLengthIndicator } from '@/components/ui/description-length-indicator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type HistoryEvent = {
@@ -646,6 +647,10 @@ export default function GovernancePage() {
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-zinc-700/50 dark:bg-muted/20">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-1">Descrição Gerada</p>
                   <code className="text-sm font-mono font-bold text-[#0F1C38] dark:text-[#C69A46] break-words">{selectedRequest.generated_description}</code>
+                  <DescriptionLengthIndicator
+                    description={selectedRequest.generated_description || ''}
+                    maxLength={user?.max_description_length ?? 40}
+                  />
                 </div>
               )}
 

@@ -10,6 +10,7 @@ import { ChevronLeft, Loader2 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useTheme } from 'next-themes'
 import { maskNCM, maskCFOP } from '@/lib/masks'
+import { DescriptionLengthIndicator } from '@/components/ui/description-length-indicator'
 
 type MaterialDetail = {
   id: number
@@ -192,7 +193,8 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 export default function DatabaseDetailPage() {
   const params = useParams()
   const id = Number(params.id)
-  const { accessToken, can } = useUser()
+  const { user, accessToken, can } = useUser()
+  const maxLength = user?.max_description_length ?? 40
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
   const [material, setMaterial] = useState<MaterialDetail | null>(null)
@@ -584,6 +586,10 @@ export default function DatabaseDetailPage() {
               <p className="font-mono text-sm font-bold text-slate-800 dark:text-foreground">
                 {generatedDesc || '—'}
               </p>
+              <DescriptionLengthIndicator
+                description={generatedDesc || ''}
+                maxLength={maxLength}
+              />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               {pdmTemplate?.attributes && pdmTemplate.attributes.length > 0 ? pdmTemplate.attributes.map((attr) => {
@@ -664,7 +670,16 @@ export default function DatabaseDetailPage() {
           </div>
         ) : (
           <SectionCard title="Atributos Técnicos">
-            <Row label="Descrição Curta" value={material.description} />
+            <div>
+              <p className="text-xs text-slate-500 dark:text-muted-foreground">Descrição Curta</p>
+              <p className="mt-0.5 font-bold font-mono text-slate-800 dark:text-foreground">
+                {material.description || '—'}
+              </p>
+              <DescriptionLengthIndicator
+                description={material.description || ''}
+                maxLength={maxLength}
+              />
+            </div>
             {material.technical_attributes && Object.keys(material.technical_attributes).length > 0 ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 {Object.entries(material.technical_attributes).map(([key, value]) => (
