@@ -49,6 +49,20 @@ from slowapi.errors import RateLimitExceeded
 from limiter import limiter
 
 
+def normalize_str(value) -> str | None:
+    """
+    Normaliza string: remove espaços nas bordas e colapsa espaços internos duplos.
+    Equivalente ao ARRUMAR() + TIRAR() do Excel.
+    Retorna None se o valor for None ou string vazia após normalização.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+    normalized = " ".join(value.split())
+    return normalized if normalized else None
+
+
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """Handler customizado que adiciona o header Retry-After na resposta 429."""
     retry_after = getattr(exc, "retry_after", 60)
@@ -1168,7 +1182,7 @@ def create_request(
     initial_status = _get_first_step_status_key(wf_id, db)
 
     # Build generated description if not supplied by client
-    generated_description = payload.generated_description
+    generated_description = normalize_str(payload.generated_description) if payload.generated_description else None
     if not generated_description and pdm.attributes:
         parts = [pdm.name.upper()]
         for attr in sorted(pdm.attributes, key=lambda a: a.get("order", 0)):
@@ -1190,9 +1204,15 @@ def create_request(
             else:
                 parts.append(f"[{attr.get('abbreviation', attr_id)}]")
         generated_description = " ".join(parts)
+    if generated_description:
+        generated_description = normalize_str(generated_description)
 
     tenant_id = pdm.tenant_id
     id_sistema = _generate_id_sistema(db)
+    normalized_values = {
+        k: normalize_str(v) if isinstance(v, str) else v
+        for k, v in payload.values.items()
+    }
     row = MaterialRequestORM(
         tenant_id=tenant_id,
         id_sistema=id_sistema,
@@ -1206,18 +1226,18 @@ def create_request(
         generated_description=generated_description,
         user_id=current_user.id if current_user else None,
         # Store full attribute dict for quick access without joining request_values
-        technical_attributes=payload.values,
+        technical_attributes=normalized_values,
         attachments=payload.attachments or [],
     )
     db.add(row)
     db.flush()
 
     # Also persist individual attribute values in request_values for backwards compat
-    for attribute_id, value in payload.values.items():
+    for attribute_id, value in normalized_values.items():
         db.add(RequestValueORM(
             request_id=row.id,
             attribute_id=attribute_id,
-            value=str(value),
+            value=str(value or ""),
         ))
 
     db.commit()
@@ -1983,9 +2003,20 @@ def update_pdm(
     row = db.query(PDMOrm).filter(PDMOrm.id == pdm_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="PDM not found")
-    attributes_data = [a.model_dump() for a in payload.attributes]
-    row.name = payload.name
-    row.internal_code = payload.internal_code
+    attributes_data = []
+    for a in payload.attributes:
+        d = a.model_dump()
+        d["name"] = normalize_str(d.get("name")) or d.get("name", "")
+        d["abbreviation"] = normalize_str(d.get("abbreviation")) or d.get("abbreviation", "")
+        for opt in d.get("allowedValues") or []:
+            if isinstance(opt, dict):
+                nv = normalize_str(opt.get("value"))
+                opt["value"] = nv if nv is not None else (opt.get("value") or "")
+                nab = normalize_str(opt.get("abbreviation"))
+                opt["abbreviation"] = nab if nab is not None else (opt.get("abbreviation") or opt.get("value", ""))
+        attributes_data.append(d)
+    row.name = normalize_str(payload.name) or payload.name
+    row.internal_code = normalize_str(payload.internal_code) or payload.internal_code or ""
     row.is_active = payload.is_active
     row.attributes = attributes_data
     tid = row.tenant_id
@@ -2419,13 +2450,17 @@ def update_material_attributes(
     tid = material.tenant_id
 
     if "technical_attributes" in payload:
-        material.technical_attributes = payload["technical_attributes"]
+        attrs = payload["technical_attributes"]
+        material.technical_attributes = {
+            k: normalize_str(v) if isinstance(v, str) else v
+            for k, v in attrs.items()
+        }
     if "description" in payload:
-        material.description = payload["description"]
+        material.description = normalize_str(payload["description"])
     if "pdm_code" in payload:
-        material.pdm_code = payload["pdm_code"]
+        material.pdm_code = normalize_str(payload["pdm_code"])
     if "pdm_name" in payload:
-        material.pdm_name = payload["pdm_name"]
+        material.pdm_name = normalize_str(payload["pdm_name"])
 
     material.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -2458,8 +2493,16 @@ def standardize_material(
     if not row:
         raise HTTPException(status_code=404, detail="Material não encontrado")
     data = payload.model_dump(exclude_unset=True)
+    string_fields = {
+        "id_erp", "description", "status", "pdm_code", "pdm_name",
+        "material_group", "unit_of_measure", "ncm", "material_type",
+        "cfop", "origin", "purchase_group", "mrp_type", "valuation_class",
+        "profit_center", "source",
+    }
     for k, v in data.items():
         if hasattr(row, k):
+            if k in string_fields and isinstance(v, str):
+                v = normalize_str(v)
             setattr(row, k, v)
     row.erp_status = "pendente_erp"
     row.standardized_at = datetime.now(timezone.utc)
