@@ -57,34 +57,34 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0F1C38] via-[#162444] to-[#0a1225] p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-slate-200 to-slate-100 p-4">
       {/* Subtle grid overlay */}
       <div
-        className="pointer-events-none fixed inset-0 opacity-[0.04]"
+        className="pointer-events-none fixed inset-0 opacity-[0.06]"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(255,255,255,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.6) 1px, transparent 1px)',
+            'linear-gradient(rgba(100,116,139,.15) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,.15) 1px, transparent 1px)',
           backgroundSize: '40px 40px',
         }}
       />
 
       <div className="relative w-full max-w-sm">
-        {/* Card */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-xl shadow-2xl overflow-hidden">
+        {/* Card branco */}
+        <div className="rounded-2xl border border-slate-200/80 bg-white shadow-xl overflow-hidden">
           {/* Gold top accent bar */}
           <div className="h-1 w-full bg-gradient-to-r from-[#C69A46] via-[#e8c06a] to-[#C69A46]" />
 
           <div className="px-8 py-10 space-y-8">
             {/* Logo / Brand */}
             <div className="flex flex-col items-center gap-3 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#C69A46]/20 ring-1 ring-[#C69A46]/40">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#C69A46]/15 ring-1 ring-[#C69A46]/40">
                 <ShieldCheck className="size-7 text-[#C69A46]" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-white">
-                  MDM Platform
+                <h1 className="text-3xl font-bold tracking-tight text-slate-800">
+                  PRO-MAT
                 </h1>
-                <p className="mt-1 text-sm text-white/50">
+                <p className="mt-1 text-sm text-slate-500">
                   Master Data Management
                 </p>
               </div>
@@ -96,12 +96,12 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <label
                   htmlFor="email"
-                  className="block text-xs font-semibold uppercase tracking-wider text-white/60"
+                  className="block text-xs font-semibold uppercase tracking-wider text-slate-600"
                 >
                   E-mail
                 </label>
                 <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-white/30" />
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
                   <input
                     id="email"
                     type="email"
@@ -110,10 +110,10 @@ export default function LoginPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="seu@email.com"
                     className={cn(
-                      'h-11 w-full rounded-xl border bg-white/[0.07] pl-10 pr-4 text-sm text-white placeholder:text-white/25',
+                      'h-11 w-full rounded-xl border bg-slate-50/80 pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400',
                       'outline-none transition-all',
-                      'focus:border-[#C69A46]/60 focus:bg-white/[0.10] focus:ring-2 focus:ring-[#C69A46]/20',
-                      error ? 'border-red-400/60' : 'border-white/15'
+                      'focus:border-[#C69A46]/60 focus:bg-white focus:ring-2 focus:ring-[#C69A46]/20',
+                      error ? 'border-red-400' : 'border-slate-200'
                     )}
                   />
                 </div>
@@ -123,12 +123,12 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <label
                   htmlFor="password"
-                  className="block text-xs font-semibold uppercase tracking-wider text-white/60"
+                  className="block text-xs font-semibold uppercase tracking-wider text-slate-600"
                 >
                   Senha
                 </label>
                 <div className="relative">
-                  <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-white/30" />
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
                   <input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
@@ -137,16 +137,16 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     className={cn(
-                      'h-11 w-full rounded-xl border bg-white/[0.07] pl-10 pr-11 text-sm text-white placeholder:text-white/25',
+                      'h-11 w-full rounded-xl border bg-slate-50/80 pl-10 pr-11 text-sm text-slate-800 placeholder:text-slate-400',
                       'outline-none transition-all',
-                      'focus:border-[#C69A46]/60 focus:bg-white/[0.10] focus:ring-2 focus:ring-[#C69A46]/20',
-                      error ? 'border-red-400/60' : 'border-white/15'
+                      'focus:border-[#C69A46]/60 focus:bg-white focus:ring-2 focus:ring-[#C69A46]/20',
+                      error ? 'border-red-400' : 'border-slate-200'
                     )}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                     tabIndex={-1}
                     aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                   >
@@ -161,7 +161,7 @@ export default function LoginPage() {
 
               {/* Error message */}
               {error && (
-                <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
                   {error}
                 </p>
               )}
@@ -192,8 +192,8 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <p className="mt-6 text-center text-xs text-white/25">
-          MDM Platform · Acesso restrito a usuários autorizados
+        <p className="mt-6 text-center text-xs text-slate-500">
+          PRO-MAT · Acesso restrito a usuários autorizados
         </p>
       </div>
     </div>

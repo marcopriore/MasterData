@@ -522,7 +522,10 @@ def delete_field(
 # -------------------------------
 # LISTAR PDMs
 @app.get("/api/pdm")
-def list_pdms(db: Session = Depends(get_db)):
+def list_pdms(
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     rows = db.query(PDMOrm).order_by(PDMOrm.name.asc()).all()
     counts = (
         db.query(MaterialDatabaseORM.pdm_code, func.count(MaterialDatabaseORM.id).label("cnt"))
@@ -1554,7 +1557,10 @@ def _workflow_header_to_dict(h):
 
 
 @app.get("/api/workflows")
-def list_workflows(db: Session = Depends(get_db)):
+def list_workflows(
+    db: Session = Depends(get_db),
+    _: UserORM = Depends(get_current_user),
+):
     rows = db.query(WorkflowHeaderORM).order_by(WorkflowHeaderORM.id.asc()).all()
     return [_workflow_header_to_dict(h) for h in rows]
 

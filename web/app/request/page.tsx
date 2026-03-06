@@ -110,21 +110,23 @@ export default function NewMaterialRequestPage() {
     }
   }, [user?.name])
 
-  // Fetch PDM templates on mount
+  // Fetch PDM templates on mount (requires auth for tenant filtering)
   useEffect(() => {
+    if (!accessToken) return
     setPdmsLoading(true)
-    apiGet<PDMTemplate[]>('/api/pdm')
+    apiGetWithAuth<PDMTemplate[]>('/api/pdm', accessToken)
       .then(setPdms)
       .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar PDMs'))
       .finally(() => setPdmsLoading(false))
-  }, [])
+  }, [accessToken])
 
   // Fetch full PDM template + attributes when a PDM is selected (entering Phase 2)
   useEffect(() => {
-    if (selectedPdm == null) { setAttributes([]); return }
+    if (selectedPdm == null || !accessToken) { setAttributes([]); return }
     setAttributesLoading(true)
-    apiGet<{ id: number; name: string; internal_code: string; attributes: Attribute[] }>(
-      `/api/pdm/${selectedPdm}`
+    apiGetWithAuth<{ id: number; name: string; internal_code: string; attributes: Attribute[] }>(
+      `/api/pdm/${selectedPdm}`,
+      accessToken
     )
       .then((pdm) => {
         const sorted = [...pdm.attributes].sort((a, b) => a.order - b.order)
@@ -149,7 +151,7 @@ export default function NewMaterialRequestPage() {
       })
       .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar atributos'))
       .finally(() => setAttributesLoading(false))
-  }, [selectedPdm])
+  }, [selectedPdm, accessToken])
 
   const selectedPdmTemplate = pdms.find((p) => p.id === selectedPdm) ?? null
 

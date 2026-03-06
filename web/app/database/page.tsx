@@ -316,10 +316,11 @@ export default function DatabasePage() {
   }, [accessToken, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
-    apiGet<PDMTemplate[]>('/api/pdm')
+    if (!accessToken) return
+    apiGetWithAuth<PDMTemplate[]>('/api/pdm', accessToken)
       .then((list) => setPdms(list ?? []))
       .catch(() => setPdms([]))
-  }, [])
+  }, [accessToken])
 
   useEffect(() => {
     fetchMaterials()

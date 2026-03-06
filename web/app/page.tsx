@@ -229,9 +229,6 @@ export default function DashboardPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-foreground">{greeting}</h1>
-          <p className="text-sm text-muted-foreground">
-            Visão geral do sistema · MDM Platform v1.9
-          </p>
         </div>
       </div>
 
