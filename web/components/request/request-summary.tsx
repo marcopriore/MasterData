@@ -56,7 +56,7 @@ export function RequestSummary({
   const progress = totalCount > 0 ? Math.round((filledCount / totalCount) * 100) : 0
 
   return (
-    <Card className="border-[#B4B9BE]/60 shadow-sm sticky top-6">
+    <Card className="border-[#B4B9BE]/60 shadow-sm sticky top-20 z-40">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Eye className="size-4 text-[#0F1C38]" />
