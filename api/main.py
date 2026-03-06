@@ -1907,6 +1907,74 @@ def get_pdm_attributes(pdm_id: int, db: Session = Depends(get_db)):
 
 
 # -------------------------------
+# REGENERAR DESCRIÇÕES DE MATERIAIS APÓS ATUALIZAÇÃO DO PDM
+def _regenerate_material_descriptions(
+    db: Session, pdm_code: str, template: dict, tenant_id: int
+) -> None:
+    """
+    Regenera a description de todos os materiais que usam este PDM,
+    aplicando as abreviações atuais do template.
+    """
+    if not tenant_id:
+        return
+    tenant_id = int(tenant_id)
+
+    materials = (
+        db.query(MaterialDatabaseORM)
+        .filter(
+            MaterialDatabaseORM.pdm_code == pdm_code,
+            MaterialDatabaseORM.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    if not materials:
+        return
+
+    attributes = template.get("attributes") or []
+    abbrev_map: dict[str, dict[str, str]] = {}
+    for attr in attributes:
+        allowed = attr.get("allowedValues") or attr.get("options") or []
+        if not allowed:
+            continue
+        attr_id = str(attr.get("id", ""))
+        abbrev_map[attr_id] = {}
+        for opt in allowed:
+            if isinstance(opt, dict):
+                val = opt.get("value", "")
+                abbr = opt.get("abbreviation") or val
+                abbrev_map[attr_id][val.upper()] = (abbr or val).upper()
+            else:
+                s = str(opt)
+                abbrev_map[attr_id][s.upper()] = s.upper()
+
+    pdm_name = (template.get("name") or "").upper()
+    sorted_attrs = sorted(attributes, key=lambda a: a.get("order", 0))
+
+    for material in materials:
+        attrs = material.technical_attributes or {}
+        if not attrs:
+            continue
+
+        parts = [pdm_name]
+        for attr in sorted_attrs:
+            attr_id = str(attr.get("id", ""))
+            if not attr.get("includeInDescription", True):
+                continue
+            val = attrs.get(attr_id, "")
+            if not val:
+                continue
+            val_upper = val.upper()
+            if attr_id in abbrev_map and val_upper in abbrev_map[attr_id]:
+                parts.append(abbrev_map[attr_id][val_upper])
+            else:
+                parts.append(val_upper)
+
+        new_description = " ".join(filter(None, parts))
+        if new_description != material.description:
+            material.description = new_description
+
+
+# -------------------------------
 # ATUALIZAR PDM
 @app.put("/api/pdm/{pdm_id}")
 def update_pdm(
@@ -1923,6 +1991,24 @@ def update_pdm(
     tid = row.tenant_id
     db.commit()
     refresh_with_rls(db, row, tid, False)
+
+    # Regenerar descrições dos materiais afetados com novas abreviações
+    try:
+        template_dict = {
+            "name": row.name,
+            "attributes": row.attributes or [],
+        }
+        _regenerate_material_descriptions(
+            db=db,
+            pdm_code=row.internal_code or "",
+            template=template_dict,
+            tenant_id=tid,
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logging.warning("Falha ao regenerar descrições de materiais: %s", e)
+
     return {
         "id": row.id,
         "name": row.name,
