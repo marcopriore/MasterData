@@ -57,7 +57,8 @@ const erpBadgeStyle: Record<string, { light: React.CSSProperties; dark: React.CS
 
 type MaterialItem = {
   id: number
-  sap_code: string
+  id_sistema?: string | null
+  id_erp: string | null
   description: string
   status: string
   pdm_code: string | null
@@ -81,7 +82,8 @@ type MaterialsResponse = {
 type PDMTemplate = { id: number; name: string; internal_code: string }
 
 const COLUMN_KEYS = {
-  sap_code: 'Código ERP',
+  id_erp: 'Código ERP',
+  id_sistema: 'ID Sistema',
   description: 'Descrição',
   status: 'Status',
   pdm_code: 'Código PDM',
@@ -92,7 +94,7 @@ const COLUMN_KEYS = {
   material_type: 'Tipo de Material',
 } as const
 
-const VISIBLE_BY_DEFAULT = new Set(['sap_code', 'description', 'status', 'pdm_code', 'created_at'])
+const VISIBLE_BY_DEFAULT = new Set(['id_erp', 'id_sistema', 'description', 'status', 'pdm_code', 'created_at'])
 const OPTIONAL_COLUMNS = ['material_group', 'unit_of_measure', 'ncm', 'material_type'] as const
 
 const STATUS_OPTIONS = [
@@ -401,7 +403,7 @@ export default function DatabasePage() {
   }
 
   const toggleColumn = (key: string) => {
-    if (key === 'sap_code' || key === 'description') return
+    if (key === 'id_erp' || key === 'id_sistema' || key === 'description') return
     setVisibleCols((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
@@ -471,6 +473,9 @@ export default function DatabasePage() {
             </div>
             <DropdownMenuCheckboxItem checked disabled>
               Código ERP
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked disabled>
+              ID Sistema
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked disabled>
               Descrição
@@ -686,6 +691,13 @@ export default function DatabasePage() {
                           </td>
                         )
                       }
+                      if (key === 'id_sistema') {
+                        return (
+                          <td key={key} className="px-4 py-3 font-mono text-xs font-medium">
+                            {row.id_sistema ?? '—'}
+                          </td>
+                        )
+                      }
                       const val = row[key as keyof MaterialItem]
                       return (
                         <td key={key} className="px-4 py-3">
@@ -773,7 +785,7 @@ export default function DatabasePage() {
                     >
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium truncate">
-                          {m.sap_code} — {m.description}
+                          {m.id_sistema ?? m.id_erp ?? '—'} — {m.description}
                         </p>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400">
                           Última padronização: {m.standardized_at

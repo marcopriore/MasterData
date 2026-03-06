@@ -13,7 +13,8 @@ import { maskNCM, maskCFOP } from '@/lib/masks'
 
 type MaterialDetail = {
   id: number
-  sap_code: string
+  id_sistema?: string | null
+  id_erp: string | null
   description: string
   status: string
   pdm_code: string | null
@@ -233,7 +234,7 @@ export default function DatabaseDetailPage() {
     try {
       const payload: Record<string, unknown> = {}
       const editableKeys: (keyof MaterialDetail)[] = [
-        'sap_code', 'description', 'status', 'pdm_code', 'pdm_name',
+        'id_erp', 'description', 'status', 'pdm_code', 'pdm_name',
         'material_group', 'unit_of_measure', 'ncm', 'material_type',
         'gross_weight', 'net_weight', 'cfop', 'origin', 'purchase_group',
         'lead_time', 'mrp_type', 'min_stock', 'max_stock', 'valuation_class',
@@ -302,7 +303,7 @@ export default function DatabaseDetailPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground font-mono">
-            {material.sap_code}
+            {material.id_erp ?? material.id_sistema ?? '—'}
           </h1>
           <p className="mt-1 text-base text-muted-foreground">
             {material.description}
@@ -390,10 +391,13 @@ export default function DatabaseDetailPage() {
           ) : (
             <Row label="Status" value={<Cell value={material.status} />} />
           )}
+          {material.id_sistema && (
+            <Row label="ID Sistema" value={<span className="font-mono font-medium">{material.id_sistema}</span>} />
+          )}
           <EditableRow
             label="Código ERP"
             isDark={isDark}
-            fieldKey="sap_code"
+            fieldKey="id_erp"
             editMode={editMode}
             formData={formData}
             material={material}

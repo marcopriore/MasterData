@@ -825,6 +825,28 @@ def _attr_id_to_order(pdm) -> dict:
     return {str(a.get("id", "")): a.get("order", 999) for a in attrs if isinstance(a, dict)}
 
 
+def _generate_id_sistema(db: Session) -> str:
+    """
+    Gera o próximo id_sistema sequencial no formato MDM-000001.
+    Busca o maior número já usado em material_requests para garantir unicidade.
+    """
+    last = (
+        db.query(MaterialRequestORM.id_sistema)
+        .filter(MaterialRequestORM.id_sistema.isnot(None))
+        .order_by(MaterialRequestORM.id_sistema.desc())
+        .first()
+    )
+    if last and last[0]:
+        try:
+            last_num = int(last[0].replace("MDM-", ""))
+        except ValueError:
+            last_num = 0
+    else:
+        last_num = 0
+    next_num = last_num + 1
+    return f"MDM-{next_num:06d}"
+
+
 def _request_to_dict(r) -> dict:
     """Serialize a MaterialRequestORM row to the full response dict.
 
@@ -868,6 +890,7 @@ def _request_to_dict(r) -> dict:
 
     return {
         "id": r.id,
+        "id_sistema": r.id_sistema,
         "pdm_id": r.pdm_id,
         "pdm_name": r.pdm.name if r.pdm else None,
         "status": r.status,
@@ -1010,7 +1033,6 @@ def assign_request(
     try:
         notify_request_event(db, "request_assigned", row, current_user, stage=row_status)
     except Exception as e:
-        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 
@@ -1167,8 +1189,10 @@ def create_request(
         generated_description = " ".join(parts)
 
     tenant_id = pdm.tenant_id
+    id_sistema = _generate_id_sistema(db)
     row = MaterialRequestORM(
         tenant_id=tenant_id,
+        id_sistema=id_sistema,
         pdm_id=payload.pdm_id,
         workflow_id=wf_id,
         status=initial_status,
@@ -1213,7 +1237,6 @@ def create_request(
     try:
         notify_request_event(db, "request_created", row, current_user)
     except Exception as e:
-        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
 
     # Eager-load relationships for the response
@@ -1353,33 +1376,31 @@ def update_request_status(
         event_type = "request_completed" if next_status == "completed" else "request_approved"
         notify_request_event(db, event_type, row, current_user, stage=next_step_label)
     except Exception as e:
-        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
 
     # ── Auto-criar material na Base de Dados ao finalizar ─────────────────────
     FINAL_STATUSES = {"completed", "finalizado"}
     if next_status and next_status.lower() in FINAL_STATUSES:
         try:
-            prov_sap_code = f"PROV-{row_id:08d}"
             existing = db.query(MaterialDatabaseORM).filter(
-                MaterialDatabaseORM.sap_code == prov_sap_code
+                MaterialDatabaseORM.id_sistema == row.id_sistema
             ).first()
-            print(f"[DEBUG] next_status={next_status!r} | prov_sap_code={prov_sap_code!r} | existing={existing}")
-            if not existing:
+            print(f"[DEBUG] next_status={next_status!r} | id_sistema={row.id_sistema!r} | existing={existing}")
+            if not existing and row.id_sistema:
                 pdm = db.query(PDMOrm).filter(PDMOrm.id == row.pdm_id).first()
                 pdm_code = pdm.internal_code if pdm else None
                 pdm_name = pdm.name if pdm else None
-                description = row.generated_description or prov_sap_code
+                description = row.generated_description or row.id_sistema
                 material = MaterialDatabaseORM(
                     tenant_id=tid,
-                    sap_code=prov_sap_code,
+                    id_erp=None,
+                    id_sistema=row.id_sistema,
                     description=description,
                     status="Ativo",
                     pdm_code=pdm_code,
                     pdm_name=pdm_name,
                     source="mdm_request",
-                    erp_status="integrado",
-                    erp_integrated_at=datetime.now(timezone.utc),
+                    erp_status="pendente_erp",
                     standardized_at=datetime.now(timezone.utc),
                     standardized_by=current_user.id if current_user else None,
                     created_at=datetime.now(timezone.utc),
@@ -1393,7 +1414,7 @@ def update_request_status(
                     current_user.id if current_user else None,
                     "material",
                     "auto_created",
-                    f"Material criado automaticamente na Base de Dados para solicitação #{row_id} (sap_code provisório: {prov_sap_code})",
+                    f"Material criado automaticamente na Base de Dados para solicitação #{row_id} (id_sistema: {row.id_sistema})",
                     tid,
                     is_master=getattr(current_user, "is_master", False) if current_user else False,
                 )
@@ -1451,7 +1472,6 @@ def reject_request(
     try:
         notify_request_event(db, "request_rejected", row, current_user, justification=justification)
     except Exception as e:
-        db.rollback()
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
     return _request_to_dict(row)
 
@@ -1910,7 +1930,8 @@ def update_pdm(
 def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
     return {
         "id": row.id,
-        "sap_code": row.sap_code,
+        "id_sistema": row.id_sistema,
+        "id_erp": row.id_erp,
         "description": row.description,
         "status": row.status,
         "pdm_code": row.pdm_code,
@@ -1961,7 +1982,7 @@ def list_material_database(
         query = query.filter(
             or_(
                 MaterialDatabaseORM.description.ilike(term),
-                MaterialDatabaseORM.sap_code.ilike(term),
+                MaterialDatabaseORM.id_erp.ilike(term),
             )
         )
     if status:
@@ -2008,7 +2029,7 @@ def search_material_database(
         .filter(
             or_(
                 MaterialDatabaseORM.description.ilike(term),
-                MaterialDatabaseORM.sap_code.ilike(term),
+                MaterialDatabaseORM.id_erp.ilike(term),
             )
         )
         .order_by(MaterialDatabaseORM.description.asc())
@@ -2059,6 +2080,53 @@ def erp_integrate_materials(
     return {"integrated": integrated, "skipped": skipped, "total": len(integrated)}
 
 
+@app.patch("/api/database/materials/erp-callback")
+def erp_callback(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_current_user),
+):
+    """
+    Recebe retorno do ERP com o código gerado (id_erp) para um material.
+    Identifica o material pelo id_sistema e atualiza id_erp + erp_status.
+
+    Payload esperado:
+    {
+        "id_sistema": "MDM-000001",
+        "id_erp": "10000099"
+    }
+    """
+    id_sistema = payload.get("id_sistema")
+    id_erp_val = payload.get("id_erp")
+
+    if not id_sistema or not id_erp_val:
+        raise HTTPException(status_code=400, detail="id_sistema e id_erp são obrigatórios")
+
+    material = db.query(MaterialDatabaseORM).filter(
+        MaterialDatabaseORM.id_sistema == id_sistema
+    ).first()
+    if not material:
+        raise HTTPException(status_code=404, detail=f"Material com id_sistema '{id_sistema}' não encontrado")
+
+    material.id_erp = id_erp_val
+    material.erp_status = "integrado"
+    material.erp_integrated_at = datetime.now(timezone.utc)
+    material.updated_at = datetime.now(timezone.utc)
+    tid = material.tenant_id
+    db.commit()
+    refresh_with_rls(db, material, tid, getattr(current_user, "is_master", False))
+    log_system_event(
+        db,
+        current_user.id,
+        "erp",
+        "erp_callback",
+        f"ERP retornou id_erp '{id_erp_val}' para material {id_sistema}",
+        tid,
+        is_master=getattr(current_user, "is_master", False),
+    )
+    return _material_db_to_dict(material)
+
+
 @app.get("/api/database/materials/export")
 def export_materials(
     q: str | None = Query(None, description="Busca por descrição ou código ERP"),
@@ -2077,7 +2145,7 @@ def export_materials(
         query = query.filter(
             or_(
                 MaterialDatabaseORM.description.ilike(term),
-                MaterialDatabaseORM.sap_code.ilike(term),
+                MaterialDatabaseORM.id_erp.ilike(term),
             )
         )
     if status:
@@ -2192,9 +2260,9 @@ async def import_materials(
         if op == "C":
             pdm_code = str(data.get("pdm_code", "")).strip()
             pdm_name = pdm_cache.get(pdm_code, pdm_code)
-            sap_code = f"{next_sap:08d}"
+            id_erp_val = f"{next_sap:08d}"
             next_sap += 1
-            kwargs = _row_to_create_kwargs(data, sap_code, pdm_name)
+            kwargs = _row_to_create_kwargs(data, id_erp_val, pdm_name)
             db.add(MaterialDatabaseORM(**kwargs))
             created += 1
         elif op == "E":
@@ -2202,7 +2270,7 @@ async def import_materials(
             if not codigo:
                 continue
             row = db.query(MaterialDatabaseORM).filter(
-                MaterialDatabaseORM.sap_code == codigo
+                MaterialDatabaseORM.id_erp == codigo
             ).first()
             if not row:
                 continue

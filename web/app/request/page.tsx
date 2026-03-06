@@ -50,7 +50,7 @@ export type UploadedFile = {
 
 type MaterialSearchItem = {
   id: number
-  sap_code: string
+  id_erp: string
   description: string
   status: string
   pdm_code: string | null

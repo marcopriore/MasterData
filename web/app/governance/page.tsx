@@ -64,6 +64,7 @@ type RequestValue = { label: string; value: string }
 
 type ApiRequest = {
   id: number
+  id_sistema?: string | null
   pdm_id: number
   pdm_name: string | null
   status: string
@@ -658,6 +659,12 @@ export default function GovernancePage() {
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">Urgência</p>
                   <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground capitalize">{selectedRequest.urgency === 'low' ? 'Baixa' : selectedRequest.urgency === 'medium' ? 'Média' : 'Alta'}</p>
                 </div>
+                {selectedRequest.id_sistema && (
+                  <div className="col-span-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground">ID Sistema</p>
+                    <p className="mt-0.5 font-mono font-bold text-[#0F1C38] dark:text-[#C69A46]">{selectedRequest.id_sistema}</p>
+                  </div>
+                )}
               </div>
 
               {/* Dados Preenchidos — editável apenas para CADASTRO atribuído */}

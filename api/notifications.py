@@ -22,6 +22,16 @@ SMTP_FROM = os.getenv("SMTP_FROM", "noreply@masterdata.com")
 SMTP_ENABLED = os.getenv("SMTP_ENABLED", "false").lower() == "true"
 
 
+def _safe_int(val) -> int | None:
+    """Converte valor para int, retornando None se inválido."""
+    if val is None or val == "":
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def send_email(to_email: str, subject: str, html_body: str) -> None:
     """Envia e-mail. Fallback silencioso: imprime no console se SMTP desabilitado."""
     if not SMTP_ENABLED:
@@ -126,16 +136,20 @@ def get_email_template(
     return subject, html
 
 
-def _get_or_create_prefs(db: Session, user_id: int, tenant_id: int | None = None) -> UserNotificationPrefsORM:
-    prefs = db.query(UserNotificationPrefsORM).filter(UserNotificationPrefsORM.user_id == user_id).first()
+def _get_or_create_prefs(db: Session, user_id: int, tenant_id: int | None = None) -> UserNotificationPrefsORM | None:
+    safe_user_id = _safe_int(user_id)
+    if safe_user_id is None:
+        return None
+    prefs = db.query(UserNotificationPrefsORM).filter(UserNotificationPrefsORM.user_id == safe_user_id).first()
     if prefs:
         return prefs
-    if tenant_id is None:
-        user_obj = db.query(UserORM).filter(UserORM.id == user_id).first()
-        tenant_id = user_obj.tenant_id if user_obj else None
-    if tenant_id is None:
-        raise ValueError(f"Cannot create UserNotificationPrefsORM for user_id={user_id}: tenant_id unknown")
-    prefs = UserNotificationPrefsORM(user_id=user_id, tenant_id=tenant_id)
+    safe_tenant_id = _safe_int(tenant_id)
+    if safe_tenant_id is None:
+        user_obj = db.query(UserORM).filter(UserORM.id == safe_user_id).first()
+        safe_tenant_id = _safe_int(user_obj.tenant_id) if user_obj else None
+    if safe_tenant_id is None:
+        return None
+    prefs = UserNotificationPrefsORM(user_id=safe_user_id, tenant_id=safe_tenant_id)
     db.add(prefs)
     db.flush()
     return prefs
@@ -155,8 +169,9 @@ def _get_pref_key(event_type: str) -> tuple[str, str]:
 
 def _find_requester_user(db: Session, request: "MaterialRequestORM") -> UserORM | None:
     """Encontra o usuário solicitante por user_id ou por nome."""
-    if request.user_id:
-        user = db.query(UserORM).filter(UserORM.id == request.user_id).first()
+    safe_user_id = _safe_int(request.user_id)
+    if safe_user_id is not None:
+        user = db.query(UserORM).filter(UserORM.id == safe_user_id).first()
         if user:
             return user
     if request.requester:
@@ -218,13 +233,21 @@ def notify_request_event(
     message = messages.get(event_type, "")
 
     prefs = _get_or_create_prefs(db, requester_user.id, getattr(requester_user, "tenant_id", None))
+    if prefs is None:
+        return
     notify_key, email_key = _get_pref_key(event_type)
+
+    safe_tenant_id = _safe_int(request.tenant_id)
+    safe_user_id = _safe_int(requester_user.id)
+    safe_request_id = _safe_int(request.id)
+    if safe_tenant_id is None or safe_user_id is None or safe_request_id is None:
+        return
 
     if getattr(prefs, notify_key, True):
         notification = NotificationORM(
-            tenant_id=request.tenant_id,
-            user_id=requester_user.id,
-            request_id=request.id,
+            tenant_id=safe_tenant_id,
+            user_id=safe_user_id,
+            request_id=safe_request_id,
             event_type=event_type,
             title=title,
             message=message,

@@ -36,6 +36,9 @@ def get_db_for_tenant(
     try:
         set_tenant_in_session(db, tenant_id, is_master)
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -47,6 +50,9 @@ def get_db_raw() -> Generator[Session, None, None]:
     db = SessionLocalAdmin()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

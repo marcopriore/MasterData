@@ -123,6 +123,7 @@ class MaterialRequestORM(Base):
     __tablename__ = "material_requests"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_sistema: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, unique=True, index=True)
     tenant_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
@@ -318,12 +319,13 @@ class MaterialDatabaseORM(Base):
     __tablename__ = "material_database"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_sistema: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, unique=True, index=True)
     tenant_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
 
-    # Identificação ERP
-    sap_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # Identificação ERP (nullable até retorno do ERP)
+    id_erp: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     description: Mapped[str] = mapped_column(String(200), nullable=False)
 
     # Status: "Ativo", "Bloqueado", "Obsoleto"
@@ -371,7 +373,7 @@ class MaterialDatabaseORM(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    __table_args__ = (UniqueConstraint("tenant_id", "sap_code", name="uq_material_db_tenant_sap"),)
+    __table_args__ = (UniqueConstraint("tenant_id", "id_erp", name="uq_material_db_tenant_id_erp"),)
 
 
 # ─── Notifications ───────────────────────────────────────────────────────────

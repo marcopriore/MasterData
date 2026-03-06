@@ -59,7 +59,7 @@ COL_TO_MODEL: dict[str, str] = {
     "cfop": "cfop",
     "origem": "origin",
 }
-# codigo_material mapeia para sap_code na edição
+# codigo_material mapeia para id_erp na edição
 
 HEADER_FILL = PatternFill(start_color="1e3a5f", end_color="1e3a5f", fill_type="solid")
 HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
@@ -102,10 +102,10 @@ INSTRUCTIONS = [
 
 
 def _material_to_export_row(m: dict[str, Any]) -> list[Any]:
-    """Map material dict to a row matching TEMPLATE_HEADERS order (operacao=E, codigo_material=sap_code)."""
+    """Map material dict to a row matching TEMPLATE_HEADERS order (operacao=E, codigo_material=id_erp)."""
     return [
         "E",  # operacao
-        m.get("sap_code") or "",
+        m.get("id_erp") or "",
         m.get("description") or "",
         m.get("pdm_code") or "",
         m.get("status") or "Ativo",
@@ -314,7 +314,7 @@ def parse_and_validate_excel(
         material_row = None
         if operacao == "E" and codigo_str:
             material_row = db.query(MaterialDatabaseORM).filter(
-                MaterialDatabaseORM.sap_code == codigo_str
+                MaterialDatabaseORM.id_erp == codigo_str
             ).first()
             if not material_row:
                 errors.append(f"Material com código '{codigo_str}' não encontrado no banco")
@@ -379,14 +379,14 @@ def parse_and_validate_excel(
     }
 
 
-def _row_to_create_kwargs(row_data: dict, sap_code: str, pdm_name: str) -> dict:
+def _row_to_create_kwargs(row_data: dict, id_erp: str, pdm_name: str) -> dict:
     """Build kwargs for MaterialDatabaseORM create from validated row data."""
     status_val = row_data.get("status")
     status_str = str(status_val).strip() if status_val else "Ativo"
     if status_str not in ("Ativo", "Bloqueado", "Obsoleto"):
         status_str = "Ativo"
     kwargs: dict[str, Any] = {
-        "sap_code": sap_code,
+        "id_erp": id_erp,
         "description": str(row_data.get("descricao", "")).strip() or "Sem descrição",
         "status": status_str,
         "pdm_code": str(row_data.get("pdm_code", "")).strip() or None,

@@ -324,7 +324,7 @@ class FieldDictionaryResponse(BaseModel):
 
 class MaterialStandardizeBody(BaseModel):
     """Body for PATCH /api/database/materials/{id}/standardize — partial update."""
-    sap_code: Optional[str] = None
+    id_erp: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
     pdm_code: Optional[str] = None

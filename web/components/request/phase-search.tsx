@@ -14,7 +14,7 @@ import { Search, Loader2 } from 'lucide-react'
 
 type MaterialSearchItem = {
   id: number
-  sap_code: string
+  id_erp: string
   description: string
   status: string
   pdm_code: string | null
@@ -162,7 +162,7 @@ export function PhaseSearch({
                 className="flex cursor-pointer flex-col gap-1 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50 dark:border-zinc-700/50 dark:bg-card dark:hover:bg-muted/30"
               >
                 <span className="font-mono text-sm font-semibold text-foreground">
-                  {item.sap_code}
+                  {item.id_erp}
                 </span>
                 <span className="text-sm text-muted-foreground line-clamp-2">
                   {item.description}
@@ -220,7 +220,7 @@ export function PhaseSearch({
             <DialogTitle className="flex items-center gap-2">
               {m && (
                 <>
-                  <span className="font-mono">{m.sap_code}</span>
+                  <span className="font-mono">{m.id_erp}</span>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium border ${
                       STATUS_BADGE[m.status] ?? 'bg-slate-200 text-slate-700 border border-slate-400'
