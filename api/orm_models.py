@@ -27,6 +27,16 @@ class TenantORM(Base):
     )
 
 
+class MeasurementUnitORM(Base):
+    """Unidades de medida (MM, KG, etc.) — tabela global, sem tenant_id."""
+    __tablename__ = "measurement_units"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    abbreviation: Mapped[str] = mapped_column(String(10), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
+
+
 # ─── Access Control ───────────────────────────────────────────────────────────
 
 class RoleORM(Base):

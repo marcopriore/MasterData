@@ -5,6 +5,9 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { apiGetWithAuth, apiPatchWithAuth, apiPostWithAuth } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
+import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
+import { NumericUnitInput } from '@/components/ui/numeric-unit-input'
+import { formatAttrValue } from '@/lib/format-attr-value'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, Loader2 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
@@ -206,11 +209,12 @@ export default function DatabaseDetailPage() {
   const [isDirty, setIsDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editingAttributes, setEditingAttributes] = useState(false)
-  const [attrValues, setAttrValues] = useState<Record<string, string>>({})
+  const [attrValues, setAttrValues] = useState<Record<string, string | { value: string; unit: string }>>({})
   const [generatedDesc, setGeneratedDesc] = useState<string>('')
   const isGeneratedDescOverLimit = generatedDesc.length > maxLength
   const [savingAttrs, setSavingAttrs] = useState(false)
   const [isIntegrating, setIsIntegrating] = useState(false)
+  const measurementUnits = useMeasurementUnits()
   const [pdmTemplate, setPdmTemplate] = useState<{
     id: number
     name: string
@@ -229,26 +233,32 @@ export default function DatabaseDetailPage() {
 
   const generateDescription = useCallback(
     (
-      pdmName: string,
-      attrs: Record<string, string>,
-      template: { name: string; attributes?: Array<{ id: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string } | string> }> } | null
+      _pdmName: string,
+      attrs: Record<string, string | { value: string; unit?: string }>,
+      template: { name: string; attributes?: Array<{ id: string; dataType?: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string } | string> }> } | null
     ) => {
-      if (!template) return pdmName || ''
+      if (!template) return ''
       const parts = [template.name.toUpperCase()]
       const sorted = [...(template.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       sorted.forEach((attr) => {
         if (!attr.includeInDescription) return
         const val = attrs[attr.id]
-        if (val) {
-          const allowed = attr.allowedValues || []
-          const lov = allowed.find((av) =>
-            typeof av === 'object' && av !== null && 'value' in av ? av.value === val : av === val
-          )
-          const abbr = typeof lov === 'object' && lov !== null && 'abbreviation' in lov ? lov.abbreviation : null
-          parts.push((abbr || val).toUpperCase())
-        } else {
+        if (!val) {
           parts.push(`[${attr.abbreviation || attr.id}]`)
+          return
         }
+        if (typeof val === 'object' && val !== null && 'value' in val) {
+          const v = val as { value: string; unit?: string }
+          parts.push(`${v.value || ''}${v.unit || ''}`.toUpperCase().trim())
+          return
+        }
+        const strVal = String(val)
+        const allowed = attr.allowedValues || []
+        const lov = allowed.find((av) =>
+          typeof av === 'object' && av !== null && 'value' in av ? (av as { value: string }).value === strVal : String(av) === strVal
+        )
+        const abbr = typeof lov === 'object' && lov !== null && 'abbreviation' in lov ? (lov as { abbreviation?: string }).abbreviation : null
+        parts.push((abbr || strVal).toUpperCase())
       })
       return parts.join(' ')
     },
@@ -282,26 +292,19 @@ export default function DatabaseDetailPage() {
         }>(`/api/pdm/${found.id}`, accessToken)
         setPdmTemplate(full)
 
-        const currentAttrs = (material?.technical_attributes as Record<string, string>) || {}
-        const merged: Record<string, string> = {}
+        const currentAttrs = (material?.technical_attributes as Record<string, string | { value: string; unit: string }>) || {}
+        const merged: Record<string, string | { value: string; unit: string }> = {}
         const sortedAttrs = [...(full.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
         sortedAttrs.forEach((attr) => {
           merged[attr.id] = currentAttrs[attr.id] !== undefined ? currentAttrs[attr.id] : ''
         })
         setAttrValues(merged)
-
-        const parts = [full.name?.toUpperCase() || '']
-        sortedAttrs.forEach((attr) => {
-          if (attr.includeInDescription !== false && merged[attr.id]) {
-            parts.push(merged[attr.id].toUpperCase())
-          }
-        })
-        setGeneratedDesc(parts.filter(Boolean).join(' '))
+        setGeneratedDesc(generateDescription(full.name || '', merged, full))
       } catch {
         setPdmTemplate(null)
       }
     },
-    [accessToken, material?.technical_attributes]
+    [accessToken, material?.technical_attributes, generateDescription]
   )
 
   const handleSaveAttributes = useCallback(async () => {
@@ -339,7 +342,7 @@ export default function DatabaseDetailPage() {
       .then((m) => {
         setMaterial(m)
         setFormData({ ...m })
-        setAttrValues((m.technical_attributes as Record<string, string>) || {})
+        setAttrValues((m.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
         setGeneratedDesc(m.description || '')
       })
       .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
@@ -354,7 +357,7 @@ export default function DatabaseDetailPage() {
   const handleCancelEdit = () => {
     if (material) {
       setFormData({ ...material })
-      setAttrValues((material.technical_attributes as Record<string, string>) || {})
+      setAttrValues((material.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
       setGeneratedDesc(material.description || '')
     }
     setEditMode(false)
@@ -657,20 +660,38 @@ export default function DatabaseDetailPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               {pdmTemplate?.attributes && pdmTemplate.attributes.length > 0 ? pdmTemplate.attributes.map((attr) => {
                 const isLov = attr.dataType === 'lov'
+                const isNumeric = (attr.dataType === 'numeric' || attr.dataType === 'number') && measurementUnits.length > 0
                 const options = (attr.allowedValues || []).map((av) =>
-                  typeof av === 'object' && av !== null && 'value' in av ? av.value : String(av)
+                  typeof av === 'object' && av !== null && 'value' in av ? (av as { value: string }).value : String(av)
                 )
                 const label = attr.name || attr.id
+                const rawVal = attrValues[attr.id]
+                const numericVal = typeof rawVal === 'object' && rawVal !== null ? (rawVal as { value?: string }).value ?? '' : String(rawVal ?? '')
+                const numericUnit = typeof rawVal === 'object' && rawVal !== null ? (rawVal as { unit?: string }).unit ?? '' : ''
                 return (
                   <div key={attr.id}>
                     <label className="text-xs font-medium capitalize text-slate-600 dark:text-muted-foreground">
                       {label.replace(/_/g, ' ')}
                       {attr.isRequired && <span className="ml-1 text-red-500">*</span>}
                     </label>
-                    {isLov && options.length > 0 ? (
+                    {isNumeric ? (
+                      <div className="mt-1">
+                        <NumericUnitInput
+                          value={numericVal}
+                          unit={numericUnit}
+                          units={measurementUnits}
+                          onChange={(val, unit) => {
+                            const newVals = { ...attrValues, [attr.id]: { value: val, unit } }
+                            setAttrValues(newVals)
+                            setGeneratedDesc(generateDescription(material.pdm_name || '', newVals, pdmTemplate))
+                          }}
+                          placeholder={`Informe ${label.toLowerCase()}...`}
+                        />
+                      </div>
+                    ) : isLov && options.length > 0 ? (
                       <select
                         className="mt-1 w-full rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background px-3 py-2 text-sm text-slate-800 dark:text-foreground"
-                        value={attrValues[attr.id] || ''}
+                        value={typeof rawVal === 'string' ? rawVal : ''}
                         onChange={(e) => {
                           const newVals = { ...attrValues, [attr.id]: e.target.value }
                           setAttrValues(newVals)
@@ -688,7 +709,7 @@ export default function DatabaseDetailPage() {
                       <input
                         type="text"
                         className="mt-1 w-full rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background px-3 py-2 text-sm text-slate-800 dark:text-foreground"
-                        value={attrValues[attr.id] || ''}
+                        value={typeof rawVal === 'string' ? rawVal : numericVal}
                         placeholder={`Informe ${label.toLowerCase()}...`}
                         onChange={(e) => {
                           const newVals = { ...attrValues, [attr.id]: e.target.value }
@@ -715,7 +736,7 @@ export default function DatabaseDetailPage() {
                 className="rounded-lg border border-slate-200 dark:border-border px-4 py-2 text-sm text-slate-600 dark:text-foreground hover:bg-slate-50 dark:hover:bg-muted"
                 onClick={() => {
                   setEditingAttributes(false)
-                  setAttrValues((material.technical_attributes as Record<string, string>) || {})
+                  setAttrValues((material.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
                   setGeneratedDesc(material.description || '')
                 }}
               >
@@ -759,7 +780,7 @@ export default function DatabaseDetailPage() {
                       {key.replace(/_/g, ' ')}
                     </p>
                     <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">
-                      {value || '—'}
+                      {formatAttrValue(value)}
                     </p>
                   </div>
                 ))}

@@ -5,12 +5,14 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Eye, FileText, Package, Hash } from "lucide-react"
 import type { PDMTemplate, Attribute } from "@/app/request/page"
+import type { AttrValue } from "@/components/request/phase-specs"
+import { formatAttrValue } from "@/lib/format-attr-value"
 import { cn } from "@/lib/utils"
 
 interface RequestSummaryProps {
   pdm: PDMTemplate | null
   attributes: Attribute[]
-  attrValues: Record<string, string>
+  attrValues: Record<string, AttrValue>
   quantity: string
   requesterName: string
   costCenter: string
@@ -41,17 +43,27 @@ export function RequestSummary({
       .filter((a) => a.includeInDescription)
       .forEach((attr) => {
         const val = attrValues[attr.id]
-        if (val) {
-          const lov = attr.allowedValues?.find((av) => av.value === val)
-          parts.push((lov?.abbreviation || val).toUpperCase())
-        } else {
+        if (!val) {
           parts.push(`[${attr.abbreviation}]`)
+          return
         }
+        if (typeof val === "object" && val !== null && "value" in val) {
+          const v = val as { value: string; unit?: string }
+          parts.push(`${v.value || ""}${v.unit || ""}`.toUpperCase().trim())
+          return
+        }
+        const strVal = String(val)
+        const lov = attr.allowedValues?.find((av) => av.value === strVal)
+        parts.push((lov?.abbreviation || strVal).toUpperCase())
       })
     return parts.join(" ")
   }
 
-  const filledCount = attributes.filter((a) => (attrValues[a.id] ?? '').trim() !== '').length
+  const filledCount = attributes.filter((a) => {
+    const v = attrValues[a.id]
+    const s = typeof v === "string" ? v : (v && typeof v === "object" ? v.value ?? "" : "")
+    return (s ?? "").trim() !== ""
+  }).length
   const totalCount = attributes.length
   const progress = totalCount > 0 ? Math.round((filledCount / totalCount) * 100) : 0
 
@@ -148,11 +160,15 @@ export function RequestSummary({
                 Atributos Preenchidos
               </p>
               {attributes
-                .filter((a) => (attrValues[a.id] ?? '').trim() !== '')
+                .filter((a) => {
+                  const v = attrValues[a.id]
+                  const s = typeof v === "string" ? v : (v && typeof v === "object" ? v.value ?? "" : "")
+                  return (s ?? "").trim() !== ""
+                })
                 .map((attr) => (
                   <div key={attr.id} className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground truncate mr-2">{attr.name}</span>
-                    <span className="font-mono font-medium text-foreground shrink-0">{attrValues[attr.id]}</span>
+                    <span className="font-mono font-medium text-foreground shrink-0">{formatAttrValue(attrValues[attr.id])}</span>
                   </div>
                 ))}
             </div>

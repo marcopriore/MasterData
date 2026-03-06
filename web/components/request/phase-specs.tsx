@@ -20,7 +20,11 @@ import {
 } from "@/components/ui/tooltip"
 import { Clipboard, Settings2, Info, AlertCircle } from "lucide-react"
 import { FIELD_MASKS } from "@/lib/masks"
+import { NumericUnitInput } from "@/components/ui/numeric-unit-input"
+import type { MeasurementUnit } from "@/hooks/useMeasurementUnits"
 import type { PDMTemplate, Attribute } from "@/app/request/page"
+
+export type AttrValue = string | { value: string; unit: string }
 
 function getMaskForAttr(attr: Attribute): ((v: string) => string) | null {
   const id = attr.id?.toLowerCase().replace(/\s+/g, '_') ?? ''
@@ -35,9 +39,10 @@ interface PhaseSpecsProps {
   onPdmChange: (v: string) => void
   attributes: Attribute[]
   attributesLoading: boolean
-  values: Record<string, string>
-  onChange: (attrId: string, value: string) => void
+  values: Record<string, AttrValue>
+  onChange: (attrId: string, value: AttrValue) => void
   invalidFieldIds: Set<string>
+  measurementUnits?: MeasurementUnit[]
 }
 
 export function PhaseSpecs({
@@ -50,6 +55,7 @@ export function PhaseSpecs({
   values,
   onChange,
   invalidFieldIds,
+  measurementUnits = [],
 }: PhaseSpecsProps) {
   const selectedPdm = pdms.find((p) => p.id === selectedPdmId)
 
@@ -183,9 +189,18 @@ export function PhaseSpecs({
 
                         {/* Input */}
                         <div className="space-y-1">
-                          {isLov ? (
+                          {(attr.dataType === "numeric" || attr.dataType === "number") && measurementUnits.length > 0 ? (
+                            <NumericUnitInput
+                              value={typeof values[attr.id] === "object" && values[attr.id] !== null ? (values[attr.id] as { value?: string }).value ?? "" : String(values[attr.id] ?? "")}
+                              unit={typeof values[attr.id] === "object" && values[attr.id] !== null ? (values[attr.id] as { unit?: string }).unit ?? "" : ""}
+                              units={measurementUnits}
+                              onChange={(val, unit) => onChange(attr.id, { value: val, unit })}
+                              placeholder={`Informe ${attr.name.toLowerCase()}...`}
+                              required={attr.isRequired}
+                            />
+                          ) : isLov ? (
                             <Select
-                              value={values[attr.id] ?? ''}
+                              value={typeof values[attr.id] === "string" ? values[attr.id] ?? "" : ""}
                               onValueChange={(v) => onChange(attr.id, v)}
                             >
                               <SelectTrigger
@@ -209,11 +224,14 @@ export function PhaseSpecs({
                           ) : (() => {
                             const maskFn = getMaskForAttr(attr)
                             const hasMask = !!maskFn
+                            const strVal = typeof values[attr.id] === "object" && values[attr.id] !== null
+                              ? (values[attr.id] as { value?: string }).value ?? ""
+                              : String(values[attr.id] ?? "")
                             const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                               const raw = e.target.value
                               const val = hasMask
                                 ? maskFn(raw)
-                                : attr.dataType === 'numeric'
+                                : attr.dataType === "numeric"
                                   ? raw
                                   : raw.toUpperCase()
                               onChange(attr.id, val)
@@ -221,8 +239,8 @@ export function PhaseSpecs({
                             return (
                               <Input
                                 id={`attr-${attr.id}`}
-                                type={hasMask ? 'text' : attr.dataType === 'numeric' ? 'number' : 'text'}
-                                value={values[attr.id] ?? ''}
+                                type={hasMask ? "text" : attr.dataType === "numeric" ? "number" : "text"}
+                                value={strVal}
                                 onChange={handleChange}
                                 placeholder={attr.dataType === 'numeric' && !hasMask ? 'Valor numérico...' : `INFORME ${attr.name.toUpperCase()}...`}
                                 className={`h-10 ${attr.dataType !== 'numeric' && !hasMask ? 'uppercase' : ''} ${inputCn}`}

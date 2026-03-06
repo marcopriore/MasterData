@@ -23,7 +23,17 @@ import { useUser } from '@/contexts/user-context'
 import { ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
+import { formatAttrValue } from '@/lib/format-attr-value'
+import { NumericUnitInput } from '@/components/ui/numeric-unit-input'
+import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { DescriptionLengthIndicator } from '@/components/ui/description-length-indicator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -75,7 +85,7 @@ type ApiRequest = {
   urgency: 'low' | 'medium' | 'high'
   justification: string | null
   generated_description: string | null
-  technical_attributes: Record<string, string> | null
+  technical_attributes: Record<string, string | { value: string; unit?: string }> | null
   attachments: string[] | null
   date: string | null
   values: RequestValue[]
@@ -186,7 +196,25 @@ export default function GovernancePage() {
   const [approveRejectLoading, setApproveRejectLoading] = useState(false)
   const [myFields, setMyFields] = useState<MyField[]>([])
   const [fieldLabels, setFieldLabels] = useState<FieldLabelItem[]>([])
-  const [attributeValues, setAttributeValues] = useState<Record<string, string>>({})
+  const [attributeValues, setAttributeValues] = useState<Record<string, string | { value: string; unit: string }>>({})
+  const measurementUnits = useMeasurementUnits()
+
+  function parseNumericWithUnit(
+    str: string | { value: string; unit: string } | null | undefined,
+    units: { abbreviation: string }[]
+  ): { value: string; unit: string } {
+    if (!str) return { value: '', unit: '' }
+    if (typeof str === 'object' && str !== null && 'value' in str) return str as { value: string; unit: string }
+    const s = String(str).trim()
+    if (!s) return { value: '', unit: '' }
+    const sorted = [...units].sort((a, b) => b.abbreviation.length - a.abbreviation.length)
+    for (const u of sorted) {
+      if (u.abbreviation && s.endsWith(u.abbreviation)) {
+        return { value: s.slice(0, -u.abbreviation.length).trim(), unit: u.abbreviation }
+      }
+    }
+    return { value: s, unit: '' }
+  }
   const [saveLoading, setSaveLoading] = useState(false)
   const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set())
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([])
@@ -318,10 +346,11 @@ export default function GovernancePage() {
     if (isNewRequest) {
       setAttributeValues(
         Object.fromEntries(
-          Object.entries(attrs).map(([k, v]) => [
-            k,
-            v != null ? applyFieldMask(k, String(v)) : '',
-          ])
+          Object.entries(attrs).map(([k, v]) => {
+            if (v == null) return [k, '']
+            if (typeof v === 'object' && v !== null && 'value' in v) return [k, v as { value: string; unit: string }]
+            return [k, applyFieldMask(k, String(v))]
+          })
         )
       )
     }
@@ -390,7 +419,8 @@ export default function GovernancePage() {
     for (const f of myFields) {
       if (!f.is_required) continue
       if (SKIP_FIELDS.includes(f.field_name)) continue
-      const val = attributeValues[f.field_name]?.trim()
+      const raw = attributeValues[f.field_name]
+      const val = typeof raw === 'string' ? (raw ?? '').trim() : (raw && typeof raw === 'object' ? (raw.value ?? '').trim() : '')
       if (!val) invalid.add(f.field_name)
     }
     setInvalidFields(invalid)
@@ -410,13 +440,30 @@ export default function GovernancePage() {
   }
 
   function handleFieldChange(fieldName: string, rawValue: string, fieldType?: string) {
-    let finalValue = rawValue
+    let finalValue: string | { value: string; unit: string } = rawValue
     if (fieldType !== 'select' && fieldType !== 'date') {
       const maskFn = FIELD_MASKS[fieldName.toLowerCase()]
       if (maskFn) finalValue = maskFn(rawValue)
     }
     setAttributeValues((prev) => ({ ...prev, [fieldName]: finalValue }))
     clearInvalidField(fieldName)
+  }
+
+  function handleNumericUnitChange(fieldName: string, value: string, unit: string) {
+    setAttributeValues((prev) => ({ ...prev, [fieldName]: { value, unit } }))
+    clearInvalidField(fieldName)
+  }
+
+  function toPayloadAttributes(vals: Record<string, string | { value: string; unit: string }>): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(vals)) {
+      if (typeof v === 'object' && v !== null && 'value' in v) {
+        out[k] = `${(v as { value?: string }).value ?? ''}${(v as { unit?: string }).unit ?? ''}`.trim()
+      } else {
+        out[k] = String(v ?? '')
+      }
+    }
+    return out
   }
 
   const handleSalvar = async () => {
@@ -426,7 +473,7 @@ export default function GovernancePage() {
     try {
       const res = await apiPatchWithAuth<ApiRequest>(
         `/api/requests/${selectedRequest.id}/attributes`,
-        { attributes: attributeValues },
+        { attributes: toPayloadAttributes(attributeValues) },
         accessToken
       )
       toast.success('Dados salvos!')
@@ -458,7 +505,7 @@ export default function GovernancePage() {
     try {
       await apiPatchWithAuth(
         `/api/requests/${selectedRequest.id}/attributes`,
-        { attributes: attributeValues },
+        { attributes: toPayloadAttributes(attributeValues) },
         accessToken
       )
       await apiPatchWithAuth(
@@ -689,23 +736,51 @@ export default function GovernancePage() {
                           <div key={key}>
                             <Label htmlFor={`tech-${key}`} className="text-sm font-medium">{label}</Label>
                             {fieldType === 'select' ? (
-                              <select
-                                id={`tech-${key}`}
-                                value={attributeValues[key] ?? ''}
-                                onChange={(e) => handleFieldChange(key, e.target.value, 'select')}
-                                className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm border-input dark:border-zinc-700/50 dark:bg-background dark:text-foreground"
+                              <Select
+                                value={typeof attributeValues[key] === 'string' ? attributeValues[key] ?? '' : (attributeValues[key] as { value?: string })?.value ?? ''}
+                                onValueChange={(v) => handleFieldChange(key, v, 'select')}
                               >
-                                <option value="">Selecione...</option>
-                                {options.map((opt) => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
+                                <SelectTrigger
+                                  id={`tech-${key}`}
+                                  className="mt-1 w-full h-10 border-slate-200 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-100"
+                                >
+                                  <SelectValue placeholder="Selecione..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {options.map((opt: string | { value: string; abbreviation?: string; abbrev?: string; abreviacao?: string }, i: number) => {
+                                    const value = typeof opt === 'object' && opt !== null && 'value' in opt ? (opt as { value: string }).value : String(opt)
+                                    const abbrev = typeof opt === 'object' && opt !== null
+                                      ? ((opt as { abbreviation?: string; abbrev?: string; abreviacao?: string }).abbreviation
+                                          ?? (opt as { abbrev?: string }).abbrev
+                                          ?? (opt as { abreviacao?: string }).abreviacao)
+                                      : null
+                                    return (
+                                      <SelectItem key={`${value}-${i}`} value={value}>
+                                        {value}
+                                        {abbrev && (
+                                          <span className="ml-1.5 font-mono text-[11px] text-slate-400 dark:text-zinc-500">({abbrev})</span>
+                                        )}
+                                      </SelectItem>
+                                    )
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            ) : (fieldType === 'number' || fieldType === 'numeric') && measurementUnits.length > 0 ? (
+                              <div className="mt-1">
+                                <NumericUnitInput
+                                  value={parseNumericWithUnit(attributeValues[key], measurementUnits).value}
+                                  unit={parseNumericWithUnit(attributeValues[key], measurementUnits).unit}
+                                  units={measurementUnits}
+                                  onChange={(val, unit) => handleNumericUnitChange(key, val, unit)}
+                                  placeholder={`Informe ${(label as string).toLowerCase()}...`}
+                                />
+                              </div>
                             ) : fieldType === 'number' ? (
                               <Input
                                 id={`tech-${key}`}
                                 type="number"
                                 min={0}
-                                value={attributeValues[key] ?? ''}
+                                value={parseNumericWithUnit(attributeValues[key], measurementUnits).value}
                                 onChange={(e) => handleFieldChange(key, e.target.value, 'number')}
                                 className="mt-1"
                               />
@@ -721,7 +796,7 @@ export default function GovernancePage() {
                               <Input
                                 id={`tech-${key}`}
                                 type="text"
-                                value={attributeValues[key] ?? ''}
+                                value={typeof attributeValues[key] === 'object' ? (attributeValues[key] as { value?: string })?.value ?? '' : String(attributeValues[key] ?? '')}
                                 onChange={(e) => handleFieldChange(key, e.target.value, 'text')}
                                 className="mt-1"
                               />
@@ -748,7 +823,7 @@ export default function GovernancePage() {
                                     {label}
                                   </td>
                                   <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
-                                    {String(val)}
+                                    {formatAttrValue(val)}
                                   </td>
                                 </tr>
                               )

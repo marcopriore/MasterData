@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { apiGet, apiGetWithAuth, apiPostWithAuth, apiUpload } from '@/lib/api'
 import { useUser } from '@/contexts/user-context'
+import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Stepper, type StepItem } from '@/components/request/stepper'
 import { PhaseAdmin } from '@/components/request/phase-admin'
 import { PhaseSearch } from '@/components/request/phase-search'
@@ -94,7 +95,7 @@ export default function NewMaterialRequestPage() {
   const [selectedPdm, setSelectedPdm] = useState<number | null>(null)
   const [attributes, setAttributes] = useState<Attribute[]>([])
   const [attributesLoading, setAttributesLoading] = useState(false)
-  const [formData, setFormData] = useState<Record<string, string>>({})
+  const [formData, setFormData] = useState<Record<string, string | { value: string; unit: string }>>({})
   const [invalidFieldIds, setInvalidFieldIds] = useState<Set<string>>(new Set())
   const [quantity, setQuantity] = useState('')
   const [descriptionNote, setDescriptionNote] = useState('')
@@ -155,9 +156,12 @@ export default function NewMaterialRequestPage() {
 
   const selectedPdmTemplate = pdms.find((p) => p.id === selectedPdm) ?? null
 
-  const handleAttrChange = useCallback((attrId: string, value: string) => {
+  const measurementUnits = useMeasurementUnits()
+
+  const handleAttrChange = useCallback((attrId: string, value: string | { value: string; unit: string }) => {
     setFormData((prev) => ({ ...prev, [attrId]: value }))
-    if (value.trim()) {
+    const filled = typeof value === "string" ? value.trim() : (value?.value ?? "").trim()
+    if (filled) {
       setInvalidFieldIds((prev) => { const n = new Set(prev); n.delete(attrId); return n })
     }
   }, [])
@@ -195,7 +199,12 @@ export default function NewMaterialRequestPage() {
     }
     if (step === 2) {
       if (!selectedPdm) { toast.error('Selecione um template PDM.'); return false }
-      const missing = attributes.filter((a) => a.isRequired && !(formData[a.id] ?? '').trim()).map((a) => a.id)
+      const missing = attributes.filter((a) => {
+        if (!a.isRequired) return false
+        const v = formData[a.id]
+        const filled = typeof v === "string" ? (v ?? "").trim() : (v && typeof v === "object" ? (v.value ?? "").trim() : "")
+        return !filled
+      }).map((a) => a.id)
       if (missing.length > 0) {
         setInvalidFieldIds(new Set(missing))
         toast.error('Preencha todos os campos obrigatórios.')
@@ -221,11 +230,17 @@ export default function NewMaterialRequestPage() {
               .filter((a) => a.includeInDescription)
               .map((a) => {
                 const val = formData[a.id]
-                const lov = a.allowedValues?.find((av) => av.value === val)
-                return val ? (lov?.abbreviation || val).toUpperCase() : `[${a.abbreviation}]`
+                if (!val) return `[${a.abbreviation}]`
+                if (typeof val === "object" && val !== null && "value" in val) {
+                  const v = val as { value: string; unit?: string }
+                  return `${v.value || ""}${v.unit || ""}`.toUpperCase().trim() || `[${a.abbreviation}]`
+                }
+                const strVal = String(val)
+                const lov = a.allowedValues?.find((av) => av.value === strVal)
+                return (lov?.abbreviation || strVal).toUpperCase()
               }),
-          ].join(' ')
-        : ''
+          ].join(" ")
+        : ""
 
       const payload = {
         pdm_id: selectedPdm,
@@ -367,6 +382,7 @@ export default function NewMaterialRequestPage() {
                 attributesLoading={attributesLoading}
                 values={formData}
                 onChange={handleAttrChange}
+                measurementUnits={measurementUnits}
                 invalidFieldIds={invalidFieldIds}
               />
             )}
@@ -488,12 +504,31 @@ function ReviewRow({ label, value, mono }: { label: string; value: string; mono?
   )
 }
 
+function getAttrDisplayValue(val: unknown): string {
+  if (!val) return "—"
+  if (typeof val === "object" && val !== null && "value" in val) {
+    const { value, unit } = val as { value: string; unit?: string }
+    if (!value) return "—"
+    return `${value}${unit || ""}`.trim().toUpperCase() || "—"
+  }
+  return String(val).trim() || "—"
+}
+
 function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costCenter, urgency, justificativa, files, descriptionNote }: ReviewPhaseProps) {
   // Build description preview
   const preview = pdm
     ? [pdm.name.toUpperCase(), ...attributes.filter(a => a.includeInDescription).map(a => {
-        const val = formData[a.id]
-        const lov = a.allowedValues?.find(av => av.value === val)
+        const raw = formData[a.id]
+        if (!raw) return `[${a.abbreviation}]`
+
+        if (typeof raw === "object" && raw !== null && "value" in raw) {
+          const numeric = raw as { value: string; unit: string }
+          if (!numeric.value) return `[${a.abbreviation}]`
+          return `${numeric.value}${numeric.unit || ""}`.toUpperCase()
+        }
+
+        const val = raw as string
+        const lov = a.allowedValues?.find((av: { value: string; abbreviation?: string }) => av.value === val)
         return val ? (lov?.abbreviation || val).toUpperCase() : `[${a.abbreviation}]`
       })].join(' ')
     : '—'
@@ -534,7 +569,7 @@ function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costC
               {attributes.map((attr) => (
                 <tr key={attr.id} className="border-b border-[#B4B9BE]/40 last:border-0">
                   <td className="w-[45%] bg-slate-50 px-4 py-2.5 font-medium text-foreground">{attr.name}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground font-mono">{formData[attr.id]?.trim() || '—'}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground font-mono">{getAttrDisplayValue(formData[attr.id])}</td>
                 </tr>
               ))}
             </tbody>

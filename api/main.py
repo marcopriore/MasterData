@@ -13,8 +13,9 @@ from fastapi import Body, Depends, File, HTTPException, Query, Request, UploadFi
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
-from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm, refresh_with_rls
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_db_raw, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm, refresh_with_rls
 from orm_models import (
+    MeasurementUnitORM,
     ProductORM,
     PDMOrm,
     MaterialRequestORM,
@@ -61,6 +62,18 @@ def normalize_str(value) -> str | None:
         return value
     normalized = " ".join(value.split())
     return normalized if normalized else None
+
+
+def normalize_attr_value(value):
+    """Normaliza valor de atributo técnico — string ou dict {value, unit}."""
+    if isinstance(value, dict):
+        return {
+            "value": (normalize_str(str(value.get("value", ""))) or ""),
+            "unit": (normalize_str(str(value.get("unit", ""))) or ""),
+        }
+    if isinstance(value, str):
+        return normalize_str(value)
+    return value
 
 
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -274,6 +287,26 @@ def seed_database(db: Session) -> None:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/measurement-units")
+def get_measurement_units(db: Session = Depends(get_db_raw)):
+    """Lista unidades de medida (MM, KG, etc.) — endpoint público, global."""
+    units = (
+        db.query(MeasurementUnitORM)
+        .filter(MeasurementUnitORM.is_active == True)
+        .order_by(MeasurementUnitORM.category, MeasurementUnitORM.name)
+        .all()
+    )
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "abbreviation": u.abbreviation,
+            "category": u.category,
+        }
+        for u in units
+    ]
 
 
 @app.get("/api/debug/tenant")
@@ -898,7 +931,14 @@ def _request_to_dict(r) -> dict:
             else:
                 field_type = "text"
             allowed = attr.get("allowedValues") or attr.get("options") or []
-            options = [str(av.get("value", av) if isinstance(av, dict) else av) for av in allowed]
+            options = []
+            for av in allowed:
+                if isinstance(av, dict):
+                    val = str(av.get("value", av))
+                    abbr = av.get("abbreviation") or av.get("abbrev") or ""
+                    options.append({"value": val, "abbreviation": abbr})
+                else:
+                    options.append(str(av))
             pdm_attributes[attr_id] = {
                 "label": attr.get("name", attr.get("label", attr_id)),
                 "type": field_type,
@@ -1210,7 +1250,7 @@ def create_request(
     tenant_id = pdm.tenant_id
     id_sistema = _generate_id_sistema(db)
     normalized_values = {
-        k: normalize_str(v) if isinstance(v, str) else v
+        k: normalize_attr_value(v)
         for k, v in payload.values.items()
     }
     row = MaterialRequestORM(
@@ -2452,7 +2492,7 @@ def update_material_attributes(
     if "technical_attributes" in payload:
         attrs = payload["technical_attributes"]
         material.technical_attributes = {
-            k: normalize_str(v) if isinstance(v, str) else v
+            k: normalize_attr_value(v)
             for k, v in attrs.items()
         }
     if "description" in payload:
