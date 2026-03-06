@@ -76,6 +76,19 @@ def normalize_attr_value(value):
     return value
 
 
+def safe_reset_session(db: Session):
+    """Garante que a sessão está limpa: rollback + reset do RLS tenant_id."""
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    try:
+        db.execute(text("SET app.tenant_id = '0'"))
+        db.commit()
+    except Exception:
+        pass
+
+
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """Handler customizado que adiciona o header Retry-After na resposta 429."""
     retry_after = getattr(exc, "retry_after", 60)
@@ -875,6 +888,83 @@ def _attr_id_to_order(pdm) -> dict:
     return {str(a.get("id", "")): a.get("order", 999) for a in attrs if isinstance(a, dict)}
 
 
+# Mapeamento: field_name (workflow/request) -> MaterialDatabaseORM column
+_ADMIN_FIELD_TO_ORM = {
+    "grupo_mercadorias": "material_group",
+    "grupo_material": "material_group",
+    "unidade_medida_base": "unit_of_measure",
+    "unidade_venda": "sales_unit",
+    "tipo_material": "material_type",
+    "peso_bruto": "gross_weight",
+    "peso_liquido": "net_weight",
+    "ncm": "ncm",
+    "cfop": "cfop",
+    "origem_material": "origin",
+    "origem": "origin",
+    "grupo_compras": "purchase_group",
+    "prazo_entrega": "lead_time",
+    "tipo_mrp": "mrp_type",
+    "estoque_minimo": "min_stock",
+    "estoque_maximo": "max_stock",
+    "grupo_valoracao": "valuation_class",
+    "classe_valorizacao": "valuation_class",
+    "preco_padrao": "standard_price",
+    "centro_lucro": "profit_center",
+    "org_vendas": "sales_org",
+    "canal_distribuicao": "distribution_channel",
+    "tolerancia_entrega": "delivery_tolerance",
+    "fornecedor_preferencial": "preferred_supplier",
+    "responsavel_mrp": "mrp_controller",
+    "tamanho_lote": "lot_size",
+    "perfil_previsao": "forecast_profile",
+    "cst_ipi": "cst_ipi",
+    "cst_pis_cofins": "cst_pis_cofins",
+    "conta_estoque": "stock_account",
+    "controle_preco": "price_control",
+    "unidade_medida_pedido": "order_unit",
+    "grupo_valorizacao": "valuation_group",
+}
+_ORM_NUMERIC_FLOAT = {"gross_weight", "net_weight", "min_stock", "max_stock", "standard_price", "lot_size"}
+_ORM_NUMERIC_INT = {"lead_time", "delivery_tolerance"}
+
+
+def _split_attrs_for_material(all_attrs: dict) -> tuple[dict, dict]:
+    """
+    Separa atributos PDM (ficam em technical_attributes) dos campos administrativos
+    (vão para colunas diretas do MaterialDatabaseORM).
+    Returns (pdm_attrs, admin_kwargs).
+    """
+    pdm_attrs = {}
+    admin_kwargs = {}
+    for key, raw in (all_attrs or {}).items():
+        orm_col = _ADMIN_FIELD_TO_ORM.get(key)
+        if orm_col and hasattr(MaterialDatabaseORM, orm_col):
+            val = raw
+            if isinstance(val, dict) and "value" in val:
+                val = val.get("value") or val.get("unit") or ""
+            s = str(val or "").strip() if val is not None else ""
+            if not s:
+                continue
+            if orm_col in _ORM_NUMERIC_FLOAT:
+                try:
+                    admin_kwargs[orm_col] = float(s.replace(",", "."))
+                except (ValueError, TypeError):
+                    admin_kwargs[orm_col] = None
+            elif orm_col in _ORM_NUMERIC_INT:
+                try:
+                    admin_kwargs[orm_col] = int(float(s.replace(",", ".")))
+                except (ValueError, TypeError):
+                    admin_kwargs[orm_col] = None
+            else:
+                admin_kwargs[orm_col] = s
+        else:
+            val = raw
+            if isinstance(val, dict) and "value" in val:
+                val = f"{val.get('value', '')}{val.get('unit', '')}".strip()
+            pdm_attrs[key] = val
+    return pdm_attrs, admin_kwargs
+
+
 def _generate_id_sistema(db: Session) -> str:
     """
     Gera o próximo id_sistema sequencial no formato MDM-000001.
@@ -1047,51 +1137,60 @@ def assign_request(
     Atribui a solicitação ao usuário logado. Bloqueia concorrência: se já estiver
     atribuída a outro usuário, retorna 409.
     """
-    row = (
-        db.query(MaterialRequestORM)
-        .options(
-            joinedload(MaterialRequestORM.pdm),
-            joinedload(MaterialRequestORM.request_values),
-            joinedload(MaterialRequestORM.assigned_to),
-        )
-        .filter(MaterialRequestORM.id == request_id)
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
-
-    if row.assigned_to_id is not None and row.assigned_to_id != current_user.id:
-        assignee_name = row.assigned_to.name if row.assigned_to else "outro usuário"
-        raise HTTPException(
-            status_code=409,
-            detail=f"Solicitação já está sendo atendida por {assignee_name}",
-        )
-
-    row.assigned_to_id = current_user.id
-    row.assigned_at = datetime.now(timezone.utc)
-    row_id = row.id
-    tid = row.tenant_id
-    row_status = row.status
-    db.commit()
-    refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
-    log_request_event(
-        db, row_id, current_user.id, "assigned",
-        f"Atendimento iniciado por {current_user.name}",
-        tid,
-        stage=row_status,
-        is_master=getattr(current_user, "is_master", False),
-    )
-    log_system_event(
-        db, current_user.id, "requests", "request_assigned",
-        f"Solicitação #{row_id} atribuída a {current_user.name}",
-        tid,
-        is_master=getattr(current_user, "is_master", False),
-    )
     try:
-        notify_request_event(db, "request_assigned", row, current_user, stage=row_status)
+        row = (
+            db.query(MaterialRequestORM)
+            .options(
+                joinedload(MaterialRequestORM.pdm),
+                joinedload(MaterialRequestORM.request_values),
+                joinedload(MaterialRequestORM.assigned_to),
+            )
+            .filter(MaterialRequestORM.id == request_id)
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+
+        if row.assigned_to_id is not None and row.assigned_to_id != current_user.id:
+            assignee_name = row.assigned_to.name if row.assigned_to else "outro usuário"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Solicitação já está sendo atendida por {assignee_name}",
+            )
+
+        row.assigned_to_id = current_user.id
+        row.assigned_at = datetime.now(timezone.utc)
+        row_id = row.id
+        tid = row.tenant_id
+        row_status = row.status
+        db.commit()
+        refresh_with_rls(db, row, tid, getattr(current_user, "is_master", False))
+        log_request_event(
+            db, row_id, current_user.id, "assigned",
+            f"Atendimento iniciado por {current_user.name}",
+            tid,
+            stage=row_status,
+            is_master=getattr(current_user, "is_master", False),
+        )
+        log_system_event(
+            db, current_user.id, "requests", "request_assigned",
+            f"Solicitação #{row_id} atribuída a {current_user.name}",
+            tid,
+            is_master=getattr(current_user, "is_master", False),
+        )
+        db.refresh(row)
+        result_dict = _request_to_dict(row)
+        try:
+            notify_request_event(row_id, tid, "request_assigned", current_user.id, current_user.name, stage=row_status)
+        except Exception as e:
+            print(f"[WARN] notify_request_event falhou (não crítico): {e}")
+            safe_reset_session(db)
+        return result_dict
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
-    return _request_to_dict(row)
+        safe_reset_session(db)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # -------------------------------
@@ -1284,8 +1383,9 @@ def create_request(
     refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False) if current_user else False)
 
     requester_name = current_user.name if current_user else payload.requester
+    row_id = row.id
     log_request_event(
-        db, row.id, current_user.id if current_user else None, "created",
+        db, row_id, current_user.id if current_user else None, "created",
         f"Solicitação criada por {requester_name}",
         tenant_id,
         stage=initial_status,
@@ -1293,16 +1393,11 @@ def create_request(
     )
     log_system_event(
         db, current_user.id if current_user else None, "requests", "request_created",
-        f"Solicitação #{row.id} criada por {requester_name}",
+        f"Solicitação #{row_id} criada por {requester_name}",
         tenant_id,
         is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
-    try:
-        notify_request_event(db, "request_created", row, current_user)
-    except Exception as e:
-        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
-
-    # Eager-load relationships for the response
+    # Eager-load relationships e serializar ANTES de notify
     row = (
         db.query(MaterialRequestORM)
         .options(
@@ -1310,10 +1405,17 @@ def create_request(
             joinedload(MaterialRequestORM.request_values),
             joinedload(MaterialRequestORM.assigned_to),
         )
-        .filter(MaterialRequestORM.id == row.id)
+        .filter(MaterialRequestORM.id == row_id)
         .one()
     )
-    return _request_to_dict(row)
+    db.refresh(row)
+    result_dict = _request_to_dict(row)
+    try:
+        notify_request_event(row_id, tenant_id, "request_created", current_user.id if current_user else None, current_user.name if current_user else "Sistema")
+    except Exception as e:
+        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
+        safe_reset_session(db)
+    return result_dict
 
 
 # -------------------------------
@@ -1420,6 +1522,10 @@ def update_request_status(
     )
     next_step_label = next_step.step_name if next_step else next_status
     approver_name = current_user.name if current_user else "Sistema"
+    row_id_sistema = row.id_sistema
+    row_pdm_id = row.pdm_id
+    row_generated_description = row.generated_description
+    row_technical_attributes = row.technical_attributes
     log_request_event(
         db, row_id, current_user.id if current_user else None, "approved",
         f"Aprovado por {approver_name} — avançou para {next_step_label}",
@@ -1435,40 +1541,36 @@ def update_request_status(
         event_data={"from_stage": from_status, "to_stage": next_status},
         is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
-    try:
-        event_type = "request_completed" if next_status == "completed" else "request_approved"
-        notify_request_event(db, event_type, row, current_user, stage=next_step_label)
-    except Exception as e:
-        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
-
-    # ── Auto-criar material na Base de Dados ao finalizar ─────────────────────
+    # ── Auto-criar material na Base de Dados ao finalizar (ANTES de notify) ────
     FINAL_STATUSES = {"completed", "finalizado"}
     if next_status and next_status.lower() in FINAL_STATUSES:
         try:
             existing = db.query(MaterialDatabaseORM).filter(
-                MaterialDatabaseORM.id_sistema == row.id_sistema
+                MaterialDatabaseORM.id_sistema == row_id_sistema
             ).first()
-            print(f"[DEBUG] next_status={next_status!r} | id_sistema={row.id_sistema!r} | existing={existing}")
-            if not existing and row.id_sistema:
-                pdm = db.query(PDMOrm).filter(PDMOrm.id == row.pdm_id).first()
+            print(f"[DEBUG] next_status={next_status!r} | id_sistema={row_id_sistema!r} | existing={existing}")
+            if not existing and row_id_sistema:
+                pdm = db.query(PDMOrm).filter(PDMOrm.id == row_pdm_id).first()
                 pdm_code = pdm.internal_code if pdm else None
                 pdm_name = pdm.name if pdm else None
-                description = row.generated_description or row.id_sistema
+                description = row_generated_description or row_id_sistema
+                pdm_attrs, admin_kwargs = _split_attrs_for_material(row_technical_attributes)
                 material = MaterialDatabaseORM(
                     tenant_id=tid,
                     id_erp=None,
-                    id_sistema=row.id_sistema,
+                    id_sistema=row_id_sistema,
                     description=description,
                     status="Ativo",
                     pdm_code=pdm_code,
                     pdm_name=pdm_name,
-                    technical_attributes=row.technical_attributes,
+                    technical_attributes=pdm_attrs if pdm_attrs else None,
                     source="mdm_request",
                     erp_status="pendente_erp",
                     standardized_at=datetime.now(timezone.utc),
                     standardized_by=current_user.id if current_user else None,
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
+                    **{k: v for k, v in admin_kwargs.items() if hasattr(MaterialDatabaseORM, k)},
                 )
                 db.add(material)
                 db.commit()
@@ -1478,7 +1580,7 @@ def update_request_status(
                     current_user.id if current_user else None,
                     "material",
                     "auto_created",
-                    f"Material criado automaticamente na Base de Dados para solicitação #{row_id} (id_sistema: {row.id_sistema})",
+                    f"Material criado automaticamente na Base de Dados para solicitação #{row_id} (id_sistema: {row_id_sistema})",
                     tid,
                     is_master=getattr(current_user, "is_master", False) if current_user else False,
                 )
@@ -1486,7 +1588,15 @@ def update_request_status(
             db.rollback()
             print(f"[WARN] Falha ao criar material na Base de Dados para request #{row_id}: {e}")
 
-    return _request_to_dict(row)
+    db.refresh(row)
+    result_dict = _request_to_dict(row)
+    try:
+        event_type = "request_completed" if next_status == "completed" else "request_approved"
+        notify_request_event(row_id, tid, event_type, current_user.id if current_user else None, current_user.name if current_user else "Sistema", stage=next_step_label)
+    except Exception as e:
+        print(f"[WARN] notify_request_event falhou (não crítico): {e}")
+        safe_reset_session(db)
+    return result_dict
 
 
 # -------------------------------
@@ -1533,11 +1643,14 @@ def reject_request(
         event_data={"justification": justification},
         is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
+    db.refresh(row)
+    result_dict = _request_to_dict(row)
     try:
-        notify_request_event(db, "request_rejected", row, current_user, justification=justification)
+        notify_request_event(row_id, tid, "request_rejected", current_user.id if current_user else None, current_user.name if current_user else "Sistema", justification=justification)
     except Exception as e:
         print(f"[WARN] notify_request_event falhou (não crítico): {e}")
-    return _request_to_dict(row)
+        safe_reset_session(db)
+    return result_dict
 
 
 # -------------------------------
@@ -2077,7 +2190,7 @@ def update_pdm(
         )
         db.commit()
     except Exception as e:
-        db.rollback()
+        safe_reset_session(db)
         logging.warning("Falha ao regenerar descrições de materiais: %s", e)
 
     return {
@@ -2115,8 +2228,22 @@ def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
         "min_stock": row.min_stock,
         "max_stock": row.max_stock,
         "valuation_class": row.valuation_class,
+        "valuation_group": row.valuation_group,
         "standard_price": row.standard_price,
         "profit_center": row.profit_center,
+        "sales_org": row.sales_org,
+        "distribution_channel": row.distribution_channel,
+        "sales_unit": row.sales_unit,
+        "order_unit": row.order_unit,
+        "delivery_tolerance": row.delivery_tolerance,
+        "preferred_supplier": row.preferred_supplier,
+        "mrp_controller": row.mrp_controller,
+        "lot_size": row.lot_size,
+        "forecast_profile": row.forecast_profile,
+        "cst_ipi": row.cst_ipi,
+        "cst_pis_cofins": row.cst_pis_cofins,
+        "stock_account": row.stock_account,
+        "price_control": row.price_control,
         "source": row.source,
         "erp_status": row.erp_status,
         "erp_integrated_at": row.erp_integrated_at.isoformat() if row.erp_integrated_at else None,
@@ -2537,7 +2664,10 @@ def standardize_material(
         "id_erp", "description", "status", "pdm_code", "pdm_name",
         "material_group", "unit_of_measure", "ncm", "material_type",
         "cfop", "origin", "purchase_group", "mrp_type", "valuation_class",
-        "profit_center", "source",
+        "valuation_group", "profit_center", "source",
+        "sales_org", "distribution_channel", "sales_unit", "order_unit",
+        "preferred_supplier", "mrp_controller", "forecast_profile",
+        "cst_ipi", "cst_pis_cofins", "stock_account", "price_control",
     }
     for k, v in data.items():
         if hasattr(row, k):

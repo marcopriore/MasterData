@@ -5,12 +5,14 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import TYPE_CHECKING
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
     from orm_models import MaterialRequestORM, UserORM
 
-from orm_models import NotificationORM, UserORM, UserNotificationPrefsORM
+from db import SessionLocal
+from orm_models import MaterialRequestORM, NotificationORM, UserORM, UserNotificationPrefsORM
 
 # ─── Configuração SMTP ───────────────────────────────────────────────────────
 
@@ -182,80 +184,99 @@ def _find_requester_user(db: Session, request: "MaterialRequestORM") -> UserORM 
 
 
 def notify_request_event(
-    db: Session,
+    request_id: int,
+    tenant_id: int,
     event_type: str,
-    request: "MaterialRequestORM",
-    actor_user: "UserORM | None",
-    justification: str | None = None,
+    actor_user_id: int | None = None,
+    actor_name: str = "Sistema",
     stage: str | None = None,
+    justification: str | None = None,
 ) -> None:
     """
     Dispara notificações in-app e e-mail para o solicitante.
+    Usa sessão própria — nunca a do endpoint chamador.
     - Não notifica o próprio actor.
     - Usa preferências do usuário para in-app e e-mail.
     """
-    requester_user = _find_requester_user(db, request)
-    if not requester_user or not requester_user.email:
-        return
-    if actor_user and requester_user.id == actor_user.id:
-        return
+    notify_db = SessionLocal()
+    try:
+        notify_db.execute(text("RESET app.tenant_id"))
+        notify_db.execute(text("RESET app.is_master"))
+        notify_db.execute(text(f"SET app.tenant_id = '{tenant_id}'"))
+        notify_db.execute(text("SET app.is_master = 'false'"))
 
-    actor_name = actor_user.name if actor_user else "Sistema"
-    request_number = f"#{request.id}"
-    description = (request.generated_description or "")[:200]
-    platform_url = os.getenv("PLATFORM_URL", "http://localhost:3000")
+        request = notify_db.query(MaterialRequestORM).filter(
+            MaterialRequestORM.id == request_id
+        ).first()
+        if not request:
+            return
 
-    context = {
-        "request_number": request_number,
-        "description": description,
-        "requester_name": request.requester or "",
-        "actor_name": actor_name,
-        "stage": stage or request.status or "",
-        "justification": justification or "",
-        "platform_url": platform_url,
-    }
+        requester_user = _find_requester_user(notify_db, request)
+        if not requester_user or not requester_user.email:
+            return
+        if actor_user_id is not None and requester_user.id == actor_user_id:
+            return
 
-    titles = {
-        "request_created": f"Solicitação {request_number} criada",
-        "request_assigned": f"Solicitação {request_number} em atendimento",
-        "request_approved": f"Solicitação {request_number} aprovada",
-        "request_rejected": f"Solicitação {request_number} rejeitada",
-        "request_completed": f"Solicitação {request_number} concluída",
-    }
-    messages = {
-        "request_created": f"Solicitação criada por {actor_name}.",
-        "request_assigned": f"{actor_name} iniciou o atendimento.",
-        "request_approved": f"Aprovado por {actor_name} — avançou para {stage or request.status}.",
-        "request_rejected": f"Rejeitado por {actor_name}.",
-        "request_completed": f"Concluída por {actor_name}.",
-    }
-    title = titles.get(event_type, f"Solicitação {request_number}")
-    message = messages.get(event_type, "")
+        request_number = f"#{request.id}"
+        description = (request.generated_description or "")[:200]
+        platform_url = os.getenv("PLATFORM_URL", "http://localhost:3000")
 
-    prefs = _get_or_create_prefs(db, requester_user.id, getattr(requester_user, "tenant_id", None))
-    if prefs is None:
-        return
-    notify_key, email_key = _get_pref_key(event_type)
+        context = {
+            "request_number": request_number,
+            "description": description,
+            "requester_name": request.requester or "",
+            "actor_name": actor_name,
+            "stage": stage or request.status or "",
+            "justification": justification or "",
+            "platform_url": platform_url,
+        }
 
-    safe_tenant_id = _safe_int(request.tenant_id)
-    safe_user_id = _safe_int(requester_user.id)
-    safe_request_id = _safe_int(request.id)
-    if safe_tenant_id is None or safe_user_id is None or safe_request_id is None:
-        return
+        titles = {
+            "request_created": f"Solicitação {request_number} criada",
+            "request_assigned": f"Solicitação {request_number} em atendimento",
+            "request_approved": f"Solicitação {request_number} aprovada",
+            "request_rejected": f"Solicitação {request_number} rejeitada",
+            "request_completed": f"Solicitação {request_number} concluída",
+        }
+        messages = {
+            "request_created": f"Solicitação criada por {actor_name}.",
+            "request_assigned": f"{actor_name} iniciou o atendimento.",
+            "request_approved": f"Aprovado por {actor_name} — avançou para {stage or request.status}.",
+            "request_rejected": f"Rejeitado por {actor_name}.",
+            "request_completed": f"Concluída por {actor_name}.",
+        }
+        title = titles.get(event_type, f"Solicitação {request_number}")
+        message = messages.get(event_type, "")
 
-    if getattr(prefs, notify_key, True):
-        notification = NotificationORM(
-            tenant_id=safe_tenant_id,
-            user_id=safe_user_id,
-            request_id=safe_request_id,
-            event_type=event_type,
-            title=title,
-            message=message,
-        )
-        db.add(notification)
+        prefs = _get_or_create_prefs(notify_db, requester_user.id, getattr(requester_user, "tenant_id", None))
+        if prefs is None:
+            return
+        notify_key, email_key = _get_pref_key(event_type)
 
-    if getattr(prefs, email_key, True) and requester_user.email:
-        subject, html_body = get_email_template(event_type, context)
-        send_email(requester_user.email, subject, html_body)
+        safe_tenant_id = _safe_int(request.tenant_id)
+        safe_user_id = _safe_int(requester_user.id)
+        safe_request_id = _safe_int(request.id)
+        if safe_tenant_id is None or safe_user_id is None or safe_request_id is None:
+            return
 
-    db.commit()
+        if getattr(prefs, notify_key, True):
+            notification = NotificationORM(
+                tenant_id=safe_tenant_id,
+                user_id=safe_user_id,
+                request_id=safe_request_id,
+                event_type=event_type,
+                title=title,
+                message=message,
+            )
+            notify_db.add(notification)
+
+        if getattr(prefs, email_key, True) and requester_user.email:
+            subject, html_body = get_email_template(event_type, context)
+            send_email(requester_user.email, subject, html_body)
+
+        notify_db.commit()
+    except Exception:
+        notify_db.rollback()
+        raise
+    finally:
+        notify_db.close()

@@ -34,6 +34,12 @@ def get_db_for_tenant(
     """Cria sessão de banco com tenant_id configurado para RLS."""
     db = SessionLocal()
     try:
+        # Reset defensivo antes de configurar o tenant
+        try:
+            db.execute(text("RESET app.tenant_id"))
+            db.execute(text("RESET app.is_master"))
+        except Exception:
+            pass
         set_tenant_in_session(db, tenant_id, is_master)
         yield db
     except Exception:

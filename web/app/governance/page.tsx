@@ -986,16 +986,16 @@ export default function GovernancePage() {
                                             {isDePara ? (
                                               <>
                                                 <span className="max-w-[100px] truncate text-gray-400 line-through dark:text-muted-foreground">
-                                                  {String(val.de).length > 40 ? `${String(val.de).slice(0, 40)}...` : val.de}
+                                                  {formatAttrValue(val.de).length > 40 ? `${formatAttrValue(val.de).slice(0, 40)}...` : formatAttrValue(val.de)}
                                                 </span>
                                                 <span className="shrink-0 text-gray-400 dark:text-muted-foreground">→</span>
                                                 <span className="max-w-[120px] truncate text-gray-800 dark:text-foreground">
-                                                  {String(val.para).length > 40 ? `${String(val.para).slice(0, 40)}...` : val.para}
+                                                  {formatAttrValue(val.para).length > 40 ? `${formatAttrValue(val.para).slice(0, 40)}...` : formatAttrValue(val.para)}
                                                 </span>
                                               </>
                                             ) : (
                                               <span className="text-slate-600 dark:text-muted-foreground">
-                                                {String(val).length > 40 ? `${String(val).slice(0, 40)}...` : val}
+                                                {formatAttrValue(val).length > 40 ? `${formatAttrValue(val).slice(0, 40)}...` : formatAttrValue(val)}
                                               </span>
                                             )}
                                           </div>

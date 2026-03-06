@@ -343,8 +343,22 @@ class MaterialStandardizeBody(BaseModel):
     min_stock: Optional[float] = None
     max_stock: Optional[float] = None
     valuation_class: Optional[str] = None
+    valuation_group: Optional[str] = None
     standard_price: Optional[float] = None
     profit_center: Optional[str] = None
+    sales_org: Optional[str] = None
+    distribution_channel: Optional[str] = None
+    sales_unit: Optional[str] = None
+    order_unit: Optional[str] = None
+    delivery_tolerance: Optional[int] = None
+    preferred_supplier: Optional[str] = None
+    mrp_controller: Optional[str] = None
+    lot_size: Optional[float] = None
+    forecast_profile: Optional[str] = None
+    cst_ipi: Optional[str] = None
+    cst_pis_cofins: Optional[str] = None
+    stock_account: Optional[str] = None
+    price_control: Optional[str] = None
     source: Optional[str] = None
 
 
