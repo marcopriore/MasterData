@@ -27,8 +27,11 @@ Auth
   POST   /admin/auth/login             Credential check → user + role payload
 """
 
+import os
 import secrets
 from datetime import datetime, timezone
+
+LOGIN_RATE_LIMIT = os.getenv("LOGIN_RATE_LIMIT", "60/minute")
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile, status
@@ -721,7 +724,7 @@ def delete_user(
     summary="Autenticação por e-mail e senha",
     response_description="Dados do usuário autenticado com perfil e permissões",
 )
-@limiter.limit("10/minute")
+@limiter.limit(LOGIN_RATE_LIMIT)
 def login(
     request: Request,
     payload: LoginRequest,

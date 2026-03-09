@@ -73,7 +73,26 @@ export async function apiPatch(path: string, body: unknown, token: string) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body ?? {}),
   })
-  return parseJson(res)
+  const data = await parseJson(res)
+  if (!res.ok) throw new Error(`API PATCH ${path} failed (${res.status}): ${JSON.stringify(data)}`)
+  return data
+}
+
+/** PATCH sem lançar — retorna { res, data } para checagem de status. */
+export async function apiPatchRaw(path: string, body: unknown, token: string) {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body ?? {}),
+  })
+  const text = await res.text()
+  let data: unknown
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = text
+  }
+  return { res, data }
 }
 
 export async function apiDelete(path: string, token: string) {

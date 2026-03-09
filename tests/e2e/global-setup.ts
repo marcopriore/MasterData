@@ -79,6 +79,19 @@ export default async function globalSetup() {
   }
   console.log(`[setup] Role operador: ${operatorRole.name} (id: ${operatorRole.id})`)
 
+  const workflowRoles = [
+    { key: 'compras', name: 'COMPRAS' },
+    { key: 'mrp', name: 'MRP' },
+    { key: 'fiscal', name: 'FISCAL' },
+    { key: 'contabilidade', name: 'CONTABILIDADE' },
+  ] as const
+  const roleMap: Record<string, { id: number; name: string }> = {}
+  for (const wr of workflowRoles) {
+    const r = roles.find((x) => (x.name || '').toUpperCase() === wr.name)
+    if (r) roleMap[wr.key] = r
+    else console.log(`[setup] Role ${wr.name} não encontrado, ignorando`)
+  }
+
   // 5. Criar operador usando token do admin
   const operatorEmail = `operador.e2e.${RUN_ID}@test.com`
   const operatorPassword = 'Senha@123456'
@@ -133,8 +146,28 @@ export default async function globalSetup() {
     console.log(`[setup] Operador criado: ${operatorUserId}`)
   }
 
+  const extraUsers: Record<string, { userId: number; email: string; roleId: number }> = {}
+  for (const wr of workflowRoles) {
+    const role = roleMap[wr.key]
+    if (!role) continue
+    const email = `${wr.key}.e2e.${RUN_ID}@test.com`
+    const name = wr.key === 'compras' ? 'Compras E2E' : wr.key === 'mrp' ? 'MRP E2E' : wr.key === 'fiscal' ? 'Fiscal E2E' : 'Contabilidade E2E'
+    const res = await post(
+      `${API_URL}/admin/users`,
+      { name, email, password: operatorPassword, role_id: role.id },
+      adminToken
+    )
+    const data = res.data as { id?: number }
+    if (data?.id) {
+      extraUsers[wr.key] = { userId: data.id, email, roleId: role.id }
+      console.log(`[setup] Usuário ${wr.key} criado: ${data.id}`)
+    } else {
+      console.log(`[setup] Falha ao criar ${wr.key}: ${JSON.stringify(res.data)}`)
+    }
+  }
+
   // 6. Salvar estado para os testes
-  const state = {
+  const state: Record<string, unknown> = {
     RUN_ID,
     tenantId,
     masterToken,
@@ -145,6 +178,30 @@ export default async function globalSetup() {
     operatorPassword,
     operatorUserId,
     operatorRoleId: operatorRole.id,
+  }
+  if (extraUsers.compras) {
+    state.comprasUserId = extraUsers.compras.userId
+    state.comprasEmail = extraUsers.compras.email
+    state.comprasPassword = operatorPassword
+    state.comprasRoleId = extraUsers.compras.roleId
+  }
+  if (extraUsers.mrp) {
+    state.mrpUserId = extraUsers.mrp.userId
+    state.mrpEmail = extraUsers.mrp.email
+    state.mrpPassword = operatorPassword
+    state.mrpRoleId = extraUsers.mrp.roleId
+  }
+  if (extraUsers.fiscal) {
+    state.fiscalUserId = extraUsers.fiscal.userId
+    state.fiscalEmail = extraUsers.fiscal.email
+    state.fiscalPassword = operatorPassword
+    state.fiscalRoleId = extraUsers.fiscal.roleId
+  }
+  if (extraUsers.contabilidade) {
+    state.contabilidadeUserId = extraUsers.contabilidade.userId
+    state.contabilidadeEmail = extraUsers.contabilidade.email
+    state.contabilidadePassword = operatorPassword
+    state.contabilidadeRoleId = extraUsers.contabilidade.roleId
   }
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
   console.log(`[setup] Estado salvo em ${STATE_FILE}`)

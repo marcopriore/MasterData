@@ -1667,7 +1667,7 @@ def create_request(
         is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
     # Eager-load relationships e serializar ANTES de notify
-    row = (
+    row_reload = (
         db.query(MaterialRequestORM)
         .options(
             joinedload(MaterialRequestORM.pdm),
@@ -1675,8 +1675,14 @@ def create_request(
             joinedload(MaterialRequestORM.assigned_to),
         )
         .filter(MaterialRequestORM.id == row_id)
-        .one()
+        .one_or_none()
     )
+    if row_reload is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Solicitação criada mas não foi possível carregar os dados para resposta. Verifique se o workflow está configurado para o tenant (RLS/onboarding).",
+        )
+    row = row_reload
     db.refresh(row)
     result_dict = _request_to_dict(row)
     try:

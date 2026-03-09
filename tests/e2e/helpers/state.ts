@@ -20,6 +20,23 @@ export interface TestState {
   /** Adicionados pela suite Request */
   requestId?: number
   requestIdApi?: number
+  /** Usuários por role do workflow */
+  comprasUserId?: number
+  comprasEmail?: string
+  comprasPassword?: string
+  comprasRoleId?: number
+  mrpUserId?: number
+  mrpEmail?: string
+  mrpPassword?: string
+  mrpRoleId?: number
+  fiscalUserId?: number
+  fiscalEmail?: string
+  fiscalPassword?: string
+  fiscalRoleId?: number
+  contabilidadeUserId?: number
+  contabilidadeEmail?: string
+  contabilidadePassword?: string
+  contabilidadeRoleId?: number
 }
 
 export function getState(): TestState {
