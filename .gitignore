@@ -29,3 +29,9 @@ web/.git
 # Sistema
 .DS_Store
 Thumbs.db
+
+# E2E
+tests/e2e/test-state.json
+tests/e2e/report/
+tests/e2e/test-results/
+.env.test

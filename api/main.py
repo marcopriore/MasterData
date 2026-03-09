@@ -47,6 +47,7 @@ from bulk_import_pdm import (
 from notifications import notify_request_event
 from security import hash_password
 from slowapi.errors import RateLimitExceeded
+from db import SessionLocalAdmin
 
 from limiter import limiter
 
@@ -1086,6 +1087,14 @@ def create_pdm(
 ):
     attributes_data = [a.model_dump() for a in payload.attributes]
     tenant_id = current_user.tenant_id if current_user else -1
+
+    # Verificar código duplicado dentro do mesmo tenant
+    existing = db.query(PDMOrm).filter(
+        PDMOrm.internal_code == payload.internal_code,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Código PDM já existe para este tenant")
+
     row = PDMOrm(
         tenant_id=tenant_id,
         name=payload.name,
@@ -1222,14 +1231,20 @@ def _split_attrs_for_material(all_attrs: dict) -> tuple[dict, dict]:
 def _generate_id_sistema(db: Session) -> str:
     """
     Gera o próximo id_sistema sequencial no formato MDM-000001.
-    Busca o maior número já usado em material_requests para garantir unicidade.
+    Busca o maior número já usado em material_requests (global, sem RLS) para garantir unicidade.
     """
-    last = (
-        db.query(MaterialRequestORM.id_sistema)
-        .filter(MaterialRequestORM.id_sistema.isnot(None))
-        .order_by(MaterialRequestORM.id_sistema.desc())
-        .first()
-    )
+    raw_db = SessionLocalAdmin() if SessionLocalAdmin else None
+    try:
+        sess = raw_db if raw_db else db
+        last = (
+            sess.query(MaterialRequestORM.id_sistema)
+            .filter(MaterialRequestORM.id_sistema.isnot(None))
+            .order_by(MaterialRequestORM.id_sistema.desc())
+            .first()
+        )
+    finally:
+        if raw_db:
+            raw_db.close()
     if last and last[0]:
         try:
             last_num = int(last[0].replace("MDM-", ""))
@@ -2443,6 +2458,7 @@ def update_pdm(
             tenant_id=tid,
         )
         db.commit()
+        refresh_with_rls(db, row, tid, False)
     except Exception as e:
         safe_reset_session(db)
         logging.warning("Falha ao regenerar descrições de materiais: %s", e)

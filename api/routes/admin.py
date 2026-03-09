@@ -521,7 +521,7 @@ def create_user(
     )
     db.add(row)
     db.commit()
-    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False))
+    refresh_with_rls(db, row, tenant_id, getattr(current_user, "is_master", False) if current_user else False)
     creator = current_user.name if current_user else "Sistema"
     log_system_event(
         db, current_user.id if current_user else None, "users", "user_created",
@@ -529,6 +529,8 @@ def create_user(
         tenant_id,
         is_master=getattr(current_user, "is_master", False) if current_user else False,
     )
+    # Garantir contexto RLS para _load_user (log_system_event faz commit)
+    set_tenant_in_session(db, tenant_id, is_master=getattr(current_user, "is_master", False) if current_user else False)
     return _user_to_dict(_load_user(row.id, db))
 
 
