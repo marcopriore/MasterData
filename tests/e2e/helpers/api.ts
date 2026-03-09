@@ -1,4 +1,4 @@
-const API_URL = process.env.TEST_API_URL || 'http://localhost:8000'
+export const API_URL = process.env.TEST_API_URL || 'http://localhost:8000'
 
 let masterToken: string | null = null
 
@@ -64,7 +64,11 @@ export async function apiPut(path: string, body: unknown, token: string) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   })
-  return res.json()
+  const data = await parseJson(res)
+  if (!res.ok) {
+    throw new Error(`API PUT ${path} failed (${res.status}): ${JSON.stringify(data)}`)
+  }
+  return data
 }
 
 export async function apiPatch(path: string, body: unknown, token: string) {

@@ -72,7 +72,7 @@
             - generic [ref=e75]: Busca
             - generic [ref=e76]:
               - img [ref=e77]
-              - textbox "Buscar por código ou descrição..." [ref=e80]: E2A2664
+              - textbox "Buscar por código ou descrição..." [ref=e80]: MDM-000022
           - generic [ref=e81]:
             - generic [ref=e82]: Status
             - combobox [ref=e83]:
@@ -84,9 +84,9 @@
             - generic [ref=e85]: PDM
             - combobox [ref=e86]:
               - option "Todos" [selected]
-              - option "E2E7526"
-              - option "E2A2664"
-              - option "E2I2664"
+              - option "E2E2654"
+              - option "E2A5489"
+              - option "E2I5489"
           - generic [ref=e87]:
             - generic [ref=e88]: Status ERP
             - combobox [ref=e89]:
