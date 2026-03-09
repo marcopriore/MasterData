@@ -222,6 +222,20 @@ def get_user_with_manage_users(
     return current_user
 
 
+def get_user_with_manage_value_dictionary(
+    current_user: UserORM = Depends(get_current_user),
+) -> UserORM:
+    """Require authenticated user with can_manage_value_dictionary permission."""
+    from fastapi import HTTPException
+    role = (current_user.role.name or "").upper() if current_user.role else ""
+    if role == "MASTER":
+        return current_user
+    perms = current_user.role.permissions if current_user.role else {}
+    if not perms.get("can_manage_value_dictionary", False):
+        raise HTTPException(status_code=403, detail="Permissão can_manage_value_dictionary necessária")
+    return current_user
+
+
 def get_user_with_view_logs(
     current_user: UserORM = Depends(get_current_user),
 ) -> UserORM:

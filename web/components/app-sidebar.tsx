@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight,
   Home, FileText, ShieldCheck, Database, LayoutGrid,
   Settings, GitBranch, Sun, Moon,
-  UserCircle, Users, ShieldHalf, BookOpen, LogOut, ScrollText, Building2,
+  UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -40,6 +40,7 @@ const CONFIG_ADMIN = [
   { href: '/admin/users',  label: 'Gestão de Usuários',     icon: Users      },
   { href: '/admin/roles',  label: 'Perfis de Acesso',       icon: ShieldHalf },
   { href: '/admin/fields', label: 'Dicionário de Campos',   icon: BookOpen   },
+  { href: '/admin/value-dictionary', label: 'Dicionário de Valores', icon: BookMarked },
   { href: '/admin/logs',   label: 'Log do Sistema',         icon: ScrollText },
 ] as const
 
@@ -89,6 +90,7 @@ export function AppSidebar() {
     pathname.startsWith('/admin/users') ||
     pathname.startsWith('/admin/roles') ||
     pathname.startsWith('/admin/fields') ||
+    pathname.startsWith('/admin/value-dictionary') ||
     pathname.startsWith('/admin/logs') ||
     pathname.startsWith('/admin/tenants')
   const [configExpanded, setConfigExpanded] = useState(isInsideConfig)
@@ -188,6 +190,7 @@ export function AppSidebar() {
                     if (item.href === '/admin/users') return can('can_manage_users')
                     if (item.href === '/admin/roles') return can('can_manage_roles')
                     if (item.href === '/admin/fields') return can('can_manage_fields')
+                    if (item.href === '/admin/value-dictionary') return can('can_manage_value_dictionary')
                     if (item.href === '/admin/logs') return can('can_view_logs')
                     return false
                   }),

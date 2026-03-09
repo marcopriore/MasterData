@@ -39,6 +39,7 @@ export type RolePermissions = {
   can_manage_fields: boolean
   can_view_database: boolean
   can_manage_roles: boolean
+  can_manage_value_dictionary: boolean
   can_standardize: boolean
   can_bulk_import: boolean
 }

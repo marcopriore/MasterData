@@ -367,6 +367,18 @@ class ErpIntegrateBody(BaseModel):
     material_ids: list[int] = Field(default_factory=list)
 
 
+class ValueDictionaryUpdate(BaseModel):
+    """Body for PUT /api/value-dictionary/{id}."""
+    value: Optional[str] = None
+    abbreviation: Optional[str] = None
+
+
+class ValueDictionaryMergeBody(BaseModel):
+    """Body for POST /api/value-dictionary/merge."""
+    keep_id: int
+    discard_id: int
+
+
 class RolePermissions(BaseModel):
     # Solicitações
     can_approve: bool = False
@@ -387,6 +399,7 @@ class RolePermissions(BaseModel):
     can_manage_fields: bool = False
     can_view_database: bool = True
     can_manage_roles: bool = False
+    can_manage_value_dictionary: bool = False
     can_standardize: bool = False
     can_bulk_import: bool = False
 

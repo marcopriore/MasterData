@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime, Float, UniqueConstraint
+from sqlalchemy import String, Text, Integer, Boolean, ForeignKey, DateTime, Float, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSON, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
@@ -301,6 +301,26 @@ class PDMOrm(Base):
 
     material_requests: Mapped[list["MaterialRequestORM"]] = relationship(
         "MaterialRequestORM", back_populates="pdm"
+    )
+
+
+class ValueDictionaryORM(Base):
+    """Dicionário de valores centralizado para LOVs dos PDMs."""
+    __tablename__ = "value_dictionary"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    value: Mapped[str] = mapped_column(String(200), nullable=False)
+    abbreviation: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "value", name="uq_value_dict_tenant_value"),
     )
 
 

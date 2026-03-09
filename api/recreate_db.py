@@ -48,6 +48,7 @@ def setup_rls(eng):
         "notifications",
         "user_notification_prefs",
         "field_dictionary",
+        "value_dictionary",
     ]
     with eng.connect() as conn:
         # Criar usuário de aplicação sem BYPASSRLS

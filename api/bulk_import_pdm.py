@@ -191,6 +191,15 @@ def _safe_int(v: Any) -> int | None:
         return None
 
 
+def _get_sheet_ci(wb, name: str):
+    """Busca aba por nome case-insensitive."""
+    target = name.strip().lower()
+    for sheet_name in wb.sheetnames:
+        if sheet_name.strip().lower() == target:
+            return wb[sheet_name]
+    return None
+
+
 def parse_and_validate_pdm_excel(file_content: bytes, db) -> dict:
     """
     Parse and validate PDM Excel file. Returns result for both sheets.
@@ -205,11 +214,11 @@ def parse_and_validate_pdm_excel(file_content: bytes, db) -> dict:
     result: dict[str, Any] = {"dry_run": True, "pdm": None, "attributes": None}
 
     # ─── Aba PDM ─────────────────────────────────────────────────────────
-    if "PDM" not in wb.sheetnames:
+    ws_pdm = _get_sheet_ci(wb, "PDM")
+    if ws_pdm is None:
         result["_error"] = "Aba 'PDM' não encontrada no arquivo."
         return result
 
-    ws_pdm = wb["PDM"]
     header_row = list(ws_pdm.iter_rows(min_row=1, max_row=1, values_only=True))
     if not header_row:
         result["_error"] = "Cabeçalho da aba PDM não encontrado."
@@ -307,11 +316,11 @@ def parse_and_validate_pdm_excel(file_content: bytes, db) -> dict:
     }
 
     # ─── Aba Atributos ───────────────────────────────────────────────────
-    if "Atributos" not in wb.sheetnames:
+    ws_attr = _get_sheet_ci(wb, "Atributos")
+    if ws_attr is None:
         result["_error"] = "Aba 'Atributos' não encontrada no arquivo."
         return result
 
-    ws_attr = wb["Atributos"]
     header_row_attr = list(ws_attr.iter_rows(min_row=1, max_row=1, values_only=True))
     if not header_row_attr:
         result["_error"] = "Cabeçalho da aba Atributos não encontrado."

@@ -13,7 +13,7 @@ from fastapi import Body, Depends, File, HTTPException, Query, Request, UploadFi
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime, timezone, timedelta
 
-from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_db_raw, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm, refresh_with_rls
+from deps import get_admin_user, get_current_user, get_current_user_optional, get_db, get_db_raw, get_user_with_standardize, get_user_with_bulk_import, get_user_with_view_database, get_user_with_edit_pdm, get_user_with_manage_value_dictionary, refresh_with_rls, set_tenant_in_session
 from orm_models import (
     MeasurementUnitORM,
     ProductORM,
@@ -27,6 +27,7 @@ from orm_models import (
     RoleORM,
     UserORM,
     FieldDictionaryORM,
+    ValueDictionaryORM,
     NotificationORM,
     UserNotificationPrefsORM,
 )
@@ -148,6 +149,7 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": True,
             "can_view_database": True,
             "can_manage_roles": True,
+            "can_manage_value_dictionary": True,
             "can_standardize": True,
             "can_bulk_import": True,
         },
@@ -168,6 +170,7 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_manage_value_dictionary": False,
             "can_standardize": False,
             "can_bulk_import": False,
         },
@@ -188,6 +191,7 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_manage_value_dictionary": False,
             "can_standardize": False,
             "can_bulk_import": False,
         },
@@ -208,6 +212,7 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_manage_value_dictionary": False,
             "can_standardize": False,
             "can_bulk_import": False,
         },
@@ -228,6 +233,7 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": True,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_manage_value_dictionary": True,
             "can_standardize": True,
             "can_bulk_import": True,
         },
@@ -248,6 +254,7 @@ _DEFAULT_ROLES: list[dict] = [
             "can_manage_fields": False,
             "can_view_database": True,
             "can_manage_roles": False,
+            "can_manage_value_dictionary": False,
             "can_standardize": False,
             "can_bulk_import": False,
         },
@@ -366,6 +373,8 @@ from models import (
     FieldDictionaryUpdate,
     MaterialStandardizeBody,
     ErpIntegrateBody,
+    ValueDictionaryUpdate,
+    ValueDictionaryMergeBody,
 )
 
 from routes.admin import router as admin_router
@@ -580,6 +589,250 @@ def delete_field(
 
 
 # -------------------------------
+# VALUE DICTIONARY (Dicionário de Valores Centralizado)
+# -------------------------------
+
+def _value_dict_pdm_usage(db: Session, tenant_id: int, value: str) -> list[str]:
+    """Retorna lista de internal_code dos PDMs que usam este valor em allowedValues."""
+    if not value or not tenant_id:
+        return []
+    pdms = db.query(PDMOrm).filter(PDMOrm.tenant_id == tenant_id).all()
+    result: list[str] = []
+    val_upper = value.strip().upper()
+    for p in pdms:
+        for attr in (p.attributes or []):
+            allowed = attr.get("allowedValues") or attr.get("options") or []
+            for opt in allowed:
+                v = opt.get("value", opt) if isinstance(opt, dict) else str(opt)
+                if str(v).strip().upper() == val_upper:
+                    result.append(p.internal_code or "")
+                    break
+            else:
+                continue
+            break
+    return [c for c in result if c]
+
+
+def _propagate_value_update(
+    db: Session, tenant_id: int, old_value: str, new_value: str, new_abbr: str | None
+) -> set[str]:
+    """
+    Propaga alteração de valor/abbreviation em PDMs, materiais e solicitações.
+    Retorna set de pdm_codes afetados (para regenerar descrições).
+    """
+    affected_pdm_codes: set[str] = set()
+    old_upper = old_value.strip().upper()
+    pdms = db.query(PDMOrm).filter(PDMOrm.tenant_id == tenant_id).all()
+    for p in pdms:
+        attrs = p.attributes or []
+        changed = False
+        for attr in attrs:
+            allowed = attr.get("allowedValues") or []
+            for opt in allowed:
+                if not isinstance(opt, dict):
+                    continue
+                v = str(opt.get("value", "") or "").strip().upper()
+                if v == old_upper:
+                    opt["value"] = new_value
+                    if new_abbr is not None:
+                        opt["abbreviation"] = new_abbr
+                    changed = True
+            if changed:
+                affected_pdm_codes.add(p.internal_code or "")
+        if changed:
+            p.attributes = attrs
+
+    # Materiais: atualizar technical_attributes
+    materials = (
+        db.query(MaterialDatabaseORM)
+        .filter(MaterialDatabaseORM.tenant_id == tenant_id)
+        .all()
+    )
+    for m in materials:
+        ta = m.technical_attributes or {}
+        for k, v in list(ta.items()):
+            if isinstance(v, dict):
+                vv = str((v.get("value") or v.get("unit") or "")).strip().upper()
+            else:
+                vv = str(v or "").strip().upper()
+            if vv == old_upper:
+                if isinstance(v, dict):
+                    ta[k] = {"value": new_value, "unit": v.get("unit", "")}
+                else:
+                    ta[k] = new_value
+                affected_pdm_codes.add(m.pdm_code or "")
+        m.technical_attributes = ta
+
+    # Solicitações em andamento
+    status_not_final = {"finalizado", "rejeitado"}
+    requests_q = (
+        db.query(MaterialRequestORM)
+        .filter(
+            MaterialRequestORM.tenant_id == tenant_id,
+            ~MaterialRequestORM.status.in_(status_not_final),
+        )
+    )
+    for req in requests_q.all():
+        ta = req.technical_attributes or {}
+        for k, v in list(ta.items()):
+            if isinstance(v, dict):
+                vv = str((v.get("value") or v.get("unit") or "")).strip().upper()
+            else:
+                vv = str(v or "").strip().upper()
+            if vv == old_upper:
+                if isinstance(v, dict):
+                    ta[k] = {"value": new_value, "unit": v.get("unit", "")}
+                else:
+                    ta[k] = new_value
+        req.technical_attributes = ta
+
+    return affected_pdm_codes
+
+
+@app.get("/api/value-dictionary")
+def list_value_dictionary(
+    search: str | None = Query(None, description="Filtro por valor"),
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_manage_value_dictionary),
+):
+    tid = current_user.tenant_id
+    set_tenant_in_session(db, tid, getattr(current_user, "is_master", False))
+    q = db.query(ValueDictionaryORM).filter(ValueDictionaryORM.tenant_id == tid)
+    if search and search.strip():
+        s = f"%{search.strip().lower()}%"
+        q = q.filter(func.lower(ValueDictionaryORM.value).like(s))
+    rows = q.order_by(ValueDictionaryORM.value).all()
+    return [
+        {
+            "id": r.id,
+            "value": r.value,
+            "abbreviation": r.abbreviation or "",
+            "pdm_usage": _value_dict_pdm_usage(db, tid, r.value),
+        }
+        for r in rows
+    ]
+
+
+@app.put("/api/value-dictionary/{entry_id}")
+def update_value_dictionary_entry(
+    entry_id: int,
+    payload: ValueDictionaryUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_manage_value_dictionary),
+):
+    set_tenant_in_session(db, current_user.tenant_id, getattr(current_user, "is_master", False))
+    row = db.query(ValueDictionaryORM).filter(ValueDictionaryORM.id == entry_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Entrada não encontrada")
+    if row.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Entrada não encontrada")
+    old_value = row.value
+    new_value = payload.value if payload.value is not None else old_value
+    new_abbr = payload.abbreviation
+    if new_value is not None and new_value.strip():
+        row.value = normalize_str(new_value) or new_value.strip()
+    if new_abbr is not None:
+        row.abbreviation = normalize_str(new_abbr) or new_abbr
+    row.updated_at = datetime.now(timezone.utc)
+    affected = _propagate_value_update(db, current_user.tenant_id, old_value, new_value, row.abbreviation)
+    for pdm_code in affected:
+        p = db.query(PDMOrm).filter(
+            PDMOrm.tenant_id == current_user.tenant_id,
+            PDMOrm.internal_code == pdm_code,
+        ).first()
+        if p:
+            _regenerate_material_descriptions(db, pdm_code, {"name": p.name, "attributes": p.attributes or []}, current_user.tenant_id)
+    db.commit()
+    refresh_with_rls(db, row, current_user.tenant_id, getattr(current_user, "is_master", False))
+    return {"id": row.id, "value": row.value, "abbreviation": row.abbreviation or ""}
+
+
+@app.post("/api/value-dictionary/merge")
+def merge_value_dictionary_entries(
+    payload: ValueDictionaryMergeBody,
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_manage_value_dictionary),
+):
+    set_tenant_in_session(db, current_user.tenant_id, getattr(current_user, "is_master", False))
+    keep = db.query(ValueDictionaryORM).filter(ValueDictionaryORM.id == payload.keep_id).first()
+    discard = db.query(ValueDictionaryORM).filter(ValueDictionaryORM.id == payload.discard_id).first()
+    if not keep or not discard:
+        raise HTTPException(status_code=404, detail="Uma ou ambas entradas não encontradas")
+    if keep.tenant_id != current_user.tenant_id or discard.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=404, detail="Entrada não encontrada")
+    discard_value = discard.value
+    keep_value = keep.value
+    affected = _propagate_value_update(db, current_user.tenant_id, discard_value, keep_value, keep.abbreviation)
+    for pdm_code in affected:
+        p = db.query(PDMOrm).filter(
+            PDMOrm.tenant_id == current_user.tenant_id,
+            PDMOrm.internal_code == pdm_code,
+        ).first()
+        if p:
+            _regenerate_material_descriptions(db, pdm_code, {"name": p.name, "attributes": p.attributes or []}, current_user.tenant_id)
+    db.delete(discard)
+    db.commit()
+    return {"merged": True, "keep_id": payload.keep_id, "discard_id": payload.discard_id}
+
+
+@app.get("/api/value-dictionary/duplicates")
+def get_value_dictionary_duplicates(
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_manage_value_dictionary),
+):
+    set_tenant_in_session(db, current_user.tenant_id, getattr(current_user, "is_master", False))
+    rows = db.query(ValueDictionaryORM).filter(ValueDictionaryORM.tenant_id == current_user.tenant_id).all()
+    groups: dict[str, list[str]] = {}
+    for r in rows:
+        key = r.value.strip().lower()
+        if key:
+            if key not in groups:
+                groups[key] = []
+            if r.value not in groups[key]:
+                groups[key].append(r.value)
+    result = []
+    for key, values in groups.items():
+        if len(values) > 1:
+            v0 = values[0]
+            canonical = (v0[0].upper() + v0[1:].lower()) if len(v0) > 1 else v0.upper()
+            result.append({"values": values, "suggested_canonical": canonical})
+    return result
+
+
+@app.post("/api/value-dictionary/sync")
+def sync_value_dictionary(
+    db: Session = Depends(get_db),
+    current_user: UserORM = Depends(get_user_with_manage_value_dictionary),
+):
+    set_tenant_in_session(db, current_user.tenant_id, getattr(current_user, "is_master", False))
+    pdms = db.query(PDMOrm).filter(PDMOrm.tenant_id == current_user.tenant_id).all()
+    existing = {
+        (current_user.tenant_id, str(v).strip().lower())
+        for v, in db.query(ValueDictionaryORM.value).filter(
+            ValueDictionaryORM.tenant_id == current_user.tenant_id
+        ).all()
+    }
+    created = 0
+    for p in pdms:
+        for attr in (p.attributes or []):
+            if attr.get("dataType") not in ("lov", "select"):
+                continue
+            allowed = attr.get("allowedValues") or attr.get("options") or []
+            for opt in allowed:
+                val = opt.get("value", opt) if isinstance(opt, dict) else str(opt)
+                s = str(val).strip()
+                if not s:
+                    continue
+                key = (current_user.tenant_id, s.lower())
+                if key not in existing:
+                    db.add(ValueDictionaryORM(tenant_id=current_user.tenant_id, value=s, abbreviation=s))
+                    existing.add(key)
+                    created += 1
+    db.commit()
+    return {"created": created}
+
+
+# -------------------------------
 # LISTAR PDMs
 @app.get("/api/pdm")
 def list_pdms(
@@ -679,6 +932,7 @@ async def import_pdm(
         is_active = ativo_str.lower() in ("sim", "s", "1", "true")
         if op == "C":
             row = PDMOrm(
+                tenant_id=current_user.tenant_id,
                 name=nome or pdm_code,
                 internal_code=pdm_code,
                 is_active=is_active,

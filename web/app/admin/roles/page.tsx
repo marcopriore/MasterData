@@ -40,6 +40,7 @@ type Permissions = {
   can_manage_fields: boolean
   can_view_database: boolean
   can_manage_roles: boolean
+  can_manage_value_dictionary: boolean
 
   // Operações
   can_standardize: boolean
@@ -88,6 +89,7 @@ const PERMISSION_GROUPS: {
       { key: 'can_manage_fields', label: 'Dicionário de Dados',  description: 'Gerir dicionário de campos e metadados' },
       { key: 'can_view_database', label: 'Base de Dados',        description: 'Visualizar base de dados de materiais' },
       { key: 'can_manage_roles',  label: 'Perfil de Acesso',     description: 'Gerir perfis e permissões de acesso' },
+      { key: 'can_manage_value_dictionary', label: 'Dicionário de Valores', description: 'Centralizar e unificar valores de atributos tipo lista' },
     ],
   },
   {
@@ -127,6 +129,7 @@ function emptyPermissions(): Permissions {
     can_manage_fields: false,
     can_view_database: true,
     can_manage_roles: false,
+    can_manage_value_dictionary: false,
     can_standardize: false,
     can_bulk_import: false,
   }
