@@ -1,7 +1,7 @@
 # Page snapshot
 
 ```yaml
-- generic [ref=e1]:
+- generic [active] [ref=e1]:
   - complementary [ref=e2]:
     - generic [ref=e3]:
       - img [ref=e5]
@@ -50,65 +50,129 @@
       - generic [ref=e57]: "1"
   - main [ref=e58]:
     - generic [ref=e59]:
-      - generic [ref=e60]:
-        - generic [ref=e61]:
-          - heading "Base de Dados de Materiais" [level=1] [ref=e62]:
-            - img [ref=e63]
-            - text: Base de Dados de Materiais
-          - paragraph [ref=e67]: Consulte os materiais cadastrados na base
-        - generic [ref=e68]:
-          - button "Exportar Excel" [ref=e69]:
-            - img
-            - text: Exportar Excel
-          - button "Importação em Massa" [ref=e70]:
-            - img
-            - text: Importação em Massa
-          - button "Colunas" [ref=e71]:
-            - img
-            - text: Colunas
-      - generic [ref=e72]:
-        - generic [ref=e73]:
-          - generic [ref=e74]:
-            - generic [ref=e75]: Busca
-            - generic [ref=e76]:
-              - img [ref=e77]
-              - textbox "Buscar por código ou descrição..." [ref=e80]: MDM-000022
-          - generic [ref=e81]:
-            - generic [ref=e82]: Status
-            - combobox [ref=e83]:
-              - option "Todos" [selected]
-              - option "Ativo"
-              - option "Bloqueado"
-              - option "Obsoleto"
-          - generic [ref=e84]:
-            - generic [ref=e85]: PDM
-            - combobox [ref=e86]:
-              - option "Todos" [selected]
-              - option "E2E2654"
-              - option "E2A5489"
-              - option "E2I5489"
-          - generic [ref=e87]:
-            - generic [ref=e88]: Status ERP
-            - combobox [ref=e89]:
-              - 'option "Status ERP: Todos" [selected]'
-              - option "Pendente ERP"
-              - option "Integrado"
-          - generic [ref=e90]:
-            - generic [ref=e91]: Data de
-            - textbox [ref=e92]
-          - generic [ref=e93]:
-            - generic [ref=e94]: Data até
-            - textbox [ref=e95]
-          - button "Buscar" [active] [ref=e96]:
-            - img
-            - text: Buscar
-          - button "Limpar" [ref=e97]:
-            - img
-            - text: Limpar
-        - paragraph [ref=e98]: 0 materiais encontrados
-        - paragraph [ref=e100]: Nenhum material encontrado.
       - region "Notifications alt+T"
-  - button "Open Next.js Dev Tools" [ref=e106] [cursor=pointer]:
-    - img [ref=e107]
-  - alert [ref=e110]
+      - link "Voltar" [ref=e60] [cursor=pointer]:
+        - /url: /database
+        - button "Voltar" [ref=e61]:
+          - img
+          - text: Voltar
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - heading "MDM-000017" [level=1] [ref=e64]
+          - paragraph [ref=e65]: PDM EDITADO E2E 1773098004080 OPA 100
+          - generic [ref=e66]:
+            - generic [ref=e67]: Ativo
+            - generic [ref=e68]: Pendente ERP
+            - generic [ref=e69]: "Última padronização: 09/03/2026"
+        - generic [ref=e70]:
+          - button "Integrar com ERP" [ref=e72]
+          - button "Iniciar Padronização" [ref=e73]
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - heading "Dados Básicos" [level=3] [ref=e76]
+          - generic [ref=e77]:
+            - generic [ref=e78]:
+              - generic [ref=e79]: Status
+              - generic [ref=e80]: Ativo
+            - generic [ref=e81]:
+              - generic [ref=e82]: ID Sistema
+              - generic [ref=e83]: MDM-000017
+            - generic [ref=e84]:
+              - generic [ref=e85]: Código ERP
+              - generic [ref=e86]: —
+            - generic [ref=e87]:
+              - generic [ref=e88]: Grupo de Mercadorias
+              - generic [ref=e89]: —
+            - generic [ref=e90]:
+              - generic [ref=e91]: Unidade de Medida
+              - generic [ref=e92]: —
+            - generic [ref=e93]:
+              - generic [ref=e94]: Tipo de Material
+              - generic [ref=e95]: —
+            - generic [ref=e96]:
+              - generic [ref=e97]: Peso Bruto
+              - generic [ref=e98]: —
+            - generic [ref=e99]:
+              - generic [ref=e100]: Peso Líquido
+              - generic [ref=e101]: —
+        - generic [ref=e102]:
+          - heading "Atributos Técnicos" [level=3] [ref=e103]
+          - generic [ref=e104]:
+            - generic [ref=e105]:
+              - paragraph [ref=e106]: Descrição Curta
+              - paragraph [ref=e107]: PDM EDITADO E2E 1773098004080 OPA 100
+              - generic [ref=e109]: 37/40
+            - generic [ref=e110]:
+              - generic [ref=e111]:
+                - paragraph [ref=e112]: tipo 1773098004080
+                - paragraph [ref=e113]: OPÇÃO A
+              - generic [ref=e114]:
+                - paragraph [ref=e115]: tamanho 1773098004080
+                - paragraph [ref=e116]: "100"
+        - generic [ref=e117]:
+          - heading "Classificação Fiscal" [level=3] [ref=e118]
+          - generic [ref=e119]:
+            - generic [ref=e120]:
+              - generic [ref=e121]: NCM
+              - generic [ref=e122]: —
+            - generic [ref=e123]:
+              - generic [ref=e124]: CFOP
+              - generic [ref=e125]: —
+            - generic [ref=e126]:
+              - generic [ref=e127]: Origem do Material
+              - generic [ref=e128]: —
+        - generic [ref=e129]:
+          - heading "Compras" [level=3] [ref=e130]
+          - generic [ref=e131]:
+            - generic [ref=e132]:
+              - generic [ref=e133]: Grupo de Compras
+              - generic [ref=e134]: —
+            - generic [ref=e135]:
+              - generic [ref=e136]: Prazo de Entrega (dias)
+              - generic [ref=e137]: —
+            - generic [ref=e138]:
+              - generic [ref=e139]: Unidade de Pedido
+              - generic [ref=e140]: —
+        - generic [ref=e141]:
+          - heading "MRP" [level=3] [ref=e142]
+          - generic [ref=e143]:
+            - generic [ref=e144]:
+              - generic [ref=e145]: Tipo MRP
+              - generic [ref=e146]: —
+            - generic [ref=e147]:
+              - generic [ref=e148]: Estoque Mínimo
+              - generic [ref=e149]: —
+            - generic [ref=e150]:
+              - generic [ref=e151]: Estoque Máximo
+              - generic [ref=e152]: —
+        - generic [ref=e153]:
+          - heading "Contabilidade" [level=3] [ref=e154]
+          - generic [ref=e155]:
+            - generic [ref=e156]:
+              - generic [ref=e157]: Classe de Valoração
+              - generic [ref=e158]: —
+            - generic [ref=e159]:
+              - generic [ref=e160]: Preço Padrão
+              - generic [ref=e161]: —
+            - generic [ref=e162]:
+              - generic [ref=e163]: Centro de Lucro
+              - generic [ref=e164]: —
+        - generic [ref=e165]:
+          - heading "Metadados" [level=3] [ref=e166]
+          - generic [ref=e167]:
+            - generic [ref=e168]:
+              - generic [ref=e169]: Código PDM
+              - generic [ref=e170]: E2A4080
+            - generic [ref=e171]:
+              - generic [ref=e172]: Nome PDM
+              - generic [ref=e173]: PDM EDITADO E2E 1773098004080
+            - generic [ref=e174]:
+              - generic [ref=e175]: Data de Criação
+              - generic [ref=e176]: 09/03/2026, 23:15
+            - generic [ref=e177]:
+              - generic [ref=e178]: Data de Atualização
+              - generic [ref=e179]: 09/03/2026, 23:15
+  - button "Open Next.js Dev Tools" [ref=e185] [cursor=pointer]:
+    - img [ref=e186]
+  - alert [ref=e189]
 ```

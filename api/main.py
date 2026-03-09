@@ -2532,7 +2532,7 @@ def _material_db_to_dict(row: MaterialDatabaseORM) -> dict:
 
 @app.get("/api/database/materials")
 def list_material_database(
-    q: str | None = Query(None, description="Busca por descrição ou código ERP"),
+    q: str | None = Query(None, description="Busca por ID Sistema, descrição ou código ERP"),
     status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
     pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
     erp_status: str | None = Query(None, description="Filtrar por erp_status: pendente_erp|integrado"),
@@ -2549,6 +2549,7 @@ def list_material_database(
         term = f"%{q.strip()}%"
         query = query.filter(
             or_(
+                MaterialDatabaseORM.id_sistema.ilike(term),
                 MaterialDatabaseORM.description.ilike(term),
                 MaterialDatabaseORM.id_erp.ilike(term),
             )
@@ -2590,12 +2591,13 @@ def search_material_database(
     db: Session = Depends(get_db),
     _: UserORM = Depends(get_current_user),
 ):
-    """Busca simplificada — retorna top 10 por descrição ou código ERP."""
+    """Busca simplificada — retorna top 10 por ID Sistema, descrição ou código ERP."""
     term = f"%{q.strip()}%"
     rows = (
         db.query(MaterialDatabaseORM)
         .filter(
             or_(
+                MaterialDatabaseORM.id_sistema.ilike(term),
                 MaterialDatabaseORM.description.ilike(term),
                 MaterialDatabaseORM.id_erp.ilike(term),
             )
@@ -2697,7 +2699,7 @@ def erp_callback(
 
 @app.get("/api/database/materials/export")
 def export_materials(
-    q: str | None = Query(None, description="Busca por descrição ou código ERP"),
+    q: str | None = Query(None, description="Busca por ID Sistema, descrição ou código ERP"),
     status: str | None = Query(None, description="Filtrar por status: Ativo|Bloqueado|Obsoleto"),
     pdm_code: str | None = Query(None, description="Filtrar por pdm_code"),
     erp_status: str | None = Query(None, description="Filtrar por erp_status: pendente_erp|integrado"),
@@ -2712,6 +2714,7 @@ def export_materials(
         term = f"%{q.strip()}%"
         query = query.filter(
             or_(
+                MaterialDatabaseORM.id_sistema.ilike(term),
                 MaterialDatabaseORM.description.ilike(term),
                 MaterialDatabaseORM.id_erp.ilike(term),
             )
