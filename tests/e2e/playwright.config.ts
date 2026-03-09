@@ -24,6 +24,8 @@ export default defineConfig({
     { name: 'governance', testMatch: 'governance.spec.ts', dependencies: ['request'] },
     { name: 'database', testMatch: 'database.spec.ts', dependencies: ['governance'] },
     { name: 'value-dictionary', testMatch: 'value-dictionary.spec.ts', dependencies: ['pdm'] },
+    { name: 'roles', testMatch: 'roles.spec.ts', dependencies: ['auth'] },
+    { name: 'users', testMatch: 'users.spec.ts', dependencies: ['auth'] },
   ],
   reporter: [['html', { outputFolder: 'e2e/report' }]],
 })
