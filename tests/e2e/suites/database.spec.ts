@@ -44,37 +44,33 @@ test.describe('05 - Base de Dados (UI)', () => {
 
   test('Detalhe do material abre corretamente', async ({ page }) => {
     const state = getState()
-    const res = await api.apiGet('/api/database/materials', state.adminToken)
-    const materials = Array.isArray(res) ? res : res.items ?? res.data ?? []
+    const allMaterials = await api.apiGet('/api/database/materials', state.adminToken)
+    const materials = Array.isArray(allMaterials) ? allMaterials : allMaterials.items || allMaterials.data || []
     if (materials.length === 0) {
-      test.skip(true, 'Nenhum material na base')
+      test.skip()
       return
     }
 
-    const first = materials[0] as { id?: number; id_sistema?: string; description?: string }
-    const searchTerm = first.id_sistema || (first.description || '').slice(0, 20) || state.pdmInternalCode
+    const firstMaterial = materials[0] as { id_sistema?: string; description?: string }
+    const searchTerm = firstMaterial.id_sistema || firstMaterial.description || ''
 
     await loginAsAdmin(page)
     await page.goto('/database')
     await page.waitForLoadState('networkidle')
 
     const searchInput = page.getByPlaceholder(/buscar por código ou descrição/i)
-    if (searchTerm) {
-      await searchInput.fill(searchTerm)
-      await page.getByRole('button', { name: /buscar/i }).click()
-      await page.waitForLoadState('networkidle')
-    }
+    await expect(searchInput).toBeVisible({ timeout: 5000 })
+    await searchInput.fill(searchTerm)
 
-    const clickTarget = page.getByText(/MDM-/i).first()
-    if (await clickTarget.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await clickTarget.click()
-    } else {
-      await page.locator('table tbody tr').first().click()
-    }
+    await page.getByRole('button', { name: /buscar/i }).click()
+    await page.waitForLoadState('networkidle')
 
-    const urlChanged = await page.waitForURL(/\/database\/\d+/, { timeout: 5000 }).catch(() => false)
-    const hasPanel = await page.getByRole('heading').first().isVisible({ timeout: 2000 }).catch(() => false)
-    expect(urlChanged || hasPanel).toBeTruthy()
+    const resultRow = page.getByText(searchTerm, { exact: false }).first()
+    await expect(resultRow).toBeVisible({ timeout: 10000 })
+    await resultRow.click()
+
+    await page.waitForURL(/\/database\/\d+/, { timeout: 10000 })
+    await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 5000 })
   })
 
   test('Filtros e busca funcionam', async ({ page }) => {

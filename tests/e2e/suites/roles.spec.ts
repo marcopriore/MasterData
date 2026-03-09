@@ -24,7 +24,7 @@ test.describe('07 - Perfis de Acesso (UI)', () => {
     await page.waitForLoadState('networkidle')
 
     for (const name of EXPECTED_ROLES) {
-      await expect(page.getByText(name, { exact: true })).toBeVisible({ timeout: 5000 })
+      await expect(page.getByRole('main').getByText(name, { exact: true })).toBeVisible({ timeout: 5000 })
     }
   })
 })

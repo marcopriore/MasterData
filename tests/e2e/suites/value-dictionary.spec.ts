@@ -29,7 +29,7 @@ test.describe('06 - Dicionário de Valores (UI)', () => {
     await syncBtn.click()
 
     await expect(
-      page.getByText(/Sincronizado:|entradas criadas|Carregando/i)
+      page.getByText(/Sincronizado:.*entradas criadas/i).first()
     ).toBeVisible({ timeout: 10000 })
     await page.waitForLoadState('networkidle')
 
@@ -40,7 +40,7 @@ test.describe('06 - Dicionário de Valores (UI)', () => {
 
   test('Busca funciona', async ({ page }) => {
     const state = getState()
-    await api.apiPost('/api/value-dictionary/sync', {}, state.adminToken).catch(() => {})
+    await api.apiPost('/api/value-dictionary/sync', {}, state.adminToken)
 
     await loginAsAdmin(page)
     await page.goto('/admin/value-dictionary')
@@ -48,7 +48,9 @@ test.describe('06 - Dicionário de Valores (UI)', () => {
 
     const searchInput = page.getByPlaceholder(/Buscar por valor/i)
     await searchInput.fill('OPÇÃO')
+    await page.keyboard.press('Enter')
     await page.waitForLoadState('networkidle')
+    await page.waitForTimeout(500)
 
     const hasResult =
       await page.getByText(/OPÇÃO A|OPÇÃO B/i).first().isVisible({ timeout: 10000 }).catch(() => false)
