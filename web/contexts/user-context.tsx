@@ -1,16 +1,11 @@
 'use client'
 
 /**
- * UserContext — session store backed by localStorage + a session cookie.
+ * UserContext — sessão via Supabase Auth + perfil de public.users.
  *
- * localStorage  → full user object (name, role, permissions, preferences)
- * Cookie        → "mdm_session=1"  (readable by the Edge middleware for
- *                 route protection; contains no sensitive data)
- *
- * Flow:
- *   login()   → calls POST /admin/auth/login, stores user in localStorage,
- *               sets the session cookie, applies the saved theme.
- *   logout()  → clears localStorage + cookie, redirects to /login.
+ * - Autenticação: Supabase Auth (signInWithPassword, signOut)
+ * - Perfil: public.users + roles + tenants (tenant_id, role, permissions)
+ * - accessToken: session.access_token (JWT Supabase para chamadas à API)
  */
 
 import {
@@ -20,6 +15,8 @@ import {
   useEffect,
   useState,
 } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import type { User, Session } from '@supabase/supabase-js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,13 +24,10 @@ export type RolePermissions = {
   can_approve: boolean
   can_reject: boolean
   can_submit_request: boolean
-
   can_view_pdm: boolean
   can_edit_pdm: boolean
-
   can_view_workflows: boolean
   can_edit_workflows: boolean
-
   can_manage_users: boolean
   can_view_logs: boolean
   can_manage_fields: boolean
@@ -50,23 +44,19 @@ export type UserPreferences = {
 }
 
 export type CurrentUser = {
-  id: number
+  id: string
   name: string
   email: string
   role_id: number
   role_name: string
-  role_type?: 'sistema' | 'etapa'  // default 'sistema' when absent (legacy)
+  role_type?: 'sistema' | 'etapa' | 'operacional'
   role_permissions: RolePermissions
   is_active: boolean
   preferences: UserPreferences
   created_at: string | null
-  /** Multi-tenant: id do tenant (empresa) do usuário */
   tenant_id?: number
-  /** Multi-tenant: nome da empresa */
   tenant_name?: string
-  /** True se for o usuário Master (dono do sistema) */
   is_master?: boolean
-  /** Limite de caracteres da Descrição Curta (padrão 40) */
   max_description_length?: number
 }
 
@@ -76,42 +66,76 @@ type LoginResult =
 
 type UserContextValue = {
   user: CurrentUser | null
-  /** JWT for API auth (Authorization: Bearer) */
   accessToken: string | null
-  /** True after the initial localStorage read has completed (avoids SSR flash) */
   ready: boolean
-  /** Calls the API, persists the session and returns the result */
   login: (email: string, password: string) => Promise<LoginResult>
-  /** Clears the session and navigates to /login */
   logout: () => void
-  /** Low-level setter used by the profile page to update in-memory + storage */
   setUser: (u: CurrentUser) => void
   clearUser: () => void
-  /** (MASTER only) Chaveia o contexto de tenant e recarrega a página */
   switchTenant: (tenantId: number) => Promise<void>
-  /** (MASTER only) Volta ao tenant próprio do MASTER */
   switchTenantBack: () => Promise<void>
   isAdmin: boolean
   can: (permission: keyof RolePermissions) => boolean
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Default permissions ───────────────────────────────────────────────────────
 
-const STORAGE_KEY = 'mdm_user'
-const TOKEN_KEY = 'mdm_access_token'
-/** Cookie name read by the middleware — value is always "1" */
-const SESSION_COOKIE = 'mdm_session'
-
-// ─── Cookie helpers (client-side only) ───────────────────────────────────────
-
-function setSessionCookie() {
-  // SameSite=Lax, no Secure flag (dev uses http); 8-hour expiry
-  const expires = new Date(Date.now() + 8 * 60 * 60 * 1000).toUTCString()
-  document.cookie = `${SESSION_COOKIE}=1; path=/; expires=${expires}; SameSite=Lax`
+const EMPTY_PERMISSIONS: RolePermissions = {
+  can_approve: false,
+  can_reject: false,
+  can_submit_request: false,
+  can_view_pdm: false,
+  can_edit_pdm: false,
+  can_view_workflows: false,
+  can_edit_workflows: false,
+  can_manage_users: false,
+  can_view_logs: false,
+  can_manage_fields: false,
+  can_view_database: true,
+  can_manage_roles: false,
+  can_manage_value_dictionary: false,
+  can_standardize: false,
+  can_bulk_import: false,
 }
 
-function clearSessionCookie() {
-  document.cookie = `${SESSION_COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`
+// ─── Profile helpers ───────────────────────────────────────────────────────────
+
+type DbProfile = {
+  id: string
+  tenant_id: number
+  name: string
+  role_id: number
+  is_active: boolean
+  preferences: { theme?: string; language?: string } | null
+  max_description_length: number | null
+  created_at: string | null
+  roles: { name: string; role_type: string; permissions: RolePermissions } | null
+  tenants: { name: string } | null
+}
+
+function mapProfileToUser(profile: DbProfile, session: Session): CurrentUser {
+  const prefs = profile.preferences as UserPreferences | null
+  const permissions = (profile.roles?.permissions ?? {}) as Partial<RolePermissions>
+
+  return {
+    id: profile.id,
+    name: profile.name,
+    email: session.user.email ?? '',
+    role_id: profile.role_id,
+    role_name: profile.roles?.name ?? '',
+    role_type: (profile.roles?.role_type as CurrentUser['role_type']) ?? 'sistema',
+    role_permissions: { ...EMPTY_PERMISSIONS, ...permissions },
+    is_active: profile.is_active,
+    preferences: {
+      theme: (prefs?.theme as 'light' | 'dark') ?? 'light',
+      language: (prefs?.language as 'pt' | 'en') ?? 'pt',
+    },
+    created_at: profile.created_at,
+    tenant_id: profile.tenant_id,
+    tenant_name: profile.tenants?.name ?? undefined,
+    is_master: (session.user.app_metadata?.is_master as boolean) ?? false,
+    max_description_length: profile.max_description_length ?? 40,
+  }
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -134,163 +158,194 @@ const UserContext = createContext<UserContextValue>({
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<CurrentUser | null>(null)
-  const [accessToken, setAccessToken] = useState<string | null>(null)
+  const [accessToken, setAccessTokenState] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
-  // Hydrate from localStorage on mount
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      const token = localStorage.getItem(TOKEN_KEY)
-      if (raw) {
-        setUserState(JSON.parse(raw) as CurrentUser)
+  const supabase = createClient()
+
+  const fetchProfile = useCallback(
+    async (uid: string): Promise<CurrentUser | null> => {
+      const { data: session } = await supabase.auth.getSession()
+      if (!session.session) return null
+
+      const { data: profile, error } = await supabase
+        .from('users')
+        .select('*, roles(name, role_type, permissions), tenants(name)')
+        .eq('id', uid)
+        .single()
+
+      if (error || !profile) {
+        console.error('[UserContext] profile fetch failed:', error)
+        return null
       }
-      if (token) {
-        setAccessToken(token)
-      }
-    } catch {
-      // corrupted — ignore
-    } finally {
+
+      return mapProfileToUser(profile as DbProfile, session.session)
+    },
+    [supabase]
+  )
+
+  const loadUserFromSession = useCallback(async () => {
+    const { data } = await supabase.auth.getSession()
+    if (!data.session?.user) {
+      setUserState(null)
+      setAccessTokenState(null)
       setReady(true)
+      return
     }
-  }, [])
 
-  // ── Persist helpers ────────────────────────────────────────────────────────
-
-  const persistUser = useCallback((u: CurrentUser, token?: string) => {
-    setUserState(u)
-    if (token) {
-      setAccessToken(token)
-      try { localStorage.setItem(TOKEN_KEY, token) } catch {}
+    const profile = await fetchProfile(data.session.user.id)
+    if (profile) {
+      setUserState(profile)
+      setAccessTokenState(data.session.access_token)
+    } else {
+      setUserState(null)
+      setAccessTokenState(null)
     }
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(u)) } catch {}
-    setSessionCookie()
-  }, [])
+    setReady(true)
+  }, [supabase, fetchProfile])
+
+  useEffect(() => {
+    loadUserFromSession()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUserState(null)
+        setAccessTokenState(null)
+      } else if (session?.user) {
+        const profile = await fetchProfile(session.user.id)
+        if (profile) {
+          setUserState(profile)
+          setAccessTokenState(session.access_token)
+        }
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [loadUserFromSession, supabase.auth, fetchProfile])
 
   const setUser = useCallback((u: CurrentUser) => {
-    persistUser(u)
-  }, [persistUser])
+    setUserState(u)
+  }, [])
 
   const clearUser = useCallback(() => {
     setUserState(null)
-    setAccessToken(null)
-    try {
-      localStorage.removeItem(STORAGE_KEY)
-      localStorage.removeItem(TOKEN_KEY)
-    } catch {}
-    clearSessionCookie()
+    setAccessTokenState(null)
   }, [])
 
-  // ── login ──────────────────────────────────────────────────────────────────
+  // ── login ───────────────────────────────────────────────────────────────────
 
-  const login = useCallback(async (
-    email: string,
-    password: string
-  ): Promise<LoginResult> => {
-    const BASE_URL = process.env.NEXT_PUBLIC_API_URL
-    try {
-      const res = await fetch(`${BASE_URL}/admin/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
+  const login = useCallback(
+    async (email: string, password: string): Promise<LoginResult> => {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        })
 
-      if (!res.ok) {
-        let detail = `HTTP ${res.status}`
-        try {
-          const json = await res.json()
-          if (typeof json?.detail === 'string') {
-            detail = json.detail
-          } else if (Array.isArray(json?.detail) && json.detail.length > 0) {
-            // Pydantic 422 validation errors: [{ loc, msg, type }]
-            const msgs = (json.detail as Array<{ msg: string; loc?: string[] }>)
-              .map((e) => e.msg)
-              .join('; ')
-            detail = msgs || detail
-            console.error('[login] 422 detail:', json.detail)
+        if (error) {
+          return { ok: false, error: error.message }
+        }
+
+        if (!data.session?.user) {
+          return { ok: false, error: 'Sessão não criada' }
+        }
+
+        const profile = await fetchProfile(data.session.user.id)
+        if (!profile) {
+          return {
+            ok: false,
+            error: 'Perfil não encontrado. Verifique se o usuário existe em public.users.',
           }
-        } catch {}
-        return { ok: false, error: detail }
-      }
+        }
 
-      const data = await res.json() as { ok: boolean; user: CurrentUser; access_token?: string }
-      persistUser(data.user, data.access_token)
-      return { ok: true, user: data.user }
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : 'Erro de conexão com o servidor',
+        setUserState(profile)
+        setAccessTokenState(data.session.access_token)
+        return { ok: true, user: profile }
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Erro de conexão',
+        }
       }
-    }
-  }, [persistUser])
+    },
+    [supabase, fetchProfile]
+  )
 
-  // ── switchTenant (MASTER only) ──────────────────────────────────────────────
+  // ── switchTenant (MASTER only) — ainda usa FastAPI, requer backend atualizado ─
 
   const switchTenant = useCallback(async (tenantId: number) => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
+    const token = accessToken
     if (!token) throw new Error('Sessão expirada')
     const BASE_URL = process.env.NEXT_PUBLIC_API_URL
+    if (!BASE_URL) throw new Error('NEXT_PUBLIC_API_URL não definido')
     const res = await fetch(`${BASE_URL}/admin/auth/switch-tenant`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ tenant_id: tenantId }),
     })
     if (!res.ok) {
-      let detail = `HTTP ${res.status}`
-      try {
-        const json = await res.json()
-        if (typeof json?.detail === 'string') detail = json.detail
-      } catch {}
-      throw new Error(detail)
+      const json = await res.json().catch(() => ({}))
+      throw new Error(typeof json?.detail === 'string' ? json.detail : `HTTP ${res.status}`)
     }
-    const data = (await res.json()) as { access_token: string; tenant_id: number; tenant_name: string }
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
-    const current = raw ? (JSON.parse(raw) as CurrentUser) : null
-    const updated: CurrentUser = current
-      ? { ...current, tenant_id: data.tenant_id, tenant_name: data.tenant_name, is_master: true }
-      : { id: 0, name: '', email: '', role_id: 0, role_name: '', role_permissions: {} as RolePermissions, is_active: true, preferences: { theme: 'light', language: 'pt' }, created_at: null, tenant_id: data.tenant_id, tenant_name: data.tenant_name, is_master: true }
-    persistUser(updated, data.access_token)
-    if (typeof window !== 'undefined') {
-      window.location.reload()
+    const data = (await res.json()) as {
+      access_token: string
+      tenant_id: number
+      tenant_name: string
     }
-  }, [persistUser])
+    if (user) {
+      setUserState({
+        ...user,
+        tenant_id: data.tenant_id,
+        tenant_name: data.tenant_name,
+        is_master: true,
+      })
+    }
+    setAccessTokenState(data.access_token)
+    window.location.reload()
+  }, [accessToken, user])
 
   const switchTenantBack = useCallback(async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
+    const token = accessToken
     if (!token) throw new Error('Sessão expirada')
     const BASE_URL = process.env.NEXT_PUBLIC_API_URL
+    if (!BASE_URL) throw new Error('NEXT_PUBLIC_API_URL não definido')
     const res = await fetch(`${BASE_URL}/admin/auth/switch-tenant/back`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!res.ok) {
-      let detail = `HTTP ${res.status}`
-      try {
-        const json = await res.json()
-        if (typeof json?.detail === 'string') detail = json.detail
-      } catch {}
-      throw new Error(detail)
+      const json = await res.json().catch(() => ({}))
+      throw new Error(typeof json?.detail === 'string' ? json.detail : `HTTP ${res.status}`)
     }
-    const data = (await res.json()) as { access_token: string; tenant_id: number; tenant_name: string }
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
-    const current = raw ? (JSON.parse(raw) as CurrentUser) : null
-    const updated: CurrentUser = current
-      ? { ...current, tenant_id: data.tenant_id, tenant_name: data.tenant_name ?? '', is_master: true }
-      : { id: 0, name: '', email: '', role_id: 0, role_name: '', role_permissions: {} as RolePermissions, is_active: true, preferences: { theme: 'light', language: 'pt' }, created_at: null, tenant_id: data.tenant_id, tenant_name: data.tenant_name ?? '', is_master: true }
-    persistUser(updated, data.access_token)
-    if (typeof window !== 'undefined') {
-      window.location.reload()
+    const data = (await res.json()) as {
+      access_token: string
+      tenant_id: number
+      tenant_name: string
     }
-  }, [persistUser])
+    if (user) {
+      setUserState({
+        ...user,
+        tenant_id: data.tenant_id,
+        tenant_name: data.tenant_name,
+        is_master: true,
+      })
+    }
+    setAccessTokenState(data.access_token)
+    window.location.reload()
+  }, [accessToken, user])
 
-  // ── logout ─────────────────────────────────────────────────────────────────
+  // ── logout ──────────────────────────────────────────────────────────────────
 
-  const logout = useCallback(() => {
-    clearUser()
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut()
+    setUserState(null)
+    setAccessTokenState(null)
     window.location.href = '/login'
-  }, [clearUser])
+  }, [supabase])
 
-  // ── Derived ────────────────────────────────────────────────────────────────
+  // ── Derived ──────────────────────────────────────────────────────────────────
 
   const isAdmin = user?.role_name === 'ADMIN'
 
@@ -302,14 +357,24 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <UserContext.Provider
-      value={{ user, accessToken, ready, login, logout, setUser, clearUser, switchTenant, switchTenantBack, isAdmin, can }}
+      value={{
+        user,
+        accessToken,
+        ready,
+        login,
+        logout,
+        setUser,
+        clearUser,
+        switchTenant,
+        switchTenantBack,
+        isAdmin,
+        can,
+      }}
     >
       {children}
     </UserContext.Provider>
   )
 }
-
-// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useUser() {
   return useContext(UserContext)

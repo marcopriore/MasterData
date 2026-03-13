@@ -1,36 +1,27 @@
 'use client'
 
-import { useState, useEffect, FormEvent } from 'react'
+import { useState, FormEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useUser } from '@/contexts/user-context'
 import { Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+function translateAuthError(message: string): string {
+  if (message.includes('Invalid login credentials')) return 'Credenciais inválidas.'
+  if (message.includes('Email not confirmed')) return 'Email não confirmado.'
+  return message
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { login, clearUser } = useUser()
+  const { login } = useUser()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  // On mount: wipe any stale localStorage session whose cookie has already
-  // expired. Without this, a returning user with stale storage but no cookie
-  // would be stuck — the middleware blocks every page, but the old user object
-  // in localStorage would make the app think they're logged in.
-  useEffect(() => {
-    const hasCookie = document.cookie
-      .split(';')
-      .some((c) => c.trim().startsWith('mdm_session='))
-
-    if (!hasCookie) {
-      clearUser()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -46,12 +37,10 @@ export default function LoginPage() {
     setLoading(false)
 
     if (!result.ok) {
-      console.error('[login] failed:', result.error)
-      setError(result.error)
+      setError(translateAuthError(result.error))
       return
     }
 
-    // Login succeeded — cookie is now set, navigate to the intended destination
     const from = searchParams.get('from') ?? '/'
     router.replace(from)
   }
