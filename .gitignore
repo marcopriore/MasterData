@@ -1,25 +1,19 @@
 # Dependencies
 node_modules/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
+# Supabase local
+.supabase/
 
-# Alembic — ignora .pyc nas migrações, mantém os .py
-api/alembic/versions/*.pyc
+# SQLite (legacy)
+*.db
+*.sqlite
+*.sqlite3
 
 # Environment
 .env
 .env.local
 .env.*.local
-
-# SQLite databases
-*.db
-*.sqlite
-*.sqlite3
+web/.env.local
 
 # Next.js
 web/.next/
@@ -30,8 +24,15 @@ web/.git
 .DS_Store
 Thumbs.db
 
-# E2E
+# E2E / Testes
+tests/test-results/
+tests/e2e/debug-*.png
 tests/e2e/test-state.json
+tests/e2e/e2e/report/
 tests/e2e/report/
 tests/e2e/test-results/
 .env.test
+
+# Temporários
+~$*
+*.tmp

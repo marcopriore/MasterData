@@ -547,13 +547,16 @@ export async function getMaterialById(id: number): Promise<MaterialDetail> {
   return data
 }
 
-export async function searchMaterials(q: string): Promise<MaterialDetail[]> {
+export async function searchMaterials(query: string): Promise<MaterialDetail[]> {
+  const q = query?.trim()
+  if (!q) return []
+
   const supabase = createClient()
   const { data, error } = await supabase
     .from('material_database')
     .select('*')
-    .or(`id_sistema.ilike.%${q}%,description.ilike.%${q}%,id_erp.ilike.%${q}%`)
-    .limit(20)
+    .or(`description.ilike.%${q}%,id_sistema.ilike.%${q}%,id_erp.ilike.%${q}%`)
+    .limit(10)
   if (error) handleError(error)
   return data ?? []
 }
@@ -1044,6 +1047,7 @@ export async function getSystemLogs(params: {
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...opts,
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...opts.headers },
   })
   if (!res.ok) {

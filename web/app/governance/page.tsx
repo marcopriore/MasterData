@@ -241,9 +241,14 @@ export default function GovernancePage() {
         if (list && list.length > 0) {
           const active = list.find((w) => w.is_active) ?? list[0]
           setSelectedWorkflowId(active.id)
+        } else {
+          setLoading(false)
         }
       })
-      .catch(() => setWorkflows([]))
+      .catch(() => {
+        setWorkflows([])
+        setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -274,7 +279,12 @@ export default function GovernancePage() {
   }, [selectedWorkflowId])
 
   useEffect(() => {
-    if (ready && selectedWorkflowId !== null) fetchRequests()
+    if (!ready) return
+    if (selectedWorkflowId !== null) {
+      fetchRequests()
+    } else {
+      setLoading(false)
+    }
   }, [ready, selectedWorkflowId, fetchRequests])
 
   const showActionButtons =
