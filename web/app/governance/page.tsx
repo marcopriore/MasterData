@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import {
   getGovernanceStats,
   getWorkflows,
@@ -183,6 +184,7 @@ function filterRequests(
 }
 
 export default function GovernancePage() {
+  const pathname = usePathname()
   const { user, ready } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
@@ -232,7 +234,7 @@ export default function GovernancePage() {
       .then((data) => setGovernanceStats(data ?? null))
       .catch(() => setGovernanceStats(null))
       .finally(() => setGovernanceStatsLoading(false))
-  }, [ready])
+  }, [ready, pathname])
 
   useEffect(() => {
     getWorkflows()
@@ -249,7 +251,7 @@ export default function GovernancePage() {
         setWorkflows([])
         setLoading(false)
       })
-  }, [])
+  }, [pathname])
 
   useEffect(() => {
     getPdms()
@@ -261,7 +263,7 @@ export default function GovernancePage() {
         )
       )
       .catch(() => setPdms([]))
-  }, [])
+  }, [pathname])
 
   const fetchRequests = useCallback((): Promise<ApiRequest[]> => {
     setLoading(true)
@@ -285,7 +287,7 @@ export default function GovernancePage() {
     } else {
       setLoading(false)
     }
-  }, [ready, selectedWorkflowId, fetchRequests])
+  }, [ready, selectedWorkflowId, fetchRequests, pathname])
 
   const showActionButtons =
     ['etapa', 'operacional'].includes(user?.role_type ?? '') && user?.role_name !== 'ADMIN'

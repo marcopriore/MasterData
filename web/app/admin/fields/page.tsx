@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import {
   getFieldDictionaryAll,
   getRoles,
@@ -365,6 +366,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FieldsPage() {
+  const pathname = usePathname()
   const { isAdmin, user } = useUser()
   const canAccess = user?.is_master || isAdmin
   const [fields, setFields] = useState<FieldDictionary[]>([])
@@ -394,7 +396,7 @@ export default function FieldsPage() {
 
   useEffect(() => {
     fetchData()
-  }, [fetchData])
+  }, [fetchData, pathname])
 
   function openCreate() {
     setEditTarget(null)

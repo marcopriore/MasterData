@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import { getUsersApi, createUserApi, updateUserApi, getRoles, getTenants, downloadFile, uploadUsersImport } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
@@ -272,6 +273,7 @@ type UserImportRow = {
 }
 
 export default function UsersPage() {
+  const pathname = usePathname()
   const { can, user } = useUser()
   const canManageUsers = user?.is_master || can('can_manage_users')
 
@@ -315,7 +317,7 @@ export default function UsersPage() {
 
   useEffect(() => {
     fetchUsers()
-  }, [fetchUsers])
+  }, [fetchUsers, pathname])
 
   function openCreate() {
     setEditTarget(null)

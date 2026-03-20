@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import { usePathname } from 'next/navigation'
 import { getSystemLogs, getUsersApi, downloadFile } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
@@ -163,6 +164,7 @@ function EventDataContent({ data }: { data: Record<string, unknown> }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLogsPage() {
+  const pathname = usePathname()
   const { user, can } = useUser()
   const canViewLogs = user?.is_master || can('can_view_logs')
   const [logs, setLogs] = useState<LogItem[]>([])
@@ -219,11 +221,11 @@ export default function AdminLogsPage() {
     getUsersApi()
       .then((list) => setUsers(list ?? []))
       .catch(() => setUsers([]))
-  }, [canViewLogs])
+  }, [canViewLogs, pathname])
 
   useEffect(() => {
     fetchLogs()
-  }, [fetchLogs])
+  }, [fetchLogs, pathname])
 
   const handleFilter = () => {
     setAppliedCategory(category)

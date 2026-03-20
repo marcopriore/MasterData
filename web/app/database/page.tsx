@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import {
   getMaterials,
   getPdms,
@@ -127,6 +127,7 @@ function formatDate(iso: string | null): string {
 
 export default function DatabasePage() {
   const router = useRouter()
+  const pathname = usePathname()
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
   const { user, can } = useUser()
@@ -294,11 +295,11 @@ export default function DatabasePage() {
     getPdms()
       .then((list) => setPdms((list ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code }))))
       .catch(() => setPdms([]))
-  }, [])
+  }, [pathname])
 
   useEffect(() => {
     fetchMaterials()
-  }, [fetchMaterials])
+  }, [fetchMaterials, pathname])
 
   const handleFilter = () => {
     setAppliedSearch(search.trim())

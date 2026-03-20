@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getRequestById } from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { ChevronLeft, Check, X, PlayCircle } from 'lucide-react'
 
 export default function GovernanceRequestPage() {
   const params = useParams()
+  const pathname = usePathname()
   const id = params?.id as string
   const [request, setRequest] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -27,7 +28,7 @@ export default function GovernanceRequestPage() {
     }
   }, [id])
 
-  useEffect(() => { fetchRequest() }, [fetchRequest])
+  useEffect(() => { fetchRequest() }, [fetchRequest, pathname])
 
   if (loading) return <div className="p-8 bg-white min-h-screen">Carregando...</div>
   if (!request) return <div className="p-8 bg-white min-h-screen">Solicitação não encontrada. <Link href="/governance" className="text-blue-600">Voltar</Link></div>

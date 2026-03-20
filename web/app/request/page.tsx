@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { getPdms, getPdmById, searchMaterials, createRequest, uploadRequestAttachment } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
@@ -75,6 +75,7 @@ type MaterialSearchItem = {
 
 export default function NewMaterialRequestPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const { user } = useUser()
   const [currentStep, setCurrentStep] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -109,7 +110,7 @@ export default function NewMaterialRequestPage() {
     if (user?.name) {
       setRequesterName(user.name.toUpperCase())
     }
-  }, [user?.name])
+  }, [user?.name, pathname])
 
   // Fetch PDM templates on mount
   useEffect(() => {
@@ -118,7 +119,7 @@ export default function NewMaterialRequestPage() {
       .then((list) => setPdms(list.map((p) => ({ ...p, is_active: p.is_active ?? true })) as PDMTemplate[]))
       .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar PDMs'))
       .finally(() => setPdmsLoading(false))
-  }, [])
+  }, [pathname])
 
   // Fetch full PDM template + attributes when a PDM is selected (entering Phase 2)
   useEffect(() => {

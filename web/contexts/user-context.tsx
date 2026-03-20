@@ -113,7 +113,13 @@ type DbProfile = {
   tenants: { name: string } | null
 }
 
-function mapProfileToUser(profile: DbProfile, session: Session): CurrentUser {
+type ProfileOverrides = { tenant_id?: number; tenant_name?: string }
+
+function mapProfileToUser(
+  profile: DbProfile,
+  session: Session,
+  overrides?: ProfileOverrides
+): CurrentUser {
   const prefs = profile.preferences as UserPreferences | null
   const permissions = (profile.roles?.permissions ?? {}) as Partial<RolePermissions>
 
@@ -131,8 +137,8 @@ function mapProfileToUser(profile: DbProfile, session: Session): CurrentUser {
       language: (prefs?.language as 'pt' | 'en') ?? 'pt',
     },
     created_at: profile.created_at,
-    tenant_id: profile.tenant_id,
-    tenant_name: profile.tenants?.name ?? undefined,
+    tenant_id: overrides?.tenant_id ?? profile.tenant_id,
+    tenant_name: overrides?.tenant_name ?? profile.tenants?.name ?? undefined,
     is_master: (session.user.app_metadata?.is_master as boolean) ?? false,
     max_description_length: profile.max_description_length ?? 40,
   }
@@ -179,51 +185,100 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         return null
       }
 
-      return mapProfileToUser(profile as DbProfile, session.session)
+      const p = profile as DbProfile
+      let effectiveTenantId = p.tenant_id
+      let effectiveTenantName = p.tenants?.name ?? undefined
+
+      // Master com switch: usar tenant do app_metadata e buscar nome
+      const isMaster =
+        (session.session.user.app_metadata?.is_master as boolean) ?? false
+      const metadataTenantId = session.session.user.app_metadata?.tenant_id as
+        | number
+        | undefined
+      if (isMaster && metadataTenantId != null) {
+        effectiveTenantId = metadataTenantId
+        if (metadataTenantId !== p.tenant_id) {
+          const { data: tenant } = await supabase
+            .from('tenants')
+            .select('name')
+            .eq('id', metadataTenantId)
+            .single()
+          effectiveTenantName = tenant?.name ?? undefined
+        }
+      }
+
+      return mapProfileToUser(p, session.session, {
+        tenant_id: effectiveTenantId,
+        tenant_name: effectiveTenantName,
+      })
     },
     [supabase]
   )
 
   const loadUserFromSession = useCallback(async () => {
-    const { data } = await supabase.auth.getSession()
-    if (!data.session?.user) {
-      setUserState(null)
-      setAccessTokenState(null)
-      setReady(true)
-      return
-    }
+    try {
+      // Se acabou de trocar tenant, forçar refresh UMA VEZ (evita conflito de lock)
+      const needsRefresh =
+        typeof window !== 'undefined' && localStorage.getItem('mdm_needs_refresh')
+      if (needsRefresh) {
+        localStorage.removeItem('mdm_needs_refresh')
+        await supabase.auth.refreshSession()
+      }
 
-    const profile = await fetchProfile(data.session.user.id)
-    if (profile) {
-      setUserState(profile)
-      setAccessTokenState(data.session.access_token)
-    } else {
+      // getUser() sempre valida no server — sem conflito de lock
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser()
+
+      if (!authUser) {
+        setUserState(null)
+        setAccessTokenState(null)
+        setReady(true)
+        return
+      }
+
+      const { data: { session } } = await supabase.auth.getSession()
+
+      const profile = await fetchProfile(authUser.id)
+      if (profile) {
+        setUserState(profile)
+        setAccessTokenState(session?.access_token ?? null)
+      } else {
+        setUserState(null)
+        setAccessTokenState(null)
+      }
+    } catch (err) {
+      console.error('[UserContext] loadUserFromSession error:', err)
       setUserState(null)
       setAccessTokenState(null)
+    } finally {
+      setReady(true)
     }
-    setReady(true)
   }, [supabase, fetchProfile])
 
   useEffect(() => {
     loadUserFromSession()
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setUserState(null)
-        setAccessTokenState(null)
-      } else if (session?.user) {
-        const profile = await fetchProfile(session.user.id)
-        if (profile) {
-          setUserState(profile)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          setUserState(null)
+          setAccessTokenState(null)
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
           setAccessTokenState(session.access_token)
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          const profile = await fetchProfile(session.user.id)
+          if (profile) {
+            setUserState(profile)
+            setAccessTokenState(session.access_token)
+          }
         }
       }
-    })
+    )
 
     return () => subscription.unsubscribe()
-  }, [loadUserFromSession, supabase.auth, fetchProfile])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const setUser = useCallback((u: CurrentUser) => {
     setUserState(u)
@@ -276,40 +331,50 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // ── switchTenant (MASTER only) via API Route Supabase ────────────────────────
 
   const switchTenant = useCallback(async (tenantId: number) => {
-    const { switchTenantApi } = await import('@/lib/supabase-api')
-    await switchTenantApi(tenantId)
-    const { data: { session } } = await supabase.auth.refreshSession()
-    if (session?.user) {
-      const profile = await fetchProfile(session.user.id)
-      if (profile) {
-        setUserState(profile)
-        setAccessTokenState(session.access_token)
-      }
+    try {
+      const { switchTenantApi } = await import('@/lib/supabase-api')
+      await switchTenantApi(tenantId)
+      localStorage.setItem('mdm_needs_refresh', 'true')
+      window.location.href = '/'
+    } catch (err) {
+      console.error('[UserContext] switchTenant error:', err)
+      throw err
     }
-    window.location.reload()
-  }, [supabase, fetchProfile])
+  }, [])
 
   const switchTenantBack = useCallback(async () => {
-    const { switchTenantBackApi } = await import('@/lib/supabase-api')
-    await switchTenantBackApi()
-    const { data: { session } } = await supabase.auth.refreshSession()
-    if (session?.user) {
-      const profile = await fetchProfile(session.user.id)
-      if (profile) {
-        setUserState(profile)
-        setAccessTokenState(session.access_token)
-      }
+    try {
+      const { switchTenantBackApi } = await import('@/lib/supabase-api')
+      await switchTenantBackApi()
+      localStorage.setItem('mdm_needs_refresh', 'true')
+      window.location.href = '/'
+    } catch (err) {
+      console.error('[UserContext] switchTenantBack error:', err)
+      throw err
     }
-    window.location.reload()
-  }, [supabase, fetchProfile])
+  }, [])
 
   // ── logout ──────────────────────────────────────────────────────────────────
 
   const logout = useCallback(async () => {
-    await supabase.auth.signOut()
-    setUserState(null)
-    setAccessTokenState(null)
-    window.location.href = '/login'
+    try {
+      await supabase.auth.signOut()
+    } catch (err) {
+      console.error('[UserContext] signOut error:', err)
+    } finally {
+      setUserState(null)
+      setAccessTokenState(null)
+      // Limpar cookies Supabase manualmente (workaround para signOut não limpar cookies no Next.js)
+      if (typeof document !== 'undefined') {
+        document.cookie.split(';').forEach((c) => {
+          const name = c.split('=')[0].trim()
+          if (name.startsWith('sb-')) {
+            document.cookie = `${name}=; Path=/; Max-Age=0`
+          }
+        })
+      }
+      window.location.href = '/login'
+    }
   }, [supabase])
 
   // ── Derived ──────────────────────────────────────────────────────────────────

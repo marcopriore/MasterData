@@ -6,6 +6,9 @@ import { NotificationsProvider } from "@/contexts/notifications-context";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],

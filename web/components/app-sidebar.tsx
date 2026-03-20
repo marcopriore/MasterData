@@ -54,6 +54,7 @@ function NavLink({
   return (
     <Link
       href={href}
+      prefetch={false}
       className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
       style={{
         color: 'var(--sidebar-text)',
@@ -167,6 +168,7 @@ export function AppSidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={false}
                     className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors"
                     style={{
                       color: 'var(--sidebar-text)',
@@ -217,6 +219,7 @@ export function AppSidebar() {
                       <Link
                         key={item.href}
                         href={item.href}
+                        prefetch={false}
                         className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors"
                         style={{
                           color: 'var(--sidebar-text)',
@@ -299,7 +302,7 @@ export function AppSidebar() {
             style={{ color: 'var(--sidebar-text)' }}
             onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)')}
             onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-            onClick={logout}
+            onClick={async () => { await logout() }}
           >
             <LogOut className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
             <span className="text-sm font-medium">Sair</span>

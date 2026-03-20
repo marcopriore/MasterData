@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react"
+import { usePathname } from "next/navigation"
 import type { PDMTemplate } from "@/components/mdm/category-tree"
 import { DashboardHeader } from "@/components/mdm/dashboard-header"
 import { PdmDetails } from "@/components/mdm/pdm-details"
@@ -32,11 +33,12 @@ import {
 } from "@/lib/supabase-api"
 
 export default function MDMDashboard() {
+  const pathname = usePathname()
   const { can } = useUser()
-  const showExport = can("can_edit_pdm")
-  const showBulkImport = can("can_bulk_import")
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
   const [pdmsLoading, setPdmsLoading] = useState(true)
+  const showExport = can("can_edit_pdm")
+  const showBulkImport = can("can_bulk_import")
   const [selectedPdmId, setSelectedPdmId] = useState<number | null>(null)
   const [pdmName, setPdmName] = useState("")
   const [pdmCode, setPdmCode] = useState("")
@@ -84,7 +86,7 @@ export default function MDMDashboard() {
       }
     }
     fetchPdms()
-  }, [])
+  }, [pathname])
 
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return pdms

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, usePathname } from 'next/navigation'
 import {
   getMaterialById,
   getPdms,
@@ -220,6 +220,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 export default function DatabaseDetailPage() {
   const params = useParams()
+  const pathname = usePathname()
   const id = Number(params.id)
   const { user, can } = useUser()
   const maxLength = user?.max_description_length ?? 40
@@ -375,7 +376,7 @@ export default function DatabaseDetailPage() {
       })
       .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, pathname])
 
   useEffect(() => {
     if (material?.pdm_code) {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { useUser } from '@/contexts/user-context'
 import {
   getWorkflows,
@@ -301,6 +302,7 @@ function SortableStepCard({
 }
 
 export default function WorkflowConfigPage() {
+  const pathname = usePathname()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [steps, setSteps] = useState<WorkflowStep[]>([])
@@ -352,11 +354,11 @@ export default function WorkflowConfigPage() {
 
   useEffect(() => {
     fetchWorkflows()
-  }, [fetchWorkflows])
+  }, [fetchWorkflows, pathname])
 
   useEffect(() => {
     fetchSteps()
-  }, [fetchSteps])
+  }, [fetchSteps, pathname])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {

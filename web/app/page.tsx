@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getDashboardStats } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
@@ -185,6 +185,7 @@ function NavCard({
 
 export default function DashboardPage() {
   const router = useRouter()
+  const pathname = usePathname()
   const { user, ready, isAdmin, can } = useUser()
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -210,7 +211,7 @@ export default function DashboardPage() {
       }
     }
     load()
-  }, [ready])
+  }, [ready, pathname])
 
   function handleSliceClick(entry: { name: string }) {
     router.push(`/governance?status=${encodeURIComponent(entry.name)}`)

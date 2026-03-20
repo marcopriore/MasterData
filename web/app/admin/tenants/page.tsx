@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { getTenants, createTenantOnboardingApi, updateTenantApi } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
@@ -398,6 +398,7 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TenantsPage() {
+  const pathname = usePathname()
   const { user, switchTenant } = useUser()
   const router = useRouter()
   const { resolvedTheme } = useTheme()
@@ -427,7 +428,7 @@ export default function TenantsPage() {
     } else {
       setLoading(false)
     }
-  }, [user, user?.is_master, fetchTenants, router])
+  }, [user, user?.is_master, fetchTenants, router, pathname])
 
   const handleEnter = async (t: Tenant) => {
     try {

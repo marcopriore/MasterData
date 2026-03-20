@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import { getRoles, createRole, updateRole } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
@@ -296,6 +297,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RolesPage() {
+  const pathname = usePathname()
   const { user, can } = useUser()
   const canManageRoles = user?.is_master || can('can_manage_roles')
 
@@ -318,7 +320,7 @@ export default function RolesPage() {
 
   useEffect(() => {
     fetchRoles()
-  }, [fetchRoles])
+  }, [fetchRoles, pathname])
 
   function openCreate() {
     setEditTarget(null)

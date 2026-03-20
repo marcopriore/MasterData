@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useUser } from '@/contexts/user-context'
@@ -164,6 +165,7 @@ const NOTIFICATION_PREF_ROWS: {
 ]
 
 export default function ProfilePage() {
+  const pathname = usePathname()
   const { user, setUser, ready } = useUser()
   const { setTheme } = useTheme()
 
@@ -199,7 +201,7 @@ export default function ProfilePage() {
       .then((p) => setNotifPrefs(p as NotificationPrefs | null))
       .catch(() => setNotifPrefs(null))
       .finally(() => setNotifPrefsLoading(false))
-  }, [user])
+  }, [user, pathname])
 
   const saveNotifPrefs = useCallback(
     async (updates: Partial<NotificationPrefs>) => {
@@ -243,7 +245,7 @@ export default function ProfilePage() {
       setThemeLocal(user.preferences?.theme ?? 'light')
       setLanguage(user.preferences?.language ?? 'pt')
     }
-  }, [ready, user])
+  }, [ready, user, pathname])
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 

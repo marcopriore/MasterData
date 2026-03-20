@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,7 @@ import { useValueDictionary, type ValueDictionaryEntry, type DuplicateGroup } fr
 const LIMIT = 100
 
 export default function ValueDictionaryPage() {
+  const pathname = usePathname()
   const { can } = useUser()
   const canAccess = can('can_manage_value_dictionary')
   const {
@@ -47,13 +49,13 @@ export default function ValueDictionaryPage() {
       fetchEntries(search || undefined)
       setOffset(0)
     }
-  }, [canAccess, search, fetchEntries])
+  }, [canAccess, search, fetchEntries, pathname])
 
   useEffect(() => {
     if (canAccess && entries.length > 0) {
       getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
     }
-  }, [canAccess, entries.length, getDuplicates])
+  }, [canAccess, entries.length, getDuplicates, pathname])
 
   const loadDuplicates = useCallback(async () => {
     try {

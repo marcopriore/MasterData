@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import { getProducts, createProduct, deleteProduct } from '@/lib/supabase-api'
 
 export default function ProductsPage() {
+  const pathname = usePathname()
   const [items, setItems] = useState<{ id: string; name: string; description?: string | null }[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -51,7 +53,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     load()
-  }, [])
+  }, [pathname])
 
   return (
     <main className="min-h-screen p-10">
