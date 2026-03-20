@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import { apiGetWithAuth, apiPostWithAuth, apiPatchWithAuth } from '@/lib/api'
+import { getTenants, createTenantOnboardingApi, updateTenantApi } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -60,7 +60,6 @@ function OnboardingModal({ onClose, onSuccess }: OnboardingModalProps) {
   const [tempPassword, setTempPassword] = useState('')
   const [sendEmailChecked, setSendEmailChecked] = useState(true)
   const [loading, setLoading] = useState(false)
-  const { accessToken } = useUser()
 
   const handleSlugChange = (v: string) => {
     const lower = v.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
@@ -89,29 +88,17 @@ function OnboardingModal({ onClose, onSuccess }: OnboardingModalProps) {
       toast.error('Email do administrador é obrigatório.')
       return
     }
-    if (!accessToken) {
-      toast.error('Sessão expirada. Faça login novamente.')
-      return
-    }
-
     setLoading(true)
     try {
-      const body = {
+      const password = tempPassword.trim() || 'Mudar@1234'
+      const res = await createTenantOnboardingApi({
         tenant_name: tenantName.trim(),
-        tenant_slug: tenantSlug.trim(),
         admin_name: adminName.trim(),
         admin_email: adminEmail.trim(),
-        temp_password: tempPassword.trim() || undefined,
-      }
-      const res = await apiPostWithAuth<OnboardingResponse>(
-        '/admin/tenants/onboarding',
-        body,
-        accessToken
-      )
-      if (res.email_sent) {
-        toast.success(`Tenant criado! Email enviado para ${res.admin_email}`)
-      } else {
-        toast.success('Tenant criado! Falha no envio do email — verifique as configurações SMTP')
+        admin_password: password,
+      })
+      if (res.tenant_id) {
+        toast.success('Tenant criado com sucesso!')
       }
       onSuccess()
       onClose()
@@ -266,8 +253,7 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [maxDescLength, setMaxDescLength] = useState(initial?.max_description_length ?? 40)
   const [saving, setSaving] = useState(false)
-  const { accessToken, setUser } = useUser()
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
+  const { setUser } = useUser()
 
   const handleSlugChange = (v: string) => {
     const lower = v.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
@@ -288,47 +274,22 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
       toast.error('Slug deve conter apenas letras minúsculas, números e hífens.')
       return
     }
-    if (!accessToken) {
-      toast.error('Sessão expirada. Faça login novamente.')
-      return
-    }
-
     setSaving(true)
     try {
       if (mode === 'create') {
-        const saved = await apiPostWithAuth<Tenant>(
-          '/admin/tenants',
-          { name: name.trim(), slug: slug.trim() },
-          accessToken
-        )
-        toast.success('Tenant criado com sucesso.')
-        onSaved(saved)
-      } else {
-        const saved = await apiPatchWithAuth<Tenant>(
-          `/admin/tenants/${initial!.id}`,
-          { name: name.trim(), slug: slug.trim(), is_active: isActive },
-          accessToken
-        )
-        const maxVal = Math.max(10, Math.min(200, maxDescLength))
-        const settingsRes = await fetch(`${API_URL}/admin/tenants/${initial!.id}/settings`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ max_description_length: maxVal }),
-        })
-        if (!settingsRes.ok) throw new Error('Falha ao atualizar configurações')
-        onSaved({ ...saved, max_description_length: maxVal })
-        const meRes = await fetch(`${API_URL}/admin/auth/me`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        })
-        if (meRes.ok) {
-          const updatedUser = await meRes.json()
-          setUser(updatedUser)
-        }
-        toast.success('Tenant atualizado.')
+        toast.error('Use "Novo Tenant" para criar via onboarding.')
+        setSaving(false)
+        return
       }
+      const maxVal = Math.max(10, Math.min(200, maxDescLength))
+      const saved = await updateTenantApi(initial!.id, {
+        name: name.trim(),
+        slug: slug.trim(),
+        is_active: isActive,
+        max_description_length: maxVal,
+      })
+      onSaved({ ...saved, max_description_length: maxVal } as Tenant)
+      toast.success('Tenant atualizado.')
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
@@ -437,7 +398,7 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TenantsPage() {
-  const { user, accessToken, switchTenant } = useUser()
+  const { user, switchTenant } = useUser()
   const router = useRouter()
   const { resolvedTheme } = useTheme()
   const [tenants, setTenants] = useState<Tenant[]>([])
@@ -446,28 +407,27 @@ export default function TenantsPage() {
   const [editModal, setEditModal] = useState<Tenant | null>(null)
 
   const fetchTenants = useCallback(async () => {
-    if (!accessToken) return
     try {
-      const data = await apiGetWithAuth<Tenant[]>('/admin/tenants', accessToken)
-      setTenants(data)
+      const data = await getTenants()
+      setTenants(data as Tenant[])
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
     if (user && !user.is_master) {
       router.replace('/')
       return
     }
-    if (user?.is_master && accessToken) {
+    if (user?.is_master) {
       fetchTenants()
     } else {
       setLoading(false)
     }
-  }, [user, user?.is_master, accessToken, fetchTenants, router])
+  }, [user, user?.is_master, fetchTenants, router])
 
   const handleEnter = async (t: Tenant) => {
     try {

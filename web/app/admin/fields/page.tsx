@@ -1,7 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { apiGetWithAuth, apiPostWithAuth, apiPutWithAuth, apiDeleteWithAuth } from '@/lib/api'
+import {
+  getFieldDictionaryAll,
+  getRoles,
+  createField,
+  updateField,
+  deleteField,
+} from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -101,7 +107,7 @@ function parseOptionsJson(value: string): string[] | null {
       return parsed.values.map(String)
     return null
   } catch {
-    return undefined // invalid
+    return null
   }
 }
 
@@ -125,10 +131,9 @@ interface FieldModalProps {
   roles: Role[]
   onClose: () => void
   onSaved: (f: FieldDictionary) => void
-  accessToken: string | null
 }
 
-function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: FieldModalProps) {
+function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps) {
   const [fieldLabel, setFieldLabel] = useState(initial?.field_label ?? '')
   const [fieldName, setFieldName] = useState(initial?.field_name ?? '')
   const [sapField, setSapField] = useState(initial?.sap_field ?? '')
@@ -198,14 +203,10 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
 
       let saved: FieldDictionary
       if (mode === 'create') {
-        saved = await apiPostWithAuth<FieldDictionary>('/api/fields', body, accessToken)
+        saved = await createField(body) as FieldDictionary
         toast.success('Campo criado com sucesso.')
       } else {
-        saved = await apiPutWithAuth<FieldDictionary>(
-          `/api/fields/${initial!.id}`,
-          body,
-          accessToken
-        )
+        saved = await updateField(initial!.id, body) as FieldDictionary
         toast.success('Campo atualizado.')
       }
       onSaved(saved)
@@ -364,7 +365,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved, accessToken }: Fie
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FieldsPage() {
-  const { isAdmin, accessToken, user } = useUser()
+  const { isAdmin, user } = useUser()
   const canAccess = user?.is_master || isAdmin
   const [fields, setFields] = useState<FieldDictionary[]>([])
   const [roles, setRoles] = useState<Role[]>([])
@@ -375,15 +376,13 @@ export default function FieldsPage() {
   const [editTarget, setEditTarget] = useState<FieldDictionary | null>(null)
 
   const fetchData = useCallback(async () => {
-    if (!accessToken) return
     setLoading(true)
     try {
-      const url = sapViewFilter ? `/api/fields?sap_view=${sapViewFilter}` : '/api/fields'
       const [f, r] = await Promise.all([
-        apiGetWithAuth<FieldDictionary[]>(url, accessToken),
-        apiGetWithAuth<Role[]>('/admin/roles', accessToken),
+        getFieldDictionaryAll(sapViewFilter || undefined),
+        getRoles(),
       ])
-      setFields(f)
+      setFields(f as FieldDictionary[])
       setRoles(r)
     } catch (err) {
       toast.error((err as Error).message)
@@ -391,7 +390,7 @@ export default function FieldsPage() {
     } finally {
       setLoading(false)
     }
-  }, [accessToken, sapViewFilter])
+  }, [sapViewFilter])
 
   useEffect(() => {
     fetchData()
@@ -419,17 +418,12 @@ export default function FieldsPage() {
   }
 
   async function toggleActive(f: FieldDictionary) {
-    if (!accessToken) return
     try {
       if (f.is_active) {
-        await apiDeleteWithAuth<FieldDictionary>(`/api/fields/${f.id}`, accessToken)
+        await deleteField(f.id)
         toast.success('Campo desativado.')
       } else {
-        await apiPutWithAuth<FieldDictionary>(
-          `/api/fields/${f.id}`,
-          { ...f, is_active: true },
-          accessToken
-        )
+        await updateField(f.id, { ...f, is_active: true })
         toast.success('Campo reativado.')
       }
       fetchData()
@@ -639,7 +633,6 @@ export default function FieldsPage() {
           roles={roles}
           onClose={() => setModalOpen(false)}
           onSaved={handleSaved}
-          accessToken={accessToken}
         />
       )}
     </div>

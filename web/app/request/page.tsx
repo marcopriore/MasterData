@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { apiGet, apiGetWithAuth, apiPostWithAuth, apiUpload } from '@/lib/api'
+import { getPdms, getPdmById, searchMaterials, createRequest, uploadRequestAttachment } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Stepper, type StepItem } from '@/components/request/stepper'
@@ -75,7 +75,7 @@ type MaterialSearchItem = {
 
 export default function NewMaterialRequestPage() {
   const router = useRouter()
-  const { user, accessToken } = useUser()
+  const { user } = useUser()
   const [currentStep, setCurrentStep] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -111,33 +111,30 @@ export default function NewMaterialRequestPage() {
     }
   }, [user?.name])
 
-  // Fetch PDM templates on mount (requires auth for tenant filtering)
+  // Fetch PDM templates on mount
   useEffect(() => {
-    if (!accessToken) return
     setPdmsLoading(true)
-    apiGetWithAuth<PDMTemplate[]>('/api/pdm', accessToken)
-      .then(setPdms)
+    getPdms()
+      .then((list) => setPdms(list.map((p) => ({ ...p, is_active: p.is_active ?? true })) as PDMTemplate[]))
       .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar PDMs'))
       .finally(() => setPdmsLoading(false))
-  }, [accessToken])
+  }, [])
 
   // Fetch full PDM template + attributes when a PDM is selected (entering Phase 2)
   useEffect(() => {
-    if (selectedPdm == null || !accessToken) { setAttributes([]); return }
+    if (selectedPdm == null) { setAttributes([]); return }
     setAttributesLoading(true)
-    apiGetWithAuth<{ id: number; name: string; internal_code: string; attributes: Attribute[] }>(
-      `/api/pdm/${selectedPdm}`,
-      accessToken
-    )
+    getPdmById(selectedPdm)
       .then((pdm) => {
-        const sorted = [...pdm.attributes].sort((a, b) => a.order - b.order)
+        const attrs = (pdm.attributes ?? []) as Attribute[]
+        const sorted = [...attrs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
         setAttributes(sorted)
 
         // Development aid — log the full schema so the team can see all fields
         console.group(`[PDM] ${pdm.name} (${pdm.internal_code})`)
         console.log('id:', pdm.id)
-        console.log('attributes (%d fields):', sorted.length)
-        sorted.forEach((attr, i) => {
+        console.log('attributes (%d fields):', attrs.length)
+        attrs.forEach((attr, i) => {
           const type = attr.dataType === 'lov'
             ? `LOV [${(attr.allowedValues ?? []).map(v => v.value).join(' | ')}]`
             : attr.dataType
@@ -152,7 +149,7 @@ export default function NewMaterialRequestPage() {
       })
       .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar atributos'))
       .finally(() => setAttributesLoading(false))
-  }, [selectedPdm, accessToken])
+  }, [selectedPdm])
 
   const selectedPdmTemplate = pdms.find((p) => p.id === selectedPdm) ?? null
 
@@ -173,16 +170,11 @@ export default function NewMaterialRequestPage() {
   }, [selectedPdm])
 
   const handleSearch = useCallback((q: string) => {
-    if (!accessToken || !q.trim()) return
+    if (!q.trim()) return
     setSearchLoading(true)
-    const params = new URLSearchParams()
-    params.set('q', q.trim())
-    apiGetWithAuth<MaterialSearchItem[]>(
-      `/api/database/materials/search?${params.toString()}`,
-      accessToken
-    )
+    searchMaterials(q.trim())
       .then((data) => {
-        setSearchResults(Array.isArray(data) ? data : [])
+        setSearchResults((Array.isArray(data) ? data : []) as MaterialSearchItem[])
         setHasSearched(true)
       })
       .catch(() => {
@@ -190,7 +182,7 @@ export default function NewMaterialRequestPage() {
         setHasSearched(true)
       })
       .finally(() => setSearchLoading(false))
-  }, [accessToken])
+  }, [])
 
   const validateStep = (step: number): boolean => {
     if (step === 1) {
@@ -221,6 +213,10 @@ export default function NewMaterialRequestPage() {
 
   const handleNext = async () => {
     if (currentStep === 4) {
+      if (selectedPdm == null) {
+        toast.error('Selecione um PDM.')
+        return
+      }
       // Build the generated description the same way ReviewPhase renders it
       const selectedPdmObj = pdms.find((p) => p.id === selectedPdm) ?? null
       const generatedDescription = selectedPdmObj
@@ -247,25 +243,22 @@ export default function NewMaterialRequestPage() {
         requester: requesterName,
         cost_center: costCenter,
         urgency,
+        justificativa: justificativa,
         generated_description: generatedDescription,
         values: formData,
-        // Pass filenames for the legacy JSON column; the real files are
-        // uploaded individually after the request row is created.
         attachments: uploadedFiles.map((f) => f.file.name),
       }
 
       setIsSubmitting(true)
       try {
         // Step 1 — create the request record
-        const result = await apiPostWithAuth<{ id: number }>('/api/requests', payload, accessToken)
+        const result = await createRequest(payload)
         const requestId = result.id
 
-        // Step 2 — upload each file to the new request_attachments table
+        // Step 2 — upload each file to Supabase Storage
         if (uploadedFiles.length > 0) {
           const uploadResults = await Promise.allSettled(
-            uploadedFiles.map((uf) =>
-              apiUpload(`/api/requests/${requestId}/attachments`, uf.file)
-            )
+            uploadedFiles.map((uf) => uploadRequestAttachment(requestId, uf.file))
           )
           const failed = uploadResults.filter((r) => r.status === 'rejected')
           if (failed.length > 0) {
@@ -351,7 +344,6 @@ export default function NewMaterialRequestPage() {
             {/* Step 0 – Link de Pesquisa */}
             {currentStep === 0 && (
               <PhaseSearch
-                accessToken={accessToken}
                 hasSearched={hasSearched}
                 searchResults={searchResults}
                 searchLoading={searchLoading}
@@ -400,7 +392,7 @@ export default function NewMaterialRequestPage() {
               <ReviewPhase
                 pdm={selectedPdmTemplate}
                 attributes={attributes}
-                formData={formData}
+                formData={formData as Record<string, string>}
                 quantity={quantity}
                 requesterName={requesterName}
                 costCenter={costCenter}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { apiGetWithAuth, apiPostWithAuth, apiPatchWithAuth, apiDownloadWithAuth, apiUploadWithAuth } from '@/lib/api'
+import { getUsersApi, createUserApi, updateUserApi, getRoles, getTenants, downloadFile, uploadUsersImport } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -34,13 +34,15 @@ import {
 type Role = { id: number; name: string }
 
 type User = {
-  id: number
+  id: string
   name: string
   email: string
   role_id: number
-  role_name: string | null
+  role_name?: string | null
   is_active: boolean
-  created_at: string | null
+  created_at?: string | null
+  tenant_id?: number
+  tenant_name?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,12 +86,13 @@ interface UserModalProps {
   mode: ModalMode
   initial?: User | null
   roles: Role[]
-  accessToken: string | null
+  tenants: { id: number; name: string }[]
+  currentUserTenantId?: number
   onClose: () => void
   onSaved: (u: User) => void
 }
 
-function UserModal({ mode, initial, roles, onClose, onSaved, accessToken }: UserModalProps) {
+function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose, onSaved }: UserModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [email, setEmail] = useState(initial?.email ?? '')
   const [password, setPassword] = useState('')
@@ -112,25 +115,23 @@ function UserModal({ mode, initial, roles, onClose, onSaved, accessToken }: User
       return
     }
 
-    if (!accessToken) {
-      toast.error('Sessão expirada. Faça login novamente.')
-      return
-    }
     setSaving(true)
     try {
       let saved: User
       if (mode === 'create') {
-        saved = await apiPostWithAuth<User>('/admin/users', {
+        const body: { name: string; email: string; password: string; role_id: number; tenant_id?: number } = {
           name: name.trim(),
           email: email.trim().toLowerCase(),
           password,
           role_id: roleId,
-        }, accessToken)
+        }
+        if (currentUserTenantId) body.tenant_id = currentUserTenantId
+        saved = await createUserApi(body) as User
         toast.success('Usuário criado com sucesso.')
       } else {
         const body: Record<string, unknown> = { name: name.trim(), role_id: roleId }
         if (password) body.password = password
-        saved = await apiPatchWithAuth<User>(`/admin/users/${initial!.id}`, body, accessToken)
+        saved = await updateUserApi(initial!.id, body) as User
         toast.success('Usuário atualizado.')
       }
       onSaved(saved)
@@ -271,11 +272,12 @@ type UserImportRow = {
 }
 
 export default function UsersPage() {
-  const { can, accessToken, user } = useUser()
+  const { can, user } = useUser()
   const canManageUsers = user?.is_master || can('can_manage_users')
 
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
+  const [tenants, setTenants] = useState<{ id: number; name: string; slug?: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
@@ -283,7 +285,7 @@ export default function UsersPage() {
   const [modalMode, setModalMode] = useState<ModalMode>('create')
   const [editTarget, setEditTarget] = useState<User | null>(null)
 
-  const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   const [showUserImportModal, setShowUserImportModal] = useState(false)
   const [userImportStep, setUserImportStep] = useState(1)
@@ -298,25 +300,22 @@ export default function UsersPage() {
   const [userImportError, setUserImportError] = useState<string | null>(null)
 
   const fetchUsers = useCallback(async () => {
-    if (!accessToken) return
     setLoading(true)
     try {
-      const [u, r] = await Promise.all([
-        apiGetWithAuth<User[]>('/admin/users', accessToken),
-        apiGetWithAuth<Role[]>('/admin/roles', accessToken),
-      ])
-      setUsers(u)
+      const [u, r, t] = await Promise.all([getUsersApi(), getRoles(), getTenants()])
+      setUsers(u as User[])
       setRoles(r)
+      setTenants(t)
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
-    if (accessToken) fetchUsers()
-  }, [accessToken, fetchUsers])
+    fetchUsers()
+  }, [fetchUsers])
 
   function openCreate() {
     setEditTarget(null)
@@ -341,12 +340,9 @@ export default function UsersPage() {
   }
 
   async function toggleActive(u: User) {
-    if (!accessToken) return
     setTogglingId(u.id)
     try {
-      const updated = await apiPatchWithAuth<User>(`/admin/users/${u.id}`, {
-        is_active: !u.is_active,
-      }, accessToken)
+      const updated = await updateUserApi(u.id, { is_active: !u.is_active }) as User
       setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       toast.success(updated.is_active ? 'Usuário ativado.' : 'Usuário desativado.')
     } catch (err) {
@@ -365,10 +361,9 @@ export default function UsersPage() {
   }
 
   const handleUserDownloadTemplate = async () => {
-    if (!accessToken) return
     setUserImportDownloading(true)
     try {
-      await apiDownloadWithAuth('/admin/users/import-template', accessToken, 'template_importacao_usuarios.xlsx')
+      await downloadFile('/api/admin/users/import-template', 'template_importacao_usuarios.xlsx')
       toast.success('Template baixado com sucesso!')
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Falha ao baixar template')
@@ -378,11 +373,10 @@ export default function UsersPage() {
   }
 
   const handleUserExport = async () => {
-    if (!accessToken) return
     setUserExporting(true)
     try {
       const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-      await apiDownloadWithAuth('/admin/users/export', accessToken, `usuarios_export_${today}.xlsx`)
+      await downloadFile('/api/admin/users/export', `usuarios_export_${today}.xlsx`)
       toast.success('Exportação concluída!')
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Falha ao exportar')
@@ -392,15 +386,12 @@ export default function UsersPage() {
   }
 
   const handleUserValidateFile = async () => {
-    if (!accessToken || !userImportFile) return
+    if (!userImportFile) return
     setUserImportValidating(true)
     setUserImportError(null)
     try {
-      const res = await apiUploadWithAuth<{
-        dry_run: boolean
-        users: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: UserImportRow[] }
-      }>('/admin/users/import?dry_run=true', userImportFile, accessToken)
-      setUserImportResult(res)
+      const res = await uploadUsersImport(userImportFile, true)
+      setUserImportResult(res as { users: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: UserImportRow[] } })
       setUserImportStep(3)
     } catch (err) {
       setUserImportError((err as Error)?.message ?? 'Falha ao validar planilha')
@@ -410,16 +401,12 @@ export default function UsersPage() {
   }
 
   const handleUserConfirmImport = async () => {
-    if (!accessToken || !userImportFile) return
+    if (!userImportFile) return
     setUserImportConfirming(true)
     setUserImportError(null)
     try {
-      const res = await apiUploadWithAuth<{ dry_run: boolean; created: number; updated: number }>(
-        '/admin/users/import?dry_run=false',
-        userImportFile,
-        accessToken
-      )
-      toast.success(`Importação concluída: ${res.created} criados, ${res.updated} atualizados`)
+      const res = await uploadUsersImport(userImportFile, false)
+      toast.success(`Importação concluída: ${res.created ?? 0} criados, ${res.updated ?? 0} atualizados`)
       fetchUsers()
       closeUserImportModal()
     } catch (err) {
@@ -538,7 +525,7 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {filtered.map((u, i) => {
-                  const badge = roleBadgeStyle(u.role_name)
+                  const badge = roleBadgeStyle(u.role_name ?? null)
                   return (
                     <tr
                       key={u.id}
@@ -854,7 +841,8 @@ export default function UsersPage() {
           mode={modalMode}
           initial={editTarget}
           roles={roles}
-          accessToken={accessToken}
+          tenants={tenants}
+          currentUserTenantId={user?.tenant_id}
           onClose={() => setModalOpen(false)}
           onSaved={handleSaved}
         />

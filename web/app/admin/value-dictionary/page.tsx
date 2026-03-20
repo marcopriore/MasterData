@@ -19,7 +19,7 @@ import { useValueDictionary, type ValueDictionaryEntry, type DuplicateGroup } fr
 const LIMIT = 100
 
 export default function ValueDictionaryPage() {
-  const { accessToken, can } = useUser()
+  const { can } = useUser()
   const canAccess = can('can_manage_value_dictionary')
   const {
     entries,
@@ -30,7 +30,7 @@ export default function ValueDictionaryPage() {
     mergeEntries,
     syncWithPdms,
     getDuplicates,
-  } = useValueDictionary(accessToken)
+  } = useValueDictionary()
 
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
@@ -43,20 +43,19 @@ export default function ValueDictionaryPage() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (canAccess && accessToken) {
+    if (canAccess) {
       fetchEntries(search || undefined)
       setOffset(0)
     }
-  }, [canAccess, accessToken, search, fetchEntries])
+  }, [canAccess, search, fetchEntries])
 
   useEffect(() => {
-    if (canAccess && accessToken && entries.length > 0) {
+    if (canAccess && entries.length > 0) {
       getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
     }
-  }, [canAccess, accessToken, entries.length, getDuplicates])
+  }, [canAccess, entries.length, getDuplicates])
 
   const loadDuplicates = useCallback(async () => {
-    if (!accessToken) return
     try {
       const d = await getDuplicates()
       setDuplicates(Array.isArray(d) ? d : [])
@@ -65,16 +64,15 @@ export default function ValueDictionaryPage() {
     } catch (e) {
       toast.error((e as Error).message)
     }
-  }, [accessToken, getDuplicates])
+  }, [getDuplicates])
 
   useEffect(() => {
-    if (duplicatesOpen && duplicates.length === 0 && accessToken) {
+    if (duplicatesOpen && duplicates.length === 0) {
       getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
     }
-  }, [duplicatesOpen, accessToken, getDuplicates])
+  }, [duplicatesOpen, duplicates.length, getDuplicates])
 
   const handleSync = async () => {
-    if (!accessToken) return
     setSyncing(true)
     try {
       const res = await syncWithPdms()

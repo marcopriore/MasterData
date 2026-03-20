@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { apiGet, apiGetWithAuth, apiPostWithAuth, apiUploadWithAuth, apiDownloadWithAuth } from '@/lib/api'
+import {
+  getMaterials,
+  getPdms,
+  erpIntegrateMaterials,
+  downloadFile,
+  uploadMaterialsImport,
+} from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -123,7 +129,7 @@ export default function DatabasePage() {
   const router = useRouter()
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
-  const { user, accessToken, can } = useUser()
+  const { user, can } = useUser()
   const maxLength = user?.max_description_length ?? 40
   const [items, setItems] = useState<MaterialItem[]>([])
   const [total, setTotal] = useState(0)
@@ -160,7 +166,6 @@ export default function DatabasePage() {
   const [exporting, setExporting] = useState(false)
 
   const handleExportExcel = async () => {
-    if (!accessToken) return
     setExporting(true)
     try {
       const params = new URLSearchParams()
@@ -172,7 +177,7 @@ export default function DatabasePage() {
       if (appliedDateTo) params.set('date_to', appliedDateTo)
       const qs = params.toString()
       const path = `/api/database/materials/export${qs ? `?${qs}` : ''}`
-      await apiDownloadWithAuth(path, accessToken, 'materiais_export.xlsx')
+      await downloadFile(path, 'materiais_export.xlsx')
       toast.success('Exportação concluída!')
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Falha ao exportar')
@@ -216,14 +221,9 @@ export default function DatabasePage() {
   }
 
   const handleDownloadTemplate = async () => {
-    if (!accessToken) return
     setBulkImportDownloading(true)
     try {
-      await apiDownloadWithAuth(
-        '/api/database/materials/import-template',
-        accessToken,
-        'template_importacao_materiais.xlsx'
-      )
+      await downloadFile('/api/database/materials/import-template', 'template_importacao_materiais.xlsx')
       toast.success('Template baixado com sucesso!')
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Falha ao baixar template')
@@ -233,31 +233,11 @@ export default function DatabasePage() {
   }
 
   const handleValidateFile = async () => {
-    if (!accessToken || !bulkImportFile) return
+    if (!bulkImportFile) return
     setBulkImportValidating(true)
     setBulkImportError(null)
     try {
-      const res = await apiUploadWithAuth<{
-        dry_run: boolean
-        total_rows: number
-        valid_rows: number
-        error_rows: number
-        warning_rows: number
-        rows: Array<{
-          row_number: number
-          operacao: string
-          codigo_material: string | null
-          descricao: string | null
-          status: 'ok' | 'warning' | 'error'
-          errors: string[]
-          warnings: string[]
-          data: Record<string, unknown>
-        }>
-      }>(
-        '/api/database/materials/import?dry_run=true',
-        bulkImportFile,
-        accessToken
-      )
+      const res = await uploadMaterialsImport(bulkImportFile, true)
       setBulkImportResult(res)
       setBulkImportStep(3)
     } catch (err) {
@@ -268,18 +248,14 @@ export default function DatabasePage() {
   }
 
   const handleConfirmImport = async () => {
-    if (!accessToken || !bulkImportFile || !bulkImportResult || bulkImportResult.error_rows > 0) return
+    if (!bulkImportFile || !bulkImportResult || bulkImportResult.error_rows > 0) return
     setBulkImportConfirming(true)
     setBulkImportError(null)
     try {
-      const res = await apiUploadWithAuth<{ created: number; updated: number }>(
-        '/api/database/materials/import?dry_run=false',
-        bulkImportFile,
-        accessToken
-      )
+      const res = await uploadMaterialsImport(bulkImportFile, false)
       closeBulkImportModal()
       fetchMaterials()
-      toast.success(`${res.created} criados, ${res.updated} atualizados!`)
+      toast.success(`${res.created ?? 0} criados, ${res.updated ?? 0} atualizados!`)
     } catch (err) {
       setBulkImportError((err as Error)?.message ?? 'Falha ao importar materiais')
     } finally {
@@ -292,21 +268,19 @@ export default function DatabasePage() {
   const updateCount = bulkImportResult?.rows.filter((r) => r.operacao === 'E' && r.status !== 'error').length ?? 0
 
   const fetchMaterials = useCallback(() => {
-    if (!accessToken) return
     setLoading(true)
-    const params = new URLSearchParams()
-    params.set('page', String(page))
-    params.set('limit', String(limit))
-    if (appliedSearch) params.set('q', appliedSearch)
-    if (appliedStatus) params.set('status', appliedStatus)
-    if (appliedPdm) params.set('pdm_code', appliedPdm)
-    if (appliedErpFilter) params.set('erp_status', appliedErpFilter)
-    if (appliedDateFrom) params.set('date_from', appliedDateFrom)
-    if (appliedDateTo) params.set('date_to', appliedDateTo)
-    const url = `/api/database/materials?${params.toString()}`
-    apiGetWithAuth<MaterialsResponse>(url, accessToken)
+    getMaterials({
+      page,
+      limit,
+      q: appliedSearch || undefined,
+      status: appliedStatus || undefined,
+      pdm_code: appliedPdm || undefined,
+      erp_status: appliedErpFilter || undefined,
+      date_from: appliedDateFrom || undefined,
+      date_to: appliedDateTo || undefined,
+    })
       .then((data) => {
-        setItems(data.items ?? [])
+        setItems((data.items ?? []) as MaterialItem[])
         setTotal(data.total ?? 0)
       })
       .catch(() => {
@@ -314,14 +288,13 @@ export default function DatabasePage() {
         setTotal(0)
       })
       .finally(() => setLoading(false))
-  }, [accessToken, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
+  }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
-    if (!accessToken) return
-    apiGetWithAuth<PDMTemplate[]>('/api/pdm', accessToken)
-      .then((list) => setPdms(list ?? []))
+    getPdms()
+      .then((list) => setPdms((list ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code }))))
       .catch(() => setPdms([]))
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
     fetchMaterials()
@@ -406,7 +379,7 @@ export default function DatabasePage() {
   }
 
   const handleConfirmErpIntegrate = async () => {
-    if (!accessToken || selectedIds.length === 0) return
+    if (selectedIds.length === 0) return
     const overLimit = selectedIds.filter((id) => {
       const m = items.find((r) => r.id === id)
       return (m?.description?.length ?? 0) > maxLength
@@ -420,11 +393,7 @@ export default function DatabasePage() {
     setIntegrating(true)
     setErpModalError(null)
     try {
-      const res = await apiPostWithAuth<{ integrated: number[]; skipped: number[]; total: number }>(
-        '/api/database/materials/erp-integrate',
-        { material_ids: selectedIds },
-        accessToken
-      )
+      const res = await erpIntegrateMaterials(selectedIds)
       setShowErpModal(false)
       setSelectedIds([])
       fetchMaterials()

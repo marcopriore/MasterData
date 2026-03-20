@@ -46,7 +46,7 @@ export interface MaterialRequest {
   pendingAction?: string
   description: string
   generated_description?: string
-  assigned_to_id?: number | null
+  assigned_to_id?: string | null
   assigned_to_name?: string | null
 }
 
@@ -118,7 +118,7 @@ interface RequestCardProps {
   /** Show Iniciar Atendimento e badges (role_type=etapa, excl. ADMIN). Aprovar/Rejeitar só no modal. */
   showActionButtons?: boolean
   /** Current user id — used for assign / own-attendance logic */
-  currentUserId?: number | null
+  currentUserId?: string | number | null
   onIniciarAtendimentoClick?: () => void
 }
 

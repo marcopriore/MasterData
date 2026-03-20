@@ -273,68 +273,35 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [supabase, fetchProfile]
   )
 
-  // ── switchTenant (MASTER only) — ainda usa FastAPI, requer backend atualizado ─
+  // ── switchTenant (MASTER only) via API Route Supabase ────────────────────────
 
   const switchTenant = useCallback(async (tenantId: number) => {
-    const token = accessToken
-    if (!token) throw new Error('Sessão expirada')
-    const BASE_URL = process.env.NEXT_PUBLIC_API_URL
-    if (!BASE_URL) throw new Error('NEXT_PUBLIC_API_URL não definido')
-    const res = await fetch(`${BASE_URL}/admin/auth/switch-tenant`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ tenant_id: tenantId }),
-    })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      throw new Error(typeof json?.detail === 'string' ? json.detail : `HTTP ${res.status}`)
+    const { switchTenantApi } = await import('@/lib/supabase-api')
+    await switchTenantApi(tenantId)
+    const { data: { session } } = await supabase.auth.refreshSession()
+    if (session?.user) {
+      const profile = await fetchProfile(session.user.id)
+      if (profile) {
+        setUserState(profile)
+        setAccessTokenState(session.access_token)
+      }
     }
-    const data = (await res.json()) as {
-      access_token: string
-      tenant_id: number
-      tenant_name: string
-    }
-    if (user) {
-      setUserState({
-        ...user,
-        tenant_id: data.tenant_id,
-        tenant_name: data.tenant_name,
-        is_master: true,
-      })
-    }
-    setAccessTokenState(data.access_token)
     window.location.reload()
-  }, [accessToken, user])
+  }, [supabase, fetchProfile])
 
   const switchTenantBack = useCallback(async () => {
-    const token = accessToken
-    if (!token) throw new Error('Sessão expirada')
-    const BASE_URL = process.env.NEXT_PUBLIC_API_URL
-    if (!BASE_URL) throw new Error('NEXT_PUBLIC_API_URL não definido')
-    const res = await fetch(`${BASE_URL}/admin/auth/switch-tenant/back`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      throw new Error(typeof json?.detail === 'string' ? json.detail : `HTTP ${res.status}`)
+    const { switchTenantBackApi } = await import('@/lib/supabase-api')
+    await switchTenantBackApi()
+    const { data: { session } } = await supabase.auth.refreshSession()
+    if (session?.user) {
+      const profile = await fetchProfile(session.user.id)
+      if (profile) {
+        setUserState(profile)
+        setAccessTokenState(session.access_token)
+      }
     }
-    const data = (await res.json()) as {
-      access_token: string
-      tenant_id: number
-      tenant_name: string
-    }
-    if (user) {
-      setUserState({
-        ...user,
-        tenant_id: data.tenant_id,
-        tenant_name: data.tenant_name,
-        is_master: true,
-      })
-    }
-    setAccessTokenState(data.access_token)
     window.location.reload()
-  }, [accessToken, user])
+  }, [supabase, fetchProfile])
 
   // ── logout ──────────────────────────────────────────────────────────────────
 

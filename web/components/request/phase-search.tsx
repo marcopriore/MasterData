@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { apiGetWithAuth } from '@/lib/api'
+import { getMaterialById } from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -74,7 +74,6 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 interface PhaseSearchProps {
-  accessToken: string | null
   hasSearched: boolean
   searchResults: MaterialSearchItem[]
   searchLoading: boolean
@@ -84,7 +83,6 @@ interface PhaseSearchProps {
 }
 
 export function PhaseSearch({
-  accessToken,
   hasSearched,
   searchResults,
   searchLoading,
@@ -105,10 +103,9 @@ export function PhaseSearch({
   const openDetailModal = (item: MaterialSearchItem) => {
     setModalMaterial(item)
     setDetailMaterial(null)
-    if (!accessToken) return
     setDetailLoading(true)
-    apiGetWithAuth<MaterialSearchItem>(`/api/database/materials/${item.id}`, accessToken)
-      .then(setDetailMaterial)
+    getMaterialById(item.id)
+      .then((d) => setDetailMaterial(d as MaterialSearchItem))
       .catch(() => setDetailMaterial(item))
       .finally(() => setDetailLoading(false))
   }

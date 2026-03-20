@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { apiGetWithAuth, apiPostWithAuth, apiPatchWithAuth } from '@/lib/api'
+import { getRoles, createRole, updateRole } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -167,12 +167,11 @@ function PermToggle({
 interface RoleModalProps {
   mode: 'create' | 'edit'
   initial?: Role | null
-  accessToken: string | null
   onClose: () => void
   onSaved: (r: Role) => void
 }
 
-function RoleModal({ mode, initial, accessToken, onClose, onSaved }: RoleModalProps) {
+function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
   const [name, setName] = useState(initial?.name ?? '')
   const [perms, setPerms] = useState<Permissions>(
     initial?.permissions ?? emptyPermissions()
@@ -186,20 +185,19 @@ function RoleModal({ mode, initial, accessToken, onClose, onSaved }: RoleModalPr
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!name.trim()) { toast.error('Informe o nome do perfil.'); return }
-    if (!accessToken) { toast.error('Sessão expirada. Faça login novamente.'); return }
 
     setSaving(true)
     try {
       let saved: Role
       if (mode === 'create') {
-        saved = await apiPostWithAuth<Role>('/admin/roles', { name: name.trim(), role_type: 'sistema', permissions: perms }, accessToken)
+        saved = (await createRole({ name: name.trim(), role_type: 'sistema', permissions: perms })) as Role
         toast.success('Perfil criado com sucesso.')
       } else {
-        saved = await apiPatchWithAuth<Role>(`/admin/roles/${initial!.id}`, {
+        saved = (await updateRole(initial!.id, {
           name: name.trim(),
           role_type: initial?.role_type ?? 'sistema',
           permissions: perms,
-        }, accessToken)
+        })) as Role
         toast.success('Perfil atualizado.')
       }
       onSaved(saved)
@@ -298,7 +296,7 @@ function RoleModal({ mode, initial, accessToken, onClose, onSaved }: RoleModalPr
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function RolesPage() {
-  const { accessToken, user, can } = useUser()
+  const { user, can } = useUser()
   const canManageRoles = user?.is_master || can('can_manage_roles')
 
   const [roles, setRoles] = useState<Role[]>([])
@@ -308,20 +306,19 @@ export default function RolesPage() {
   const [editTarget, setEditTarget] = useState<Role | null>(null)
 
   const fetchRoles = useCallback(async () => {
-    if (!accessToken) return
     setLoading(true)
     try {
-      setRoles(await apiGetWithAuth<Role[]>('/admin/roles', accessToken))
+      setRoles((await getRoles()) as Role[])
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
-    if (accessToken) fetchRoles()
-  }, [accessToken, fetchRoles])
+    fetchRoles()
+  }, [fetchRoles])
 
   function openCreate() {
     setEditTarget(null)
@@ -482,7 +479,6 @@ export default function RolesPage() {
         <RoleModal
           mode={modalMode}
           initial={editTarget}
-          accessToken={accessToken}
           onClose={() => setModalOpen(false)}
           onSaved={handleSaved}
         />

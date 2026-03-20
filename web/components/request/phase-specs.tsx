@@ -200,7 +200,13 @@ export function PhaseSpecs({
                             />
                           ) : isLov ? (
                             <Select
-                              value={typeof values[attr.id] === "string" ? values[attr.id] ?? "" : ""}
+                              value={
+                                  typeof values[attr.id] === "string"
+                                    ? (values[attr.id] as string) ?? ""
+                                    : typeof values[attr.id] === "object" && values[attr.id] !== null && "value" in (values[attr.id] as object)
+                                      ? String((values[attr.id] as { value?: string }).value ?? "")
+                                      : ""
+                                }
                               onValueChange={(v) => onChange(attr.id, v)}
                             >
                               <SelectTrigger

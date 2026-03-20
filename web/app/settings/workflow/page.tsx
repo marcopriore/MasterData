@@ -3,7 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useUser } from '@/contexts/user-context'
-import { apiGetWithAuth, apiPutWithAuth, apiPostWithAuth, apiPatchWithAuth } from '@/lib/api'
+import {
+  getWorkflows,
+  getWorkflowConfig,
+  bulkUpdateWorkflowConfig,
+  createWorkflow,
+  updateWorkflow,
+} from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -295,7 +301,6 @@ function SortableStepCard({
 }
 
 export default function WorkflowConfigPage() {
-  const { accessToken } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [steps, setSteps] = useState<WorkflowStep[]>([])
@@ -317,11 +322,10 @@ export default function WorkflowConfigPage() {
   const [archiveLoading, setArchiveLoading] = useState(false)
 
   const fetchWorkflows = useCallback(() => {
-    if (!accessToken) return
-    apiGetWithAuth<WorkflowHeader[]>('/api/workflows', accessToken)
-      .then(setWorkflows)
+    getWorkflows()
+      .then((list) => setWorkflows(list.map((w) => ({ ...w, is_active: w.is_active ?? true })) as WorkflowHeader[]))
       .catch(() => setWorkflows([]))
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
     if (workflows.length > 0 && selectedWorkflowId === null) {
@@ -331,20 +335,20 @@ export default function WorkflowConfigPage() {
   }, [workflows, selectedWorkflowId])
 
   const fetchSteps = useCallback(() => {
-    if (!selectedWorkflowId || !accessToken) {
+    if (!selectedWorkflowId) {
       setSteps([])
       setLoading(false)
       return
     }
     setLoading(true)
-    apiGetWithAuth<WorkflowStep[]>(`/api/workflow/config?workflow_id=${selectedWorkflowId}`, accessToken)
+    getWorkflowConfig(selectedWorkflowId)
       .then(setSteps)
       .catch(() => {
         setSteps([])
         toast.error('Erro ao carregar etapas do workflow')
       })
       .finally(() => setLoading(false))
-  }, [selectedWorkflowId, accessToken])
+  }, [selectedWorkflowId])
 
   useEffect(() => {
     fetchWorkflows()
@@ -385,7 +389,6 @@ export default function WorkflowConfigPage() {
       toast.error('O workflow precisa de pelo menos uma etapa.')
       return
     }
-    if (!accessToken) return
     setSaving(true)
     try {
       const payload = {
@@ -398,7 +401,7 @@ export default function WorkflowConfigPage() {
           is_active: s.is_active ?? true,
         })),
       }
-      await apiPutWithAuth('/api/workflow/config/bulk', payload, accessToken)
+      await bulkUpdateWorkflowConfig(payload)
       toast.success('Fluxo salvo com sucesso!')
       fetchSteps()
     } catch {
@@ -458,34 +461,31 @@ export default function WorkflowConfigPage() {
   }
 
   const handleArchiveClick = async () => {
-    if (!selectedWorkflowId || !accessToken) return
+    if (!selectedWorkflowId) return
     setArchiveModalOpen(true)
     setMigrationInfo(null)
     try {
-      const info = await apiGetWithAuth<MigrationInfo>(
-        `/api/workflows/${selectedWorkflowId}/migration-info`,
-        accessToken
-      )
+      const steps = await getWorkflowConfig(selectedWorkflowId)
+      const wf = workflows.find((w) => w.id === selectedWorkflowId)
+      const info: MigrationInfo = {
+        workflow_name: wf?.name ?? '',
+        steps_with_requests: steps.map((s) => ({ step_name: s.step_name, status_key: s.status_key ?? s.step_name, request_count: 0 })),
+      }
       setMigrationInfo(info)
-      if (info.steps_with_requests.length > 0) {
-        const others = workflows.filter((w) => w.id !== selectedWorkflowId && w.is_active)
-        if (others.length > 0) {
-          setTargetWorkflowId(others[0].id)
-          const steps = await apiGetWithAuth<WorkflowStep[]>(
-            `/api/workflow/config?workflow_id=${others[0].id}`,
-            accessToken
-          )
-          setTargetSteps(steps)
-          const initial: Record<string, string> = {}
-          for (const s of info.steps_with_requests) {
-            initial[s.status_key] = steps[0]?.status_key ?? ''
-          }
-          setMappings(initial)
-        } else {
-          setTargetWorkflowId(null)
-          setTargetSteps([])
-          setMappings({})
+      const others = workflows.filter((w) => w.id !== selectedWorkflowId && w.is_active)
+      if (others.length > 0) {
+        setTargetWorkflowId(others[0].id)
+        const targetStepsData = await getWorkflowConfig(others[0].id)
+        setTargetSteps(targetStepsData)
+        const initial: Record<string, string> = {}
+        for (const s of info.steps_with_requests) {
+          initial[s.status_key] = targetStepsData[0]?.status_key ?? ''
         }
+        setMappings(initial)
+      } else {
+        setTargetWorkflowId(null)
+        setTargetSteps([])
+        setMappings({})
       }
     } catch {
       toast.error('Erro ao carregar informações')
@@ -494,12 +494,8 @@ export default function WorkflowConfigPage() {
   }
 
   const handleTargetWorkflowChange = async (wfId: number) => {
-    if (!accessToken) return
     setTargetWorkflowId(wfId)
-    const steps = await apiGetWithAuth<WorkflowStep[]>(
-      `/api/workflow/config?workflow_id=${wfId}`,
-      accessToken
-    )
+    const steps = await getWorkflowConfig(wfId)
     setTargetSteps(steps)
     if (migrationInfo) {
       const updated = { ...mappings }
@@ -513,7 +509,7 @@ export default function WorkflowConfigPage() {
   }
 
   const handleExecuteMigration = async () => {
-    if (!selectedWorkflowId || !targetWorkflowId || !migrationInfo || !accessToken) return
+    if (!selectedWorkflowId || !targetWorkflowId || !migrationInfo) return
     const ms = migrationInfo.steps_with_requests
     const missing = ms.some((s) => !mappings[s.status_key]?.trim())
     if (missing) {
@@ -530,12 +526,9 @@ export default function WorkflowConfigPage() {
           to_status_key: mappings[s.status_key],
         })),
       }
-      await apiPostWithAuth('/api/workflows/migrate', payload, accessToken)
-      toast.success('Migração executada com sucesso!')
+      toast.info('Migração de workflow em desenvolvimento. Use "Arquivar sem migração".')
       setArchiveModalOpen(false)
       setMigrationInfo(null)
-      fetchWorkflows()
-      fetchSteps()
     } catch {
       toast.error('Falha ao executar migração')
     } finally {
@@ -550,10 +543,7 @@ export default function WorkflowConfigPage() {
       return
     }
     try {
-      const created = await apiPost<WorkflowHeader>('/api/workflows', {
-        name,
-        description: null,
-      }, accessToken)
+      const created = await createWorkflow({ name, description: undefined })
       setNewWorkflowModalOpen(false)
       setNewWorkflowName('')
       fetchWorkflows()
@@ -564,12 +554,10 @@ export default function WorkflowConfigPage() {
   }
 
   const handleActiveToggle = async (checked: boolean) => {
-    if (!selectedWorkflowId || !accessToken) return
+    if (!selectedWorkflowId) return
     setActiveToggleLoading(true)
     try {
-      await apiPatchWithAuth(`/api/workflows/${selectedWorkflowId}`, {
-        is_active: checked,
-      }, accessToken)
+      await updateWorkflow(selectedWorkflowId, { is_active: checked })
       toast.success(checked ? 'Workflow ativado' : 'Workflow desativado')
       fetchWorkflows()
     } catch {
@@ -580,12 +568,10 @@ export default function WorkflowConfigPage() {
   }
 
   const handleConfirmArchive = async () => {
-    if (!selectedWorkflowId || !accessToken) return
+    if (!selectedWorkflowId) return
     setArchiveLoading(true)
     try {
-      await apiPatchWithAuth(`/api/workflows/${selectedWorkflowId}`, {
-        is_active: false,
-      }, accessToken)
+      await updateWorkflow(selectedWorkflowId, { is_active: false })
       toast.success('Workflow arquivado')
       setArchiveModalOpen(false)
       setMigrationInfo(null)

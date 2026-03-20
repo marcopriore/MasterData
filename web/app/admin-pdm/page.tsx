@@ -21,10 +21,18 @@ import { Search, Plus, FileText, FileDown, Upload, Loader2, X, FileSpreadsheet, 
 import { Toaster, toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useUser } from "@/contexts/user-context"
-import { apiDownloadWithAuth, apiUploadWithAuth, apiGetWithAuth, apiPostWithAuth, apiPutWithAuth } from "@/lib/api"
+import {
+  getPdms,
+  getPdmById,
+  createPdm,
+  updatePdm,
+  downloadPdmImportTemplate,
+  downloadPdmsExport,
+  uploadPdmsImport,
+} from "@/lib/supabase-api"
 
 export default function MDMDashboard() {
-  const { accessToken, can } = useUser()
+  const { can } = useUser()
   const showExport = can("can_edit_pdm")
   const showBulkImport = can("can_bulk_import")
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
@@ -62,13 +70,13 @@ export default function MDMDashboard() {
 
   useEffect(() => {
     const fetchPdms = async () => {
-      if (!accessToken) {
-        setPdmsLoading(false)
-        return
-      }
       try {
-        const data = await apiGetWithAuth<PDMTemplate[]>("/api/pdm", accessToken)
-        setPdms(Array.isArray(data) ? data : [])
+        const data = await getPdms()
+        setPdms(
+          (Array.isArray(data)
+            ? data.map((p) => ({ ...p, is_active: p.is_active ?? true, attributes: p.attributes ?? [] }))
+            : []) as PDMTemplate[]
+        )
       } catch {
         setPdms([])
       } finally {
@@ -76,7 +84,7 @@ export default function MDMDashboard() {
       }
     }
     fetchPdms()
-  }, [accessToken])
+  }, [])
 
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return pdms
@@ -171,25 +179,15 @@ export default function MDMDashboard() {
       })),
     }
 
-    if (!accessToken) {
-      toast.error("Autenticação necessária para salvar.")
-      return
-    }
-
     try {
-      let saved: PDMTemplate
-      if (selectedPdmId != null) {
-        saved = await apiPutWithAuth<PDMTemplate>(
-          `/api/pdm/${selectedPdmId}`,
-          payload,
-          accessToken
-        )
-      } else {
-        saved = await apiPostWithAuth<PDMTemplate>(
-          "/api/pdm",
-          payload,
-          accessToken
-        )
+      const raw =
+        selectedPdmId != null
+          ? await updatePdm(selectedPdmId, payload)
+          : await createPdm(payload)
+      const saved: PDMTemplate = {
+        ...raw,
+        is_active: raw.is_active ?? true,
+        attributes: (raw.attributes ?? []) as PDMTemplate["attributes"],
       }
       toast.success("Estrutura salva com sucesso!", {
         description: `PDM "${pdmName}" foi salvo.`,
@@ -220,10 +218,9 @@ export default function MDMDashboard() {
   }
 
   const handlePdmDownloadTemplate = async () => {
-    if (!accessToken) return
     setPdmImportDownloading(true)
     try {
-      await apiDownloadWithAuth("/api/pdm/import-template", accessToken, "template_importacao_pdm.xlsx")
+      await downloadPdmImportTemplate()
       toast.success("Template baixado com sucesso!")
     } catch (err) {
       toast.error((err as Error)?.message ?? "Falha ao baixar template")
@@ -233,16 +230,12 @@ export default function MDMDashboard() {
   }
 
   const handlePdmValidateFile = async () => {
-    if (!accessToken || !pdmImportFile) return
+    if (!pdmImportFile) return
     setPdmImportValidating(true)
     setPdmImportError(null)
     try {
-      const res = await apiUploadWithAuth<{
-        dry_run: boolean
-        pdm: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: Array<{ row_number: number; operacao: string; pdm_code: string | null; nome: string | null; status: string; errors: string[]; warnings: string[] }> }
-        attributes: { total_rows: number; valid_rows: number; error_rows: number; warning_rows: number; rows: Array<{ row_number: number; operacao: string; pdm_code: string | null; atributo_key: string | null; status: string; errors: string[]; warnings: string[] }> }
-      }>("/api/pdm/import?dry_run=true", pdmImportFile, accessToken)
-      setPdmImportResult(res)
+      const res = await uploadPdmsImport(pdmImportFile, true)
+      if ('pdm' in res) setPdmImportResult(res)
       setPdmImportStep(3)
     } catch (err) {
       setPdmImportError((err as Error)?.message ?? "Falha ao validar planilha")
@@ -252,28 +245,24 @@ export default function MDMDashboard() {
   }
 
   const handlePdmConfirmImport = async () => {
-    if (!accessToken || !pdmImportFile || !pdmImportResult) return
+    if (!pdmImportFile || !pdmImportResult) return
     const hasPdmErrors = pdmImportResult.pdm?.error_rows ? pdmImportResult.pdm.error_rows > 0 : false
     const hasAttrErrors = pdmImportResult.attributes?.error_rows ? pdmImportResult.attributes.error_rows > 0 : false
     if (hasPdmErrors || hasAttrErrors) return
     setPdmImportConfirming(true)
     setPdmImportError(null)
     try {
-      const res = await apiUploadWithAuth<{
-        dry_run: boolean
-        pdm_created: number
-        pdm_updated: number
-        attr_created: number
-        attr_updated: number
-        attr_deleted: number
-      }>("/api/pdm/import?dry_run=false", pdmImportFile, accessToken)
+      const res = await uploadPdmsImport(pdmImportFile, false)
+      if (!('pdm_created' in res)) throw new Error("Resposta inesperada")
       toast.success(
         `Importação concluída: ${res.pdm_created + res.pdm_updated} PDM(s), ${res.attr_created + res.attr_updated} atributo(s) criados/atualizados, ${res.attr_deleted} deletados`
       )
       closePdmImportModal()
       try {
-        const data = await apiGetWithAuth<PDMTemplate[]>("/api/pdm", accessToken)
-        setPdms(data)
+        const data = await getPdms()
+        setPdms(
+          data.map((p) => ({ ...p, is_active: p.is_active ?? true, attributes: p.attributes ?? [] })) as PDMTemplate[]
+        )
       } catch {
         // ignore refresh error
       }
@@ -285,10 +274,9 @@ export default function MDMDashboard() {
   }
 
   const handlePdmExport = async () => {
-    if (!accessToken) return
     setPdmExporting(true)
     try {
-      await apiDownloadWithAuth("/api/pdm/export", accessToken, "pdm_export.xlsx")
+      await downloadPdmsExport()
       toast.success("Exportação concluída!")
     } catch (err) {
       toast.error((err as Error)?.message ?? "Falha ao exportar")
@@ -339,10 +327,12 @@ export default function MDMDashboard() {
         is_active: true,
         attributes: clonedAttributes,
       }
-      if (!accessToken) {
-        throw new Error("Autenticação necessária para clonar PDM.")
+      const raw = await createPdm(payload)
+      const saved: PDMTemplate = {
+        ...raw,
+        is_active: raw.is_active ?? true,
+        attributes: (raw.attributes ?? []) as PDMTemplate["attributes"],
       }
-      const saved = await apiPostWithAuth<PDMTemplate>("/api/pdm", payload, accessToken)
       toast.success("PDM clonado!", {
         description: `"${saved.name}" foi criado com sucesso.`,
       })

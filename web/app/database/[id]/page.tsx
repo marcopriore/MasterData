@@ -3,7 +3,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { apiGetWithAuth, apiPatchWithAuth, apiPostWithAuth } from '@/lib/api'
+import {
+  getMaterialById,
+  getPdms,
+  getPdmById,
+  updateMaterialAttributes,
+  updateMaterialStandardize,
+  erpIntegrateMaterials,
+} from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { NumericUnitInput } from '@/components/ui/numeric-unit-input'
@@ -87,6 +94,7 @@ function formatNumber(v: number | null): string {
   if (v == null) return '—'
   return String(v)
 }
+const formatNumDisplay = (v: unknown) => formatNumber(v as number | null)
 
 function formatCurrency(v: number | null): string {
   if (v == null) return '—'
@@ -95,6 +103,7 @@ function formatCurrency(v: number | null): string {
     currency: 'BRL',
   }).format(v)
 }
+const formatCurrDisplay = (v: unknown) => formatCurrency(v as number | null)
 
 function Cell({ value }: { value: string | number | null }) {
   const s = value != null && String(value).trim() ? String(value) : '—'
@@ -172,7 +181,7 @@ function EditableRow({
         <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
         <input
           type={fieldKey === 'gross_weight' || fieldKey === 'net_weight' || fieldKey === 'lead_time' || fieldKey === 'min_stock' || fieldKey === 'max_stock' || fieldKey === 'delivery_tolerance' || fieldKey === 'lot_size' ? 'number' : 'text'}
-          step={fieldKey === 'gross_weight' || fieldKey === 'net_weight' || fieldKey === 'standard_price' || fieldKey === 'lot_size' ? '0.01' : undefined}
+          step={['gross_weight', 'net_weight', 'standard_price', 'lot_size'].includes(String(fieldKey)) ? '0.01' : undefined}
           value={value}
           onChange={(e) => {
             const v = e.target.value
@@ -212,7 +221,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 export default function DatabaseDetailPage() {
   const params = useParams()
   const id = Number(params.id)
-  const { user, accessToken, can } = useUser()
+  const { user, can } = useUser()
   const maxLength = user?.max_description_length ?? 40
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
@@ -255,7 +264,9 @@ export default function DatabaseDetailPage() {
     ) => {
       if (!template) return ''
       const parts = [template.name.toUpperCase()]
-      const sorted = [...(template.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      const sorted = [...(template.attributes || [])].sort(
+        (a, b) => ((a as { order?: number }).order ?? 0) - ((b as { order?: number }).order ?? 0)
+      )
       sorted.forEach((attr) => {
         if (!attr.includeInDescription) return
         const val = attrs[attr.id]
@@ -283,15 +294,12 @@ export default function DatabaseDetailPage() {
 
   const fetchPdmTemplate = useCallback(
     async (pdmCode: string | null) => {
-      if (!accessToken || !pdmCode) return
+      if (!pdmCode) return
       try {
-        const pdms = await apiGetWithAuth<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>(
-          '/api/pdm',
-          accessToken
-        )
+        const pdms = await getPdms()
         const found = pdms.find((p) => p.internal_code === pdmCode)
         if (!found) return
-        const full = await apiGetWithAuth<{
+        const full = await getPdmById(found.id) as {
           id: number
           name: string
           internal_code: string
@@ -305,7 +313,7 @@ export default function DatabaseDetailPage() {
             abbreviation?: string
             allowedValues?: Array<{ value: string; abbreviation?: string } | string>
           }>
-        }>(`/api/pdm/${found.id}`, accessToken)
+        }
         setPdmTemplate(full)
 
         const currentAttrs = (material?.technical_attributes as Record<string, string | { value: string; unit: string }>) || {}
@@ -320,24 +328,28 @@ export default function DatabaseDetailPage() {
         setPdmTemplate(null)
       }
     },
-    [accessToken, material?.technical_attributes, generateDescription]
+    [material?.technical_attributes, generateDescription]
   )
 
   const handleSaveAttributes = useCallback(async () => {
-    if (!material || !accessToken) return
+    if (!material) return
     setSavingAttrs(true)
     try {
-      const updated = await apiPatchWithAuth<MaterialDetail>(
-        `/api/database/materials/${material.id}/attributes`,
-        {
-          technical_attributes: attrValues,
-          description: generatedDesc,
-          ...(material.pdm_code && { pdm_code: material.pdm_code }),
-          ...(material.pdm_name && { pdm_name: material.pdm_name }),
-        },
-        accessToken
-      )
-      setMaterial((prev) => (prev ? { ...prev, ...updated } : updated))
+      const attrsPayload: Record<string, string> = {}
+      for (const [k, v] of Object.entries(attrValues)) {
+        if (typeof v === 'object' && v !== null && 'value' in v) {
+          attrsPayload[k] = `${(v as { value?: string }).value ?? ''}${(v as { unit?: string }).unit ?? ''}`
+        } else {
+          attrsPayload[k] = String(v ?? '')
+        }
+      }
+      const updated = await updateMaterialAttributes(material.id, {
+        technical_attributes: attrsPayload,
+        description: generatedDesc,
+        pdm_code: material.pdm_code ?? undefined,
+        pdm_name: material.pdm_name ?? undefined,
+      }) as MaterialDetail
+      setMaterial((prev) => (prev ? { ...prev, ...updated, description: generatedDesc } : { ...updated, description: generatedDesc }))
       setFormData((prev) => ({ ...prev, ...updated }))
       setIsDirty(true)
       setEditingAttributes(false)
@@ -348,28 +360,28 @@ export default function DatabaseDetailPage() {
     } finally {
       setSavingAttrs(false)
     }
-  }, [material, accessToken, attrValues, generatedDesc])
+  }, [material, attrValues, generatedDesc])
 
   useEffect(() => {
-    if (!accessToken || !id || Number.isNaN(id)) return
+    if (!id || Number.isNaN(id)) return
     setLoading(true)
     setError(null)
-    apiGetWithAuth<MaterialDetail>(`/api/database/materials/${id}`, accessToken)
+    getMaterialById(id)
       .then((m) => {
-        setMaterial(m)
+        setMaterial(m as MaterialDetail)
         setFormData({ ...m })
         setAttrValues((m.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
-        setGeneratedDesc(m.description || '')
+        setGeneratedDesc(String(m.description ?? ''))
       })
       .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
       .finally(() => setLoading(false))
-  }, [accessToken, id])
+  }, [id])
 
   useEffect(() => {
-    if (material?.pdm_code && accessToken) {
+    if (material?.pdm_code) {
       fetchPdmTemplate(material.pdm_code)
     }
-  }, [material?.pdm_code, accessToken, fetchPdmTemplate])
+  }, [material?.pdm_code, fetchPdmTemplate])
 
   const handleUpdate = (key: string, value: string | number | null) => {
     setFormData((prev) => ({ ...prev, [key]: value }))
@@ -388,7 +400,7 @@ export default function DatabaseDetailPage() {
   }
 
   const handleSave = async () => {
-    if (!accessToken || !material) return
+    if (!material) return
     setSaving(true)
     try {
       const payload: Record<string, unknown> = {}
@@ -407,12 +419,11 @@ export default function DatabaseDetailPage() {
           payload[k] = formData[k]
         }
       }
-      const updated = await apiPatchWithAuth<MaterialDetail>(
-        `/api/database/materials/${material.id}/standardize`,
-        Object.keys(payload).length ? payload : formData,
-        accessToken
+      const updated = await updateMaterialStandardize(
+        material.id,
+        Object.keys(payload).length ? payload : formData
       )
-      setMaterial(updated)
+      setMaterial(updated as MaterialDetail)
       setFormData({ ...updated })
       setEditMode(false)
       setIsDirty(false)
@@ -428,14 +439,10 @@ export default function DatabaseDetailPage() {
   const showActionBar = can('can_standardize')
 
   const handleIntegrate = useCallback(async () => {
-    if (!material || !accessToken) return
+    if (!material) return
     setIsIntegrating(true)
     try {
-      const res = await apiPostWithAuth<{ integrated: number[]; skipped: number[] }>(
-        '/api/database/materials/erp-integrate',
-        { material_ids: [material.id] },
-        accessToken
-      )
+      const res = await erpIntegrateMaterials([material.id])
       if (res.integrated?.includes(material.id)) {
         setMaterial((prev) => prev ? { ...prev, erp_status: 'integrado', erp_integrated_at: new Date().toISOString() } : null)
         toast.success('Material integrado com sucesso!')
@@ -447,7 +454,7 @@ export default function DatabaseDetailPage() {
     } finally {
       setIsIntegrating(false)
     }
-  }, [material, accessToken])
+  }, [material])
 
   if (loading) {
     return (
@@ -684,7 +691,7 @@ export default function DatabaseDetailPage() {
             formData={formData}
             material={material}
             onUpdate={handleUpdate}
-            formatDisplay={formatNumber}
+            formatDisplay={formatNumDisplay}
           />
           <EditableRow
             label="Peso Líquido"
@@ -694,7 +701,7 @@ export default function DatabaseDetailPage() {
             formData={formData}
             material={material}
             onUpdate={handleUpdate}
-            formatDisplay={formatNumber}
+            formatDisplay={formatNumDisplay}
           />
         </SectionCard>
 
@@ -944,7 +951,7 @@ export default function DatabaseDetailPage() {
               formData={formData}
               material={material}
               onUpdate={handleUpdate}
-              formatDisplay={formatNumber}
+              formatDisplay={formatNumDisplay}
             />
           )}
           {(editMode || (material.preferred_supplier != null && String(material.preferred_supplier).trim() !== '')) && (
@@ -966,7 +973,7 @@ export default function DatabaseDetailPage() {
             formData={formData}
             material={material}
             onUpdate={handleUpdate}
-            formatDisplay={formatNumber}
+            formatDisplay={formatNumDisplay}
           />
           <EditableRow
             label="Unidade de Pedido"
@@ -1020,7 +1027,7 @@ export default function DatabaseDetailPage() {
               formData={formData}
               material={material}
               onUpdate={handleUpdate}
-              formatDisplay={formatNumber}
+              formatDisplay={formatNumDisplay}
             />
           )}
           {(editMode || (material.forecast_profile != null && String(material.forecast_profile).trim() !== '')) && (
@@ -1042,7 +1049,7 @@ export default function DatabaseDetailPage() {
             formData={formData}
             material={material}
             onUpdate={handleUpdate}
-            formatDisplay={formatNumber}
+            formatDisplay={formatNumDisplay}
           />
           <EditableRow
             label="Estoque Máximo"
@@ -1052,7 +1059,7 @@ export default function DatabaseDetailPage() {
             formData={formData}
             material={material}
             onUpdate={handleUpdate}
-            formatDisplay={formatNumber}
+            formatDisplay={formatNumDisplay}
           />
         </SectionCard>
 
@@ -1096,7 +1103,7 @@ export default function DatabaseDetailPage() {
             formData={formData}
             material={material}
             onUpdate={handleUpdate}
-            formatDisplay={formatCurrency}
+            formatDisplay={formatCurrDisplay}
           />
           <EditableRow
             label="Centro de Lucro"

@@ -20,7 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
-import { apiGetWithAuth, apiPatchWithAuth } from "@/lib/api"
+import { getWorkflowConfig, assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -81,7 +81,7 @@ function SortableCard({
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
   showActionButtons?: boolean
-  currentUserId?: number | null
+  currentUserId?: string | number | null
   onIniciarAtendimentoClick?: (request: MaterialRequest) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -121,8 +121,7 @@ interface KanbanBoardProps {
   /** Chamado após sucesso do assign — abre o modal de detalhes com dados atualizados */
   onAssignSuccess?: (requestId: string) => void
   showActionButtons?: boolean
-  currentUserId?: number | null
-  accessToken?: string | null
+  currentUserId?: string | null
   /** Para filtro de colunas: roles operacionais/etapa veem apenas sua coluna */
   currentUserRoleName?: string | null
   currentUserRoleType?: string | null
@@ -145,7 +144,6 @@ export function KanbanBoard({
   onAssignSuccess,
   showActionButtons = false,
   currentUserId = null,
-  accessToken = null,
   currentUserRoleName = null,
   currentUserRoleType = null,
 }: KanbanBoardProps) {
@@ -162,17 +160,13 @@ export function KanbanBoard({
   useEffect(() => { setLocalRequests(requests) }, [requests])
 
   const handleIniciarAtendimento = async (req: MaterialRequest) => {
-    if (!accessToken) {
-      toast.error("Autenticação necessária para iniciar atendimento.")
-      return
-    }
     try {
-      await apiPatchWithAuth(`/api/requests/${req.id}/assign`, {}, accessToken)
+      await assignRequest(Number(req.id))
       toast.success("Atendimento iniciado com sucesso!")
       if (onAssignSuccess) {
-        onAssignSuccess(req.id)
+        onAssignSuccess(String(req.id))
       } else {
-        onStatusChanged?.(req.id)
+        onStatusChanged?.(String(req.id))
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao iniciar atendimento"
@@ -181,20 +175,12 @@ export function KanbanBoard({
   }
 
   useEffect(() => {
-    if (!accessToken) {
-      setColumnsLoading(false)
-      setColumns([])
-      return
-    }
     setColumnsLoading(true)
-    const url = workflowId
-      ? `/api/workflow/config?workflow_id=${workflowId}`
-      : "/api/workflow/config"
-    apiGetWithAuth<WorkflowStep[]>(url, accessToken)
+    getWorkflowConfig(workflowId ?? undefined)
       .then((steps) => setColumns(workflowToColumns(steps.filter((s) => s.is_active))))
       .catch(() => setColumns([]))
       .finally(() => setColumnsLoading(false))
-  }, [workflowId, accessToken])
+  }, [workflowId])
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -266,10 +252,6 @@ export function KanbanBoard({
       : localRequests.find((r) => r.id === over.id)?.status ?? null
 
     if (!targetColumnId || targetColumnId === draggedCard.status) return
-    if (!accessToken) {
-      toast.error("Autenticação necessária para mover solicitação")
-      return
-    }
 
     // ── Optimistic update ─────────────────────────────────────────────────────
     setLocalRequests((prev) =>
@@ -278,10 +260,8 @@ export function KanbanBoard({
 
     // ── Persist to backend ────────────────────────────────────────────────────
     try {
-      await apiPatchWithAuth(`/api/requests/${draggedCard.id}/move-to`, {
-        status_key: targetColumnId,
-      }, accessToken)
-      onStatusChanged?.(draggedCard.id, targetColumnId)
+      await moveRequestToStatus(Number(draggedCard.id), targetColumnId)
+      onStatusChanged?.(String(draggedCard.id), targetColumnId)
     } catch (err: unknown) {
       // Roll back optimistic update
       setLocalRequests((prev) =>

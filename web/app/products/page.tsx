@@ -1,16 +1,10 @@
 'use client'
 
 import { useEffect, useState, type FormEvent } from 'react'
-import { apiGet } from '@/lib/api'
-
-type Product = {
-  id: string
-  name: string
-  description?: string | null
-}
+import { getProducts, createProduct, deleteProduct } from '@/lib/supabase-api'
 
 export default function ProductsPage() {
-  const [items, setItems] = useState<Product[]>([])
+  const [items, setItems] = useState<{ id: string; name: string; description?: string | null }[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -19,10 +13,10 @@ export default function ProductsPage() {
   async function load() {
     setError(null)
     try {
-      const data = await apiGet<Product[]>('/products')
+      const data = await getProducts()
       setItems(data)
-    } catch (e: any) {
-      setError(e?.message ?? 'erro ao carregar')
+    } catch (e: unknown) {
+      setError((e as Error)?.message ?? 'erro ao carregar')
     }
   }
 
@@ -30,49 +24,30 @@ export default function ProductsPage() {
     e.preventDefault()
     setLoading(true)
     setError(null)
-
     try {
-      const base = process.env.NEXT_PUBLIC_API_URL
-      if (!base) throw new Error('NEXT_PUBLIC_API_URL não definido em .env.local')
-
-      const res = await fetch(`${base}/products`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() ? description.trim() : null,
-        }),
+      await createProduct({
+        name: name.trim(),
+        description: description.trim() ? description.trim() : null,
       })
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
       setName('')
       setDescription('')
       await load()
-    } catch (e: any) {
-      setError(e?.message ?? 'erro ao criar')
+    } catch (e: unknown) {
+      setError((e as Error)?.message ?? 'erro ao criar')
     } finally {
       setLoading(false)
     }
   }
 
   async function remove(id: string) {
-  setError(null)
-  try {
-    const base = process.env.NEXT_PUBLIC_API_URL
-    if (!base) throw new Error('NEXT_PUBLIC_API_URL não definido')
-
-    const res = await fetch(`${base}/products/${id}`, {
-      method: 'DELETE',
-    })
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-    await load()
-  } catch (e: any) {
-    setError(e?.message ?? 'erro ao excluir')
+    setError(null)
+    try {
+      await deleteProduct(id)
+      await load()
+    } catch (e: unknown) {
+      setError((e as Error)?.message ?? 'erro ao excluir')
+    }
   }
-}
 
   useEffect(() => {
     load()

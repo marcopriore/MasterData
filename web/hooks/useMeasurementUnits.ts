@@ -1,20 +1,16 @@
-"use client"
+'use client'
 
-import { useState, useEffect } from "react"
-import { apiGet } from "@/lib/api"
+import { useState, useEffect } from 'react'
+import { getMeasurementUnits } from '@/lib/supabase-api'
+import type { MeasurementUnit } from '@/lib/supabase-api'
 
-export interface MeasurementUnit {
-  id: number
-  name: string
-  abbreviation: string
-  category: string
-}
+export type { MeasurementUnit }
 
 export function useMeasurementUnits(): MeasurementUnit[] {
   const [units, setUnits] = useState<MeasurementUnit[]>([])
 
   useEffect(() => {
-    apiGet<MeasurementUnit[]>("/api/measurement-units")
+    getMeasurementUnits()
       .then(setUnits)
       .catch(() => {})
   }, [])

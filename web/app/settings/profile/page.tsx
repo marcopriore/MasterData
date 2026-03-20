@@ -4,7 +4,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useUser } from '@/contexts/user-context'
-import { apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
+import {
+  getUserNotificationPrefs,
+  updateUserNotificationPrefs,
+  updateUserApi,
+  updateMyPassword,
+  updateMyPreferences,
+} from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -158,7 +164,7 @@ const NOTIFICATION_PREF_ROWS: {
 ]
 
 export default function ProfilePage() {
-  const { user, setUser, ready, accessToken } = useUser()
+  const { user, setUser, ready } = useUser()
   const { setTheme } = useTheme()
 
   // ── Meus Dados ──────────────────────────────────────────────────────────────
@@ -184,28 +190,27 @@ export default function ProfilePage() {
 
   // Fetch notification prefs on load
   useEffect(() => {
-    if (!accessToken || !user) {
+    if (!user) {
       setNotifPrefsLoading(false)
       return
     }
     setNotifPrefsLoading(true)
-    apiGetWithAuth<NotificationPrefs>('/api/notifications/prefs', accessToken)
-      .then(setNotifPrefs)
+    getUserNotificationPrefs()
+      .then((p) => setNotifPrefs(p as NotificationPrefs | null))
       .catch(() => setNotifPrefs(null))
       .finally(() => setNotifPrefsLoading(false))
-  }, [accessToken, user])
+  }, [user])
 
   const saveNotifPrefs = useCallback(
     async (updates: Partial<NotificationPrefs>) => {
-      if (!accessToken) return
       try {
-        await apiPatchWithAuth('/api/notifications/prefs', updates, accessToken)
+        await updateUserNotificationPrefs(updates)
         toast.success('Preferências salvas')
       } catch {
         toast.error('Falha ao salvar preferências de notificação')
       }
     },
-    [accessToken]
+    []
   )
 
   const handleNotifPrefChange = useCallback(
@@ -243,15 +248,11 @@ export default function ProfilePage() {
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleSaveProfile = async () => {
-    if (!user || !accessToken) return
+    if (!user) return
     if (!name.trim()) { toast.error('O nome não pode estar vazio.'); return }
     setSavingProfile(true)
     try {
-      const updated = await apiPatchWithAuth<{ id: number; name: string; email: string }>(
-        `/admin/users/${user.id}`,
-        { name: name.trim() },
-        accessToken
-      )
+      const updated = await updateUserApi(user.id, { name: name.trim() })
       setUser({ ...user, name: updated.name })
       toast.success('Dados atualizados com sucesso!')
     } catch (err: unknown) {
@@ -264,16 +265,13 @@ export default function ProfilePage() {
   }
 
   const handleSavePassword = async () => {
-    if (!user || !accessToken) return
+    if (!user) return
     if (!currentPassword) { toast.error('Informe a senha atual.'); return }
     if (newPassword.length < 6) { toast.error('A nova senha deve ter pelo menos 6 caracteres.'); return }
     if (newPassword !== confirmPassword) { toast.error('As senhas não coincidem.'); return }
     setSavingPassword(true)
     try {
-      await apiPatchWithAuth(`/admin/users/${user.id}/password`, {
-        current_password: currentPassword,
-        new_password: newPassword,
-      }, accessToken)
+      await updateMyPassword(currentPassword, newPassword)
       toast.success('Senha alterada com sucesso!')
       setCurrentPassword('')
       setNewPassword('')
@@ -291,13 +289,10 @@ export default function ProfilePage() {
     nextTheme: 'light' | 'dark',
     nextLang: 'pt' | 'en'
   ) => {
-    if (!user || !accessToken) return
+    if (!user) return
     setSavingPrefs(true)
     try {
-      await apiPatchWithAuth(`/admin/users/${user.id}/preferences`, {
-        theme: nextTheme,
-        language: nextLang,
-      }, accessToken)
+      await updateMyPreferences({ theme: nextTheme, language: nextLang })
       // Update context + localStorage
       setUser({ ...user, preferences: { theme: nextTheme, language: nextLang } })
       // Apply theme immediately via next-themes

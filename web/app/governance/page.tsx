@@ -2,7 +2,20 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { apiGet, apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
+import {
+  getGovernanceStats,
+  getWorkflows,
+  getPdms,
+  getRequests,
+  getMyFields,
+  getFieldLabels,
+  advanceWorkflow,
+  updateRequestAttributes,
+  rejectRequest,
+  getRequestHistory,
+  type MyField,
+  type FieldLabelItem,
+} from '@/lib/supabase-api'
 import { KanbanBoard } from '@/components/governance/kanban-board'
 import { ListView } from '@/components/governance/list-view'
 import { FiltersBar } from '@/components/governance/filters-bar'
@@ -47,23 +60,6 @@ type HistoryEvent = {
   user_name: string | null
 }
 
-type MyField = {
-  id: number
-  field_name: string
-  field_label: string
-  sap_field: string | null
-  sap_view: string
-  field_type: 'text' | 'number' | 'date' | 'select'
-  options: string[] | Record<string, unknown> | null
-  responsible_role: string
-  is_required: boolean
-  is_active: boolean
-  display_order: number
-  created_at: string | null
-}
-
-type FieldLabelItem = { field_name: string; field_label: string }
-
 type WorkflowHeader = {
   id: number
   name: string
@@ -72,6 +68,12 @@ type WorkflowHeader = {
 }
 
 type RequestValue = { label: string; value: string }
+
+function attrValStr(v: string | { value: string; unit?: string } | undefined): string {
+  if (v == null) return ''
+  if (typeof v === 'object') return (v as { value?: string }).value ?? ''
+  return String(v)
+}
 
 type ApiRequest = {
   id: number
@@ -89,7 +91,7 @@ type ApiRequest = {
   attachments: string[] | null
   date: string | null
   values: RequestValue[]
-  assigned_to_id?: number | null
+  assigned_to_id?: string | null
   assigned_to_name?: string | null
   pdm_attributes?: Record<string, { label: string; type: string; options: string[] }>
 }
@@ -181,7 +183,7 @@ function filterRequests(
 }
 
 export default function GovernancePage() {
-  const { user, accessToken, ready } = useUser()
+  const { user, ready } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [pdms, setPdms] = useState<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>([])
@@ -224,53 +226,52 @@ export default function GovernancePage() {
   const [governanceStatsLoading, setGovernanceStatsLoading] = useState(true)
 
   useEffect(() => {
-    if (!ready || !accessToken) {
-      if (ready && !accessToken) setGovernanceStatsLoading(false)
-      return
-    }
+    if (!ready) return
     setGovernanceStatsLoading(true)
-    apiGetWithAuth<GovernanceStats>('/api/governance/stats', accessToken)
+    getGovernanceStats()
       .then((data) => setGovernanceStats(data ?? null))
       .catch(() => setGovernanceStats(null))
       .finally(() => setGovernanceStatsLoading(false))
-  }, [ready, accessToken])
+  }, [ready])
 
   useEffect(() => {
-    if (!accessToken) return
-    apiGetWithAuth<WorkflowHeader[]>('/api/workflows', accessToken)
+    getWorkflows()
       .then((list) => {
-        setWorkflows(list ?? [])
+        setWorkflows((list ?? []) as WorkflowHeader[])
         if (list && list.length > 0) {
           const active = list.find((w) => w.is_active) ?? list[0]
           setSelectedWorkflowId(active.id)
         }
       })
       .catch(() => setWorkflows([]))
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
-    if (!accessToken) return
-    apiGetWithAuth<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>('/api/pdm', accessToken)
-      .then((list) => setPdms((list ?? []).filter((p) => p.is_active)))
+    getPdms()
+      .then((list) =>
+        setPdms(
+          (list ?? [])
+            .filter((p) => p.is_active ?? true)
+            .map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code, is_active: p.is_active ?? true }))
+        )
+      )
       .catch(() => setPdms([]))
-  }, [accessToken])
+  }, [])
 
   const fetchRequests = useCallback((): Promise<ApiRequest[]> => {
     setLoading(true)
-    const url = selectedWorkflowId
-      ? `/api/requests?workflow_id=${selectedWorkflowId}`
-      : '/api/requests'
-    return apiGetWithAuth<ApiRequest[]>(url, accessToken)
+    return getRequests({ workflowId: selectedWorkflowId ?? undefined })
       .then((data) => {
-        setRequests(data)
-        return data
+        const arr = (data ?? []) as ApiRequest[]
+        setRequests(arr)
+        return arr
       })
       .catch(() => {
         setRequests([])
         return []
       })
       .finally(() => setLoading(false))
-  }, [selectedWorkflowId, accessToken])
+  }, [selectedWorkflowId])
 
   useEffect(() => {
     if (ready && selectedWorkflowId !== null) fetchRequests()
@@ -335,7 +336,7 @@ export default function GovernancePage() {
     Object.keys(selectedRequest.technical_attributes).length > 0
 
   useEffect(() => {
-    if (!detailsOpen || !selectedRequest || !accessToken) return
+    if (!detailsOpen || !selectedRequest) return
     setHistoryFetched(false)
     setHistoryEvents([])
     setInvalidFields(new Set())
@@ -359,7 +360,7 @@ export default function GovernancePage() {
     const hasAttrs = Object.keys(attrs).length > 0
 
     if (assignedToMe) {
-      apiGetWithAuth<MyField[]>('/api/fields/my-fields', accessToken)
+      getMyFields()
         .then(setMyFields)
         .catch(() => setMyFields([]))
     } else {
@@ -367,13 +368,13 @@ export default function GovernancePage() {
     }
 
     if (hasAttrs) {
-      apiGetWithAuth<FieldLabelItem[]>('/api/fields/field-labels', accessToken)
+      getFieldLabels()
         .then(setFieldLabels)
         .catch(() => setFieldLabels([]))
     } else {
       setFieldLabels([])
     }
-  }, [detailsOpen, selectedRequest, user?.id, accessToken])
+  }, [detailsOpen, selectedRequest, user?.id])
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectJustification, setRejectJustification] = useState('')
@@ -384,7 +385,7 @@ export default function GovernancePage() {
     if (approveRejectLoading) return
     setApproveRejectLoading(true)
     try {
-      await apiPatchWithAuth(`/api/requests/${id}/status`, { action: 'approve' }, accessToken)
+      await advanceWorkflow(id)
       toast.success('Solicitação aprovada com sucesso!')
       handleCloseModal()
       await fetchRequests()
@@ -467,15 +468,11 @@ export default function GovernancePage() {
   }
 
   const handleSalvar = async () => {
-    if (!selectedRequest || !accessToken) return
+    if (!selectedRequest) return
     setInvalidFields(new Set())
     setSaveLoading(true)
     try {
-      const res = await apiPatchWithAuth<ApiRequest>(
-        `/api/requests/${selectedRequest.id}/attributes`,
-        { attributes: toPayloadAttributes(attributeValues) },
-        accessToken
-      )
+      const res = await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues))
       toast.success('Dados salvos!')
       const attrs = res?.technical_attributes ?? { ...selectedRequest.technical_attributes, ...attributeValues }
       const genDesc = res?.generated_description ?? selectedRequest.generated_description
@@ -484,10 +481,10 @@ export default function GovernancePage() {
           ? { ...r, technical_attributes: attrs, generated_description: genDesc }
           : r
       )
-      setRequests(updated)
+      setRequests(updated as ApiRequest[])
       setSelectedRequest((prev) =>
         prev && prev.id === selectedRequest.id
-          ? { ...prev, technical_attributes: attrs, generated_description: genDesc }
+          ? ({ ...prev, technical_attributes: attrs, generated_description: genDesc } as ApiRequest)
           : prev
       )
     } catch {
@@ -498,21 +495,13 @@ export default function GovernancePage() {
   }
 
   const handleSalvarEAprovar = async () => {
-    if (!selectedRequest || !accessToken) return
+    if (!selectedRequest) return
     if (!validateRequiredFields()) return
     setSaveLoading(true)
     setApproveRejectLoading(true)
     try {
-      await apiPatchWithAuth(
-        `/api/requests/${selectedRequest.id}/attributes`,
-        { attributes: toPayloadAttributes(attributeValues) },
-        accessToken
-      )
-      await apiPatchWithAuth(
-        `/api/requests/${selectedRequest.id}/status`,
-        { action: 'approve' },
-        accessToken
-      )
+      await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues))
+      await advanceWorkflow(selectedRequest.id)
       toast.success('Dados salvos e solicitação aprovada!')
       handleCloseModal()
       await fetchRequests()
@@ -525,16 +514,16 @@ export default function GovernancePage() {
   }
 
   const fetchHistory = useCallback(() => {
-    if (!selectedRequest || !accessToken || historyFetched || historyLoading) return
+    if (!selectedRequest || historyFetched || historyLoading) return
     setHistoryLoading(true)
-    apiGetWithAuth<HistoryEvent[]>(`/api/requests/${selectedRequest.id}/history`, accessToken)
+    getRequestHistory(selectedRequest.id)
       .then((data) => {
-        setHistoryEvents(data ?? [])
+        setHistoryEvents((data ?? []) as HistoryEvent[])
         setHistoryFetched(true)
       })
       .catch(() => setHistoryEvents([]))
       .finally(() => setHistoryLoading(false))
-  }, [selectedRequest, accessToken, historyFetched, historyLoading])
+  }, [selectedRequest, historyFetched, historyLoading])
 
   const handleRejectConfirm = async () => {
     if (!selectedRequest) return
@@ -545,11 +534,7 @@ export default function GovernancePage() {
     setApproveRejectLoading(true)
     setRejectError(null)
     try {
-      await apiPatchWithAuth(
-        `/api/requests/${selectedRequest.id}/reject`,
-        { justification: rejectJustification.trim() },
-        accessToken
-      )
+      await rejectRequest(selectedRequest.id, rejectJustification.trim())
       toast.success('Solicitação rejeitada com sucesso!')
       setRejectModalOpen(false)
       handleCloseModal()
@@ -644,7 +629,6 @@ export default function GovernancePage() {
                   onAssignSuccess={handleAssignSuccess}
                   showActionButtons={showActionButtons}
                   currentUserId={user?.id ?? null}
-                  accessToken={accessToken}
                   currentUserRoleName={user?.role_name ?? null}
                   currentUserRoleType={user?.role_type ?? null}
                 />
@@ -788,7 +772,11 @@ export default function GovernancePage() {
                               <Input
                                 id={`tech-${key}`}
                                 type="date"
-                                value={attributeValues[key] ?? ''}
+                                value={
+                                  typeof attributeValues[key] === 'object'
+                                    ? (attributeValues[key] as { value?: string })?.value ?? ''
+                                    : String(attributeValues[key] ?? '')
+                                }
                                 onChange={(e) => handleFieldChange(key, e.target.value, 'date')}
                                 className="mt-1"
                               />
@@ -855,7 +843,7 @@ export default function GovernancePage() {
                           <Input
                             id={`attr-${f.field_name}`}
                             type="text"
-                            value={attributeValues[f.field_name] ?? ''}
+                            value={attrValStr(attributeValues[f.field_name])}
                             onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'text')}
                             maxLength={100}
                             className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
@@ -866,7 +854,7 @@ export default function GovernancePage() {
                             <Input
                               id={`attr-${f.field_name}`}
                               type="text"
-                              value={attributeValues[f.field_name] ?? ''}
+                              value={attrValStr(attributeValues[f.field_name])}
                               onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'number')}
                               className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                             />
@@ -875,7 +863,7 @@ export default function GovernancePage() {
                               id={`attr-${f.field_name}`}
                               type="number"
                               min={0}
-                              value={attributeValues[f.field_name] ?? ''}
+                              value={attrValStr(attributeValues[f.field_name])}
                               onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'number')}
                               className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                             />
@@ -885,7 +873,7 @@ export default function GovernancePage() {
                           <Input
                             id={`attr-${f.field_name}`}
                             type="date"
-                            value={attributeValues[f.field_name] ?? ''}
+                            value={attrValStr(attributeValues[f.field_name])}
                             onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'date')}
                             className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                           />
@@ -893,7 +881,7 @@ export default function GovernancePage() {
                         {f.field_type === 'select' && (
                           <select
                             id={`attr-${f.field_name}`}
-                            value={attributeValues[f.field_name] ?? ''}
+                            value={attrValStr(attributeValues[f.field_name])}
                             onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'select')}
                             className={`mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : 'border-input'}`}
                           >

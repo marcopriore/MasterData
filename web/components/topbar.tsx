@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { apiGetWithAuth } from '@/lib/api'
+import { getTenants } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { NotificationsBell } from '@/components/notifications-bell'
 import {
@@ -16,23 +16,23 @@ import { Loader2 } from 'lucide-react'
 type Tenant = { id: number; name: string; slug: string; is_active: boolean }
 
 export function Topbar() {
-  const { user, accessToken, switchTenant, switchTenantBack } = useUser()
+  const { user, switchTenant, switchTenantBack } = useUser()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loadingTenants, setLoadingTenants] = useState(false)
   const [open, setOpen] = useState(false)
 
   const fetchTenants = useCallback(async () => {
-    if (!accessToken || !user?.is_master) return
+    if (!user?.is_master) return
     setLoadingTenants(true)
     try {
-      const data = await apiGetWithAuth<Tenant[]>('/admin/tenants', accessToken)
+      const data = await getTenants()
       setTenants(data)
     } catch {
       setTenants([])
     } finally {
       setLoadingTenants(false)
     }
-  }, [accessToken, user?.is_master])
+  }, [user?.is_master])
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)

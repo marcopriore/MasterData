@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { apiGetWithAuth } from '@/lib/api'
+import { getDashboardStats } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import {
   PieChart,
@@ -109,7 +109,9 @@ function KpiCard({
         className="flex size-11 shrink-0 items-center justify-center rounded-xl"
         style={{ backgroundColor: accent ? `${accent}18` : '#0F1C3818' }}
       >
-        <Icon className="size-5" style={{ color: accent ?? '#0F1C38' }} />
+        <span style={{ color: accent ?? '#0F1C38' }}>
+          <Icon className="size-5" />
+        </span>
       </div>
       <div className="min-w-0">
         <p className="text-xs font-medium text-muted-foreground">{label}</p>
@@ -183,7 +185,7 @@ function NavCard({
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { user, accessToken, ready, isAdmin, can } = useUser()
+  const { user, ready, isAdmin, can } = useUser()
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -199,7 +201,7 @@ export default function DashboardPage() {
       setStatsLoading(true)
       setStatsError(null)
       try {
-        const s = await apiGetWithAuth<DashboardStats>('/api/dashboard/stats', accessToken ?? null)
+        const s = await getDashboardStats()
         setStats(s)
       } catch (err) {
         setStatsError((err as Error).message)
@@ -208,7 +210,7 @@ export default function DashboardPage() {
       }
     }
     load()
-  }, [ready, accessToken])
+  }, [ready])
 
   function handleSliceClick(entry: { name: string }) {
     router.push(`/governance?status=${encodeURIComponent(entry.name)}`)

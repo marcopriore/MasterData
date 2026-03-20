@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { apiGetWithAuth, apiDownloadWithAuth } from '@/lib/api'
+import { getSystemLogs, getUsersApi, downloadFile } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,7 +33,7 @@ type LogsResponse = {
   items: LogItem[]
 }
 
-type UserItem = { id: number; name: string; email: string }
+type UserItem = { id: string; name: string; email: string }
 
 const CATEGORIES = [
   { value: '', label: 'Todos' },
@@ -46,7 +46,7 @@ const CATEGORIES = [
   { value: 'system', label: 'Sistema' },
 ] as const
 
-const CATEGORY_BADGE: Record<string, { bg: string; text: string }> = {
+const CATEGORY_BADGE: Record<string, string> = {
   auth: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
   users: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
   roles: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
@@ -163,7 +163,7 @@ function EventDataContent({ data }: { data: Record<string, unknown> }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLogsPage() {
-  const { accessToken, user, can } = useUser()
+  const { user, can } = useUser()
   const canViewLogs = user?.is_master || can('can_view_logs')
   const [logs, setLogs] = useState<LogItem[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
@@ -194,17 +194,15 @@ export default function AdminLogsPage() {
   }
 
   const fetchLogs = useCallback(() => {
-    if (!accessToken) return
     setLoading(true)
-    const params = new URLSearchParams()
-    params.set('page', String(page))
-    params.set('limit', String(limit))
-    if (appliedCategory) params.set('category', appliedCategory)
-    if (appliedUserId) params.set('user_id', appliedUserId)
-    if (appliedDateFrom) params.set('from', appliedDateFrom + 'T00:00:00')
-    if (appliedDateTo) params.set('to', appliedDateTo + 'T23:59:59')
-    const url = `/admin/logs?${params.toString()}`
-    apiGetWithAuth<LogsResponse>(url, accessToken)
+    getSystemLogs({
+      page,
+      limit,
+      category: appliedCategory || undefined,
+      user_id: appliedUserId || undefined,
+      from: appliedDateFrom ? appliedDateFrom + 'T00:00:00' : undefined,
+      to: appliedDateTo ? appliedDateTo + 'T23:59:59' : undefined,
+    })
       .then((data) => {
         setLogs(data.items ?? [])
         setTotal(data.total ?? 0)
@@ -214,14 +212,14 @@ export default function AdminLogsPage() {
         setTotal(0)
       })
       .finally(() => setLoading(false))
-  }, [accessToken, page, limit, appliedCategory, appliedUserId, appliedDateFrom, appliedDateTo])
+  }, [page, limit, appliedCategory, appliedUserId, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
-    if (!accessToken || !canViewLogs) return
-    apiGetWithAuth<UserItem[]>('/admin/users', accessToken)
+    if (!canViewLogs) return
+    getUsersApi()
       .then((list) => setUsers(list ?? []))
       .catch(() => setUsers([]))
-  }, [accessToken, canViewLogs])
+  }, [canViewLogs])
 
   useEffect(() => {
     fetchLogs()
@@ -247,7 +245,6 @@ export default function AdminLogsPage() {
   }
 
   const handleExport = async () => {
-    if (!accessToken) return
     setExporting(true)
     try {
       const params = new URLSearchParams()
@@ -255,8 +252,8 @@ export default function AdminLogsPage() {
       if (appliedUserId) params.set('user_id', appliedUserId)
       if (appliedDateFrom) params.set('from', appliedDateFrom + 'T00:00:00')
       if (appliedDateTo) params.set('to', appliedDateTo + 'T23:59:59')
-      const path = `/admin/logs/export${params.toString() ? '?' + params.toString() : ''}`
-      await apiDownloadWithAuth(path, accessToken, 'logs_export.xlsx')
+      const path = `/api/admin/logs/export${params.toString() ? '?' + params.toString() : ''}`
+      await downloadFile(path, 'logs_export.xlsx')
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(err)

@@ -8,7 +8,12 @@ import {
   useRef,
   useState,
 } from 'react'
-import { apiGetWithAuth, apiPatchWithAuth } from '@/lib/api'
+import { createClient } from '@/lib/supabase/client'
+import {
+  getNotifications,
+  markNotificationRead as markReadApi,
+  markAllNotificationsRead as markAllReadApi,
+} from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 
 export type Notification = {
@@ -21,11 +26,6 @@ export type Notification = {
   request_id: number | null
 }
 
-export type NotificationsResponse = {
-  unread_count: number
-  notifications: Notification[]
-}
-
 interface NotificationsContextType {
   unreadCount: number
   notifications: Notification[]
@@ -36,78 +36,86 @@ interface NotificationsContextType {
 
 const NotificationsContext = createContext<NotificationsContextType | null>(null)
 
-const POLL_INTERVAL_MS = 30_000
-
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
-  const { accessToken, user } = useUser()
+  const { user } = useUser()
   const [unreadCount, setUnreadCount] = useState(0)
   const [notifications, setNotifications] = useState<Notification[]>([])
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null)
 
   const fetchNotifications = useCallback(async () => {
-    if (!accessToken || !user) return
+    if (!user) return
     try {
-      const data = await apiGetWithAuth<NotificationsResponse>(
-        '/api/notifications?unread_only=false&limit=5',
-        accessToken
-      )
+      const data = await getNotifications(false)
       setUnreadCount(data.unread_count ?? 0)
       setNotifications(data.notifications ?? [])
     } catch {
       // silent fail
     }
-  }, [accessToken, user])
+  }, [user])
 
   const refresh = useCallback(async () => {
     await fetchNotifications()
   }, [fetchNotifications])
 
-  const markAsRead = useCallback(
-    async (id: number) => {
-      if (!accessToken) return
-      try {
-        await apiPatchWithAuth(`/api/notifications/${id}/read`, {}, accessToken)
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
-        )
-        setUnreadCount((c) => Math.max(0, c - 1))
-      } catch {
-        // silent fail
-      }
-    },
-    [accessToken]
-  )
+  const markAsRead = useCallback(async (id: number) => {
+    try {
+      await markReadApi(id)
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+      )
+      setUnreadCount((c) => Math.max(0, c - 1))
+    } catch {
+      // silent fail
+    }
+  }, [])
 
   const markAllAsRead = useCallback(async () => {
-    if (!accessToken) return
     try {
-      await apiPatchWithAuth('/api/notifications/read-all', {}, accessToken)
+      await markAllReadApi()
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
       setUnreadCount(0)
     } catch {
       // silent fail
     }
-  }, [accessToken])
+  }, [])
 
   useEffect(() => {
-    if (!user || !accessToken) {
+    if (!user) {
       setUnreadCount(0)
       setNotifications([])
       return
     }
     fetchNotifications()
-  }, [user, accessToken, fetchNotifications])
+  }, [user, fetchNotifications])
 
   useEffect(() => {
-    if (!user || !accessToken) return
-    intervalRef.current = setInterval(fetchNotifications, POLL_INTERVAL_MS)
+    if (!user?.id) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel('notifications-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const newNotif = payload.new as Notification
+          if (newNotif && !newNotif.is_read) {
+            setNotifications((prev) => [newNotif, ...prev])
+            setUnreadCount((c) => c + 1)
+          }
+        }
+      )
+      .subscribe()
+    channelRef.current = channel
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
+      supabase.removeChannel(channel)
+      channelRef.current = null
     }
-  }, [user, accessToken, fetchNotifications])
+  }, [user?.id])
 
   const value: NotificationsContextType = {
     unreadCount,

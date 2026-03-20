@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { apiGet, apiPatch } from '@/lib/api'
+import { getRequestById } from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { Toaster, toast } from 'sonner'
 import { ChevronLeft, Check, X, PlayCircle } from 'lucide-react'
@@ -18,8 +18,7 @@ export default function GovernanceRequestPage() {
   const fetchRequest = useCallback(async () => {
     if (!id) return
     try {
-      const list = await apiGet<any[]>('/api/requests')
-      const found = list.find((r) => String(r.id) === id)
+      const found = await getRequestById(Number(id))
       setRequest(found ?? null)
     } catch (err) {
       console.error(err)

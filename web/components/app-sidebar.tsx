@@ -63,7 +63,7 @@ function NavLink({
       onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)' }}
       onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
     >
-      <Icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
+      <span style={{ color: 'var(--sidebar-icon)' }}><Icon className="size-4 shrink-0" /></span>
       {label}
     </Link>
   )
@@ -226,7 +226,7 @@ export function AppSidebar() {
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--sidebar-hover-bg)' }}
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
                       >
-                        <Icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
+                        <span style={{ color: 'var(--sidebar-icon)' }}><Icon className="size-4 shrink-0" /></span>
                         {item.label}
                       </Link>
                     )
