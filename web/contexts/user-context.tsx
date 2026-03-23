@@ -16,7 +16,7 @@ import {
   useState,
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { User, Session } from '@supabase/supabase-js'
+import type { Session } from '@supabase/supabase-js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -167,116 +167,103 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessTokenState] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
-  const supabase = createClient()
+  const loadUserFromSession = useCallback(async (): Promise<CurrentUser | null> => {
+    try {
+      const supabase = createClient()
+      const { data: { user: authUser } } = await supabase.auth.getUser()
 
-  const fetchProfile = useCallback(
-    async (uid: string): Promise<CurrentUser | null> => {
-      const { data: session } = await supabase.auth.getSession()
-      if (!session.session) return null
+      if (!authUser) {
+        setUserState(null)
+        setAccessTokenState(null)
+        setReady(true)
+        return null
+      }
+
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        setUserState(null)
+        setAccessTokenState(null)
+        setReady(true)
+        return null
+      }
 
       const { data: profile, error } = await supabase
         .from('users')
         .select('*, roles(name, role_type, permissions), tenants(name)')
-        .eq('id', uid)
+        .eq('id', authUser.id)
         .single()
 
       if (error || !profile) {
         console.error('[UserContext] profile fetch failed:', error)
+        setUserState(null)
+        setAccessTokenState(null)
+        setReady(true)
         return null
       }
 
       const p = profile as DbProfile
       let effectiveTenantId = p.tenant_id
       let effectiveTenantName = p.tenants?.name ?? undefined
+      const isMaster = authUser.app_metadata?.is_master === true
 
-      // Master com switch: usar tenant do app_metadata e buscar nome
-      const isMaster =
-        (session.session.user.app_metadata?.is_master as boolean) ?? false
-      const metadataTenantId = session.session.user.app_metadata?.tenant_id as
-        | number
-        | undefined
-      if (isMaster && metadataTenantId != null) {
-        effectiveTenantId = metadataTenantId
-        if (metadataTenantId !== p.tenant_id) {
-          const { data: tenant } = await supabase
-            .from('tenants')
-            .select('name')
-            .eq('id', metadataTenantId)
-            .single()
-          effectiveTenantName = tenant?.name ?? undefined
+      if (isMaster) {
+        const cookieTenantId =
+          typeof document !== 'undefined'
+            ? document.cookie
+                .split('; ')
+                .find((r) => r.startsWith('mdm_selected_tenant='))
+                ?.split('=')[1]
+            : null
+
+        if (cookieTenantId) {
+          const parsed = parseInt(cookieTenantId, 10)
+          if (!isNaN(parsed)) {
+            effectiveTenantId = parsed
+          }
+          if (effectiveTenantId !== p.tenant_id) {
+            const { data: tenant } = await supabase
+              .from('tenants')
+              .select('name')
+              .eq('id', effectiveTenantId)
+              .single()
+            effectiveTenantName = tenant?.name ?? effectiveTenantName
+          }
+        } else {
+          const metaTenantId = authUser.app_metadata?.tenant_id as
+            | number
+            | undefined
+          if (metaTenantId && metaTenantId !== p.tenant_id) {
+            effectiveTenantId = metaTenantId
+            const { data: tenant } = await supabase
+              .from('tenants')
+              .select('name')
+              .eq('id', metaTenantId)
+              .single()
+            effectiveTenantName = tenant?.name ?? effectiveTenantName
+          }
         }
       }
 
-      return mapProfileToUser(p, session.session, {
+      const mappedUser = mapProfileToUser(p, session, {
         tenant_id: effectiveTenantId,
         tenant_name: effectiveTenantName,
       })
-    },
-    [supabase]
-  )
 
-  const loadUserFromSession = useCallback(async () => {
-    try {
-      // Se acabou de trocar tenant, forçar refresh UMA VEZ (evita conflito de lock)
-      const needsRefresh =
-        typeof window !== 'undefined' && localStorage.getItem('mdm_needs_refresh')
-      if (needsRefresh) {
-        localStorage.removeItem('mdm_needs_refresh')
-        await supabase.auth.refreshSession()
-      }
-
-      // getUser() sempre valida no server — sem conflito de lock
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser()
-
-      if (!authUser) {
-        setUserState(null)
-        setAccessTokenState(null)
-        setReady(true)
-        return
-      }
-
-      const { data: { session } } = await supabase.auth.getSession()
-
-      const profile = await fetchProfile(authUser.id)
-      if (profile) {
-        setUserState(profile)
-        setAccessTokenState(session?.access_token ?? null)
-      } else {
-        setUserState(null)
-        setAccessTokenState(null)
-      }
+      setUserState(mappedUser)
+      setAccessTokenState(session.access_token ?? null)
+      setReady(true)
+      return mappedUser
     } catch (err) {
       console.error('[UserContext] loadUserFromSession error:', err)
       setUserState(null)
       setAccessTokenState(null)
-    } finally {
       setReady(true)
+      return null
     }
-  }, [supabase, fetchProfile])
+  }, [])
 
   useEffect(() => {
     loadUserFromSession()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_OUT') {
-          setUserState(null)
-          setAccessTokenState(null)
-        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-          setAccessTokenState(session.access_token)
-        } else if (event === 'SIGNED_IN' && session?.user) {
-          const profile = await fetchProfile(session.user.id)
-          if (profile) {
-            setUserState(profile)
-            setAccessTokenState(session.access_token)
-          }
-        }
-      }
-    )
-
-    return () => subscription.unsubscribe()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -289,35 +276,36 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setAccessTokenState(null)
   }, [])
 
-  // ── login ───────────────────────────────────────────────────────────────────
-
   const login = useCallback(
     async (email: string, password: string): Promise<LoginResult> => {
       try {
+        const supabase = createClient()
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         })
 
         if (error) {
-          return { ok: false, error: error.message }
+          const msg =
+            error.message === 'Invalid login credentials'
+              ? 'Credenciais inválidas'
+              : error.message
+          return { ok: false, error: msg }
         }
 
         if (!data.session?.user) {
           return { ok: false, error: 'Sessão não criada' }
         }
 
-        const profile = await fetchProfile(data.session.user.id)
-        if (!profile) {
+        const loaded = await loadUserFromSession()
+        if (!loaded) {
           return {
             ok: false,
-            error: 'Perfil não encontrado. Verifique se o usuário existe em public.users.',
+            error:
+              'Perfil não encontrado. Verifique se o usuário existe em public.users.',
           }
         }
-
-        setUserState(profile)
-        setAccessTokenState(data.session.access_token)
-        return { ok: true, user: profile }
+        return { ok: true, user: loaded }
       } catch (err) {
         return {
           ok: false,
@@ -325,59 +313,43 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [supabase, fetchProfile]
+    [loadUserFromSession]
   )
 
-  // ── switchTenant (MASTER only) via API Route Supabase ────────────────────────
-
   const switchTenant = useCallback(async (tenantId: number) => {
+    document.cookie = `mdm_selected_tenant=${tenantId}; path=/; max-age=${60 * 60 * 24 * 365}`
+
     try {
       const { switchTenantApi } = await import('@/lib/supabase-api')
       await switchTenantApi(tenantId)
-      localStorage.setItem('mdm_needs_refresh', 'true')
-      window.location.href = '/'
     } catch (err) {
-      console.error('[UserContext] switchTenant error:', err)
-      throw err
+      console.error('[switchTenant] API error:', err)
     }
+
+    window.location.href = '/'
   }, [])
 
   const switchTenantBack = useCallback(async () => {
+    document.cookie = 'mdm_selected_tenant=; path=/; max-age=0'
+
     try {
       const { switchTenantBackApi } = await import('@/lib/supabase-api')
       await switchTenantBackApi()
-      localStorage.setItem('mdm_needs_refresh', 'true')
-      window.location.href = '/'
     } catch (err) {
-      console.error('[UserContext] switchTenantBack error:', err)
-      throw err
+      console.error('[switchTenantBack] API error:', err)
     }
+
+    window.location.href = '/'
   }, [])
 
-  // ── logout ──────────────────────────────────────────────────────────────────
-
   const logout = useCallback(async () => {
-    try {
-      await supabase.auth.signOut()
-    } catch (err) {
-      console.error('[UserContext] signOut error:', err)
-    } finally {
-      setUserState(null)
-      setAccessTokenState(null)
-      // Limpar cookies Supabase manualmente (workaround para signOut não limpar cookies no Next.js)
-      if (typeof document !== 'undefined') {
-        document.cookie.split(';').forEach((c) => {
-          const name = c.split('=')[0].trim()
-          if (name.startsWith('sb-')) {
-            document.cookie = `${name}=; Path=/; Max-Age=0`
-          }
-        })
-      }
-      window.location.href = '/login'
-    }
-  }, [supabase])
-
-  // ── Derived ──────────────────────────────────────────────────────────────────
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    document.cookie = 'mdm_selected_tenant=; path=/; max-age=0'
+    setUserState(null)
+    setAccessTokenState(null)
+    window.location.href = '/login'
+  }, [])
 
   const isAdmin = user?.role_name === 'ADMIN'
 

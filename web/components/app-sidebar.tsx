@@ -76,6 +76,12 @@ export function AppSidebar() {
   const { isAdmin, user, logout, can } = useUser()
   const [mounted, setMounted] = useState(false)
 
+  useEffect(() => {
+    if (user) {
+      console.log('[Sidebar] user:', user.role_name, user.role_type, 'is_master:', user.is_master, 'isAdmin:', isAdmin)
+    }
+  }, [user, isAdmin])
+
   const visibleNavLinks = navLinks.filter((item) => {
     if (item.href === '/') return true
     if (item.href === '/request') return can('can_submit_request')
@@ -186,9 +192,10 @@ export function AppSidebar() {
 
               {/* ── ADMIN items (driven by granular permissions) ── */}
               {(() => {
+                const showAllAdmin = user?.is_master || isAdmin
                 const adminItems = [
                   ...CONFIG_ADMIN.filter((item) => {
-                    if (user?.is_master) return true
+                    if (showAllAdmin) return true
                     if (item.href === '/admin/users') return can('can_manage_users')
                     if (item.href === '/admin/roles') return can('can_manage_roles')
                     if (item.href === '/admin/fields') return can('can_manage_fields')
