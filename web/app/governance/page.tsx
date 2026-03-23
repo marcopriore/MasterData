@@ -232,8 +232,11 @@ export default function GovernancePage() {
     const loadAll = async () => {
       setGovernanceStatsLoading(true)
       setLoading(true)
+      let wfList: Awaited<ReturnType<typeof getWorkflows>> | null = null
       try {
-        const [stats, wfList, pdmList] = await Promise.all([
+        let pdmList: Awaited<ReturnType<typeof getPdms>> | null = null
+        let stats: Awaited<ReturnType<typeof getGovernanceStats>> | null = null
+        ;[stats, wfList, pdmList] = await Promise.all([
           getGovernanceStats(),
           getWorkflows(),
           getPdms(),
