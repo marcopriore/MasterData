@@ -5,6 +5,30 @@
 
 import { createClient } from '@/lib/supabase/client'
 
+// ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
+
+const CACHE_TTL_MS = 5 * 60 * 1000
+
+let cachedFields: unknown[] | null = null
+let cachedFieldsTime = 0
+
+let cachedUnits: unknown[] | null = null
+let cachedUnitsTime = 0
+
+let cachedRoles: unknown[] | null = null
+let cachedRolesTime = 0
+
+let cachedWorkflows: unknown[] | null = null
+let cachedWorkflowsTime = 0
+
+/** Invalida caches (chamar após criar/editar fields, units, roles, workflows) */
+export function invalidateApiCache(): void {
+  cachedFields = null
+  cachedUnits = null
+  cachedRoles = null
+  cachedWorkflows = null
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function handleError(err: unknown): never {
@@ -86,14 +110,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const { data: requests, error: reqErr } = await reqQuery
   if (reqErr) handleError(reqErr)
 
-  const { count: pdmCount } = await supabase.from('pdm_templates').select('*', { count: 'exact', head: true })
-
-  // Contar usuários apenas do tenant atual (evita master ver 8 = 1 próprio + 7 do tenant)
-  const { count: userCount } = await supabase
-    .from('users')
-    .select('*', { count: 'exact', head: true })
-    .eq('is_active', true)
-    .eq('tenant_id', effectiveTenantId ?? 0)
+  const [{ count: pdmCount }, { count: userCount }] = await Promise.all([
+    supabase.from('pdm_templates').select('*', { count: 'exact', head: true }),
+    supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('tenant_id', effectiveTenantId ?? 0),
+  ])
 
   let filtered = requests ?? []
   if (!isMaster && roleName !== 'ADMIN') {
@@ -172,14 +192,20 @@ export type PDMTemplate = {
   materials_count?: number
 }
 
+/** Colunas leves para listagem (sem attributes JSONB) */
+const PDM_LIST_COLS = 'id, name, internal_code, is_active'
+
 export async function getPdms(): Promise<PDMTemplate[]> {
   const supabase = createClient()
-  const { data: pdms, error } = await supabase.from('pdm_templates').select('*').order('name')
+  const [pdmsRes, countsRes] = await Promise.all([
+    supabase.from('pdm_templates').select(PDM_LIST_COLS).order('name'),
+    supabase.from('material_database').select('pdm_code'),
+  ])
+  const { data: pdms, error } = pdmsRes
   if (error) handleError(error)
 
-  const { data: counts } = await supabase.from('material_database').select('pdm_code')
   const countMap: Record<string, number> = {}
-  ;(counts ?? []).forEach((c) => {
+  ;(countsRes.data ?? []).forEach((c) => {
     const code = c.pdm_code as string
     if (code) countMap[code] = (countMap[code] ?? 0) + 1
   })
@@ -189,7 +215,7 @@ export async function getPdms(): Promise<PDMTemplate[]> {
     name: p.name,
     internal_code: p.internal_code,
     is_active: p.is_active ?? true,
-    attributes: p.attributes ?? [],
+    attributes: [],
     materials_count: countMap[p.internal_code] ?? 0,
   }))
 }
@@ -270,31 +296,45 @@ export async function getRequests(params?: {
   const { data, error } = await q
   if (error) handleError(error)
 
-  const result: ApiRequest[] = []
-  for (const r of data ?? []) {
+  const rows = data ?? []
+  const assigneeIds = [...new Set(rows.map((r) => r.assigned_to_id).filter(Boolean))] as string[]
+  const pdmIds = [...new Set(rows.map((r) => {
     const pdm = Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates
-    let assignedName: string | null = null
-    if (r.assigned_to_id) {
-      const { data: u } = await supabase.from('users').select('name').eq('id', r.assigned_to_id).single()
-      assignedName = u?.name ?? null
-    }
-    let pdmAttributes: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }> = {}
-    if (pdm?.id) {
-      const { data: pdmFull } = await supabase.from('pdm_templates').select('attributes').eq('id', pdm.id).single()
-      const attrs = (pdmFull?.attributes ?? []) as Array<{ id?: string; name?: string; dataType?: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
-      for (const a of attrs) {
-        const key = a.id ?? ''
-        if (!key) continue
-        pdmAttributes[key] = {
-          label: a.name ?? key,
-          type: a.dataType === 'lov' ? 'select' : (a.dataType ?? 'text'),
-          options: (a.allowedValues ?? []).map((v) => (typeof v === 'object' ? v.value : String(v)) ?? ''),
-          includeInDescription: a.includeInDescription,
-          abbreviation: a.abbreviation,
-          allowedValues: a.allowedValues ?? [],
-        }
+    return pdm?.id
+  }).filter(Boolean))] as number[]
+
+  const [usersRes, pdmAttrsRes] = await Promise.all([
+    assigneeIds.length ? supabase.from('users').select('id, name').in('id', assigneeIds) : Promise.resolve({ data: [] }),
+    pdmIds.length ? supabase.from('pdm_templates').select('id, attributes').in('id', pdmIds) : Promise.resolve({ data: [] }),
+  ])
+
+  const userMap: Record<string, string> = {}
+  ;(usersRes.data ?? []).forEach((u) => { userMap[u.id] = u.name ?? '' })
+
+  const pdmAttrMap: Record<number, Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>> = {}
+  ;(pdmAttrsRes.data ?? []).forEach((p) => {
+    const attrs = (p.attributes ?? []) as Array<{ id?: string; name?: string; dataType?: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
+    const map: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }> = {}
+    for (const a of attrs) {
+      const key = a.id ?? ''
+      if (!key) continue
+      map[key] = {
+        label: a.name ?? key,
+        type: a.dataType === 'lov' ? 'select' : (a.dataType ?? 'text'),
+        options: (a.allowedValues ?? []).map((v) => (typeof v === 'object' ? v.value : String(v)) ?? ''),
+        includeInDescription: a.includeInDescription,
+        abbreviation: a.abbreviation,
+        allowedValues: a.allowedValues ?? [],
       }
     }
+    pdmAttrMap[p.id] = map
+  })
+
+  const result: ApiRequest[] = []
+  for (const r of rows) {
+    const pdm = Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates
+    const assignedName = r.assigned_to_id ? (userMap[r.assigned_to_id] ?? null) : null
+    const pdmAttributes = (pdm?.id ? pdmAttrMap[pdm.id] : {}) ?? {}
     result.push({
       id: r.id,
       pdm_id: r.pdm_id,
@@ -468,13 +508,17 @@ export async function getRequestHistory(requestId: number): Promise<HistoryEvent
     .order('created_at', { ascending: false })
   if (error) handleError(error)
 
+  const rows = data ?? []
+  const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[]
+  const { data: usersData } = userIds.length
+    ? await supabase.from('users').select('id, name').in('id', userIds)
+    : { data: [] }
+  const userMap: Record<string, string> = {}
+  ;(usersData ?? []).forEach((u) => { userMap[u.id] = u.name ?? '' })
+
   const result: HistoryEvent[] = []
-  for (const r of data ?? []) {
-    let userName: string | null = null
-    if (r.user_id) {
-      const { data: u } = await supabase.from('users').select('name').eq('id', r.user_id).single()
-      userName = u?.name ?? null
-    }
+  for (const r of rows) {
+    const userName = r.user_id ? (userMap[r.user_id] ?? null) : null
     result.push({
       id: r.id,
       event_type: r.event_type,
@@ -533,10 +577,15 @@ export type WorkflowHeader = { id: number; name: string; description?: string | 
 export type WorkflowStep = { id: number; workflow_id: number; step_name: string; status_key: string; order: number; is_active: boolean }
 
 export async function getWorkflows(): Promise<WorkflowHeader[]> {
+  if (cachedWorkflows && Date.now() - cachedWorkflowsTime < CACHE_TTL_MS) {
+    return cachedWorkflows as WorkflowHeader[]
+  }
   const supabase = createClient()
   const { data, error } = await supabase.from('workflow_header').select('id, name, description, is_active').order('id')
   if (error) handleError(error)
-  return data ?? []
+  cachedWorkflows = data ?? []
+  cachedWorkflowsTime = Date.now()
+  return cachedWorkflows as WorkflowHeader[]
 }
 
 export async function getWorkflowConfig(workflowId?: number): Promise<WorkflowStep[]> {
@@ -596,6 +645,8 @@ export async function bulkUpdateWorkflowConfig(payload: {
 export type MaterialDetail = Record<string, unknown>
 export type MaterialsResponse = { total: number; page: number; limit: number; items: MaterialDetail[] }
 
+const MATERIALS_LIST_COLS = 'id, id_sistema, id_erp, description, status, pdm_code, pdm_name, material_group, unit_of_measure, ncm, material_type, erp_status, standardized_at, created_at'
+
 export async function getMaterials(params: {
   page?: number
   limit?: number
@@ -609,7 +660,7 @@ export async function getMaterials(params: {
   const supabase = createClient()
   const page = params.page ?? 1
   const limit = params.limit ?? 50
-  let q = supabase.from('material_database').select('*', { count: 'exact' })
+  let q = supabase.from('material_database').select(MATERIALS_LIST_COLS, { count: 'exact' })
 
   if (params.q) q = q.or(`id_sistema.ilike.%${params.q}%,description.ilike.%${params.q}%,id_erp.ilike.%${params.q}%`)
   if (params.status) q = q.eq('status', params.status)
@@ -636,9 +687,10 @@ export async function searchMaterials(query: string): Promise<MaterialDetail[]> 
   if (!q) return []
 
   const supabase = createClient()
+  const cols = 'id, id_sistema, id_erp, description, status, pdm_code, technical_attributes'
   const { data, error } = await supabase
     .from('material_database')
-    .select('*')
+    .select(cols)
     .or(`description.ilike.%${q}%,id_sistema.ilike.%${q}%,id_erp.ilike.%${q}%`)
     .limit(10)
   if (error) handleError(error)
@@ -819,12 +871,20 @@ export async function getDuplicates(): Promise<DuplicateGroup[]> {
 export type FieldDictionary = Record<string, unknown>
 
 export async function getFieldDictionary(erpView?: string): Promise<FieldDictionary[]> {
+  if (!erpView && cachedFields && Date.now() - cachedFieldsTime < CACHE_TTL_MS) {
+    return cachedFields as FieldDictionary[]
+  }
   const supabase = createClient()
   let q = supabase.from('field_dictionary').select('*').eq('is_active', true).order('display_order')
   if (erpView) q = q.eq('erp_view', erpView)
   const { data, error } = await q
   if (error) handleError(error)
-  return data ?? []
+  const result = data ?? []
+  if (!erpView) {
+    cachedFields = result
+    cachedFieldsTime = Date.now()
+  }
+  return result
 }
 
 /** Admin: all fields including inactive */
@@ -955,15 +1015,22 @@ export async function getFieldLabels(): Promise<FieldLabelItem[]> {
 export type Role = { id: number; name: string; role_type?: string; permissions?: Record<string, boolean>; user_count?: number }
 
 export async function getRoles(): Promise<Role[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase.from('roles').select('*').order('id')
-  if (error) handleError(error)
-  const roles = data ?? []
-  const result: Role[] = []
-  for (const r of roles) {
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('role_id', r.id)
-    result.push({ ...r, user_count: count ?? 0 })
+  if (cachedRoles && Date.now() - cachedRolesTime < CACHE_TTL_MS) {
+    return cachedRoles as Role[]
   }
+  const supabase = createClient()
+  const { data: roles, error } = await supabase.from('roles').select('id, name, role_type, permissions').order('id')
+  if (error) handleError(error)
+  const roleList = roles ?? []
+  const { data: counts } = await supabase.from('users').select('role_id')
+  const countMap: Record<number, number> = {}
+  ;(counts ?? []).forEach((u) => {
+    const rid = u.role_id as number
+    if (rid != null) countMap[rid] = (countMap[rid] ?? 0) + 1
+  })
+  const result: Role[] = roleList.map((r) => ({ ...r, user_count: countMap[r.id] ?? 0 }))
+  cachedRoles = result
+  cachedRolesTime = Date.now()
   return result
 }
 
@@ -994,15 +1061,28 @@ export type Tenant = { id: number; name: string; slug: string; is_active: boolea
 
 export async function getTenants(): Promise<Tenant[]> {
   const supabase = createClient()
-  const { data, error } = await supabase.from('tenants').select('*').order('name')
+  const [tenantsRes, usersRes, materialsRes] = await Promise.all([
+    supabase.from('tenants').select('id, name, slug, is_active').order('name'),
+    supabase.from('users').select('tenant_id'),
+    supabase.from('material_database').select('tenant_id'),
+  ])
+  const { data: tenants, error } = tenantsRes
   if (error) handleError(error)
-  const result: Tenant[] = []
-  for (const t of data ?? []) {
-    const { count: uc } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id)
-    const { count: mc } = await supabase.from('material_database').select('*', { count: 'exact', head: true }).eq('tenant_id', t.id)
-    result.push({ ...t, users_count: uc ?? 0, materials_count: mc ?? 0 })
-  }
-  return result
+  const userCountMap: Record<number, number> = {}
+  ;(usersRes.data ?? []).forEach((u) => {
+    const tid = u.tenant_id as number
+    if (tid != null) userCountMap[tid] = (userCountMap[tid] ?? 0) + 1
+  })
+  const materialCountMap: Record<number, number> = {}
+  ;(materialsRes.data ?? []).forEach((m) => {
+    const tid = m.tenant_id as number
+    if (tid != null) materialCountMap[tid] = (materialCountMap[tid] ?? 0) + 1
+  })
+  return (tenants ?? []).map((t) => ({
+    ...t,
+    users_count: userCountMap[t.id] ?? 0,
+    materials_count: materialCountMap[t.id] ?? 0,
+  }))
 }
 
 // ─── Notifications ───────────────────────────────────────────────────────────
@@ -1086,10 +1166,16 @@ export async function updateUserNotificationPrefs(prefs: Partial<NotificationPre
 export type MeasurementUnit = { id: number; name: string; abbreviation: string; category?: string | null }
 
 export async function getMeasurementUnits(): Promise<MeasurementUnit[]> {
+  if (cachedUnits && Date.now() - cachedUnitsTime < CACHE_TTL_MS) {
+    return cachedUnits as MeasurementUnit[]
+  }
   const supabase = createClient()
-  const { data, error } = await supabase.from('measurement_units').select('*').eq('is_active', true).order('category')
+  const { data, error } = await supabase.from('measurement_units').select('id, name, abbreviation, category').eq('is_active', true).order('category')
   if (error) handleError(error)
-  return data ?? []
+  const result = data ?? []
+  cachedUnits = result
+  cachedUnitsTime = Date.now()
+  return result
 }
 
 // ─── Products ────────────────────────────────────────────────────────────────
@@ -1443,4 +1529,34 @@ export async function uploadPdmsImport(
     throw new Error((err as { error?: string; message?: string }).error ?? (err as { message?: string }).message ?? res.statusText)
   }
   return res.json()
+}
+
+// ─── Recent Activities ───────────────────────────────────────────────────────
+
+export async function getRecentActivities(params?: { limit?: number; offset?: number }): Promise<{ data: unknown[]; count: number }> {
+  const limit = params?.limit ?? 5
+  const offset = params?.offset ?? 0
+
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: [], count: 0 }
+
+    const { data, error, count } = await supabase
+      .from('material_requests')
+      .select('id, generated_description, status, urgency, created_at, requester', { count: 'exact' })
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (error) {
+      console.error('getRecentActivities:', error)
+      return { data: [], count: 0 }
+    }
+
+    return { data: data ?? [], count: count ?? 0 }
+  } catch (err) {
+    console.error('getRecentActivities:', err)
+    return { data: [], count: 0 }
+  }
 }

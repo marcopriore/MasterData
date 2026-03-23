@@ -229,41 +229,37 @@ export default function GovernancePage() {
 
   useEffect(() => {
     if (!ready) return
-    setGovernanceStatsLoading(true)
-    getGovernanceStats()
-      .then((data) => setGovernanceStats(data ?? null))
-      .catch(() => setGovernanceStats(null))
-      .finally(() => setGovernanceStatsLoading(false))
-  }, [ready, pathname])
-
-  useEffect(() => {
-    getWorkflows()
-      .then((list) => {
-        setWorkflows((list ?? []) as WorkflowHeader[])
-        if (list && list.length > 0) {
-          const active = list.find((w) => w.is_active) ?? list[0]
+    const loadAll = async () => {
+      setGovernanceStatsLoading(true)
+      setLoading(true)
+      try {
+        const [stats, wfList, pdmList] = await Promise.all([
+          getGovernanceStats(),
+          getWorkflows(),
+          getPdms(),
+        ])
+        setGovernanceStats(stats ?? null)
+        setWorkflows((wfList ?? []) as WorkflowHeader[])
+        if (wfList && wfList.length > 0) {
+          const active = wfList.find((w) => w.is_active) ?? wfList[0]
           setSelectedWorkflowId(active.id)
-        } else {
-          setLoading(false)
         }
-      })
-      .catch(() => {
-        setWorkflows([])
-        setLoading(false)
-      })
-  }, [pathname])
-
-  useEffect(() => {
-    getPdms()
-      .then((list) =>
         setPdms(
-          (list ?? [])
+          (pdmList ?? [])
             .filter((p) => p.is_active ?? true)
             .map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code, is_active: p.is_active ?? true }))
         )
-      )
-      .catch(() => setPdms([]))
-  }, [pathname])
+      } catch {
+        setGovernanceStats(null)
+        setWorkflows([])
+        setPdms([])
+      } finally {
+        setGovernanceStatsLoading(false)
+        if (!wfList?.length) setLoading(false)
+      }
+    }
+    loadAll()
+  }, [ready, pathname])
 
   const fetchRequests = useCallback((opts?: { silent?: boolean }): Promise<ApiRequest[]> => {
     if (!opts?.silent) setLoading(true)
@@ -404,16 +400,22 @@ export default function GovernancePage() {
       selectedRequest.assigned_to_id != null && selectedRequest.assigned_to_id === user?.id
 
     if (assignedToMe) {
-      getMyFields(selectedRequest.status)
-        .then(setMyFields)
-        .catch(() => setMyFields([]))
+      Promise.all([
+        getMyFields(selectedRequest.status),
+        getFieldLabels(),
+      ])
+        .then(([fields, labels]) => {
+          setMyFields(fields ?? [])
+          setFieldLabels(labels ?? [])
+        })
+        .catch(() => {
+          setMyFields([])
+          setFieldLabels([])
+        })
     } else {
       setMyFields([])
+      getFieldLabels().then(setFieldLabels).catch(() => setFieldLabels([]))
     }
-
-    getFieldLabels()
-      .then(setFieldLabels)
-      .catch(() => setFieldLabels([]))
   }, [detailsOpen, selectedRequest, user?.id])
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false)

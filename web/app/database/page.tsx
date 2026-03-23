@@ -292,14 +292,35 @@ export default function DatabasePage() {
   }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
-    getPdms()
-      .then((list) => setPdms((list ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code }))))
-      .catch(() => setPdms([]))
-  }, [pathname])
-
-  useEffect(() => {
-    fetchMaterials()
-  }, [fetchMaterials, pathname])
+    const load = async () => {
+      setLoading(true)
+      try {
+        const [matsRes, pdmList] = await Promise.all([
+          getMaterials({
+            page,
+            limit,
+            q: appliedSearch || undefined,
+            status: appliedStatus || undefined,
+            pdm_code: appliedPdm || undefined,
+            erp_status: appliedErpFilter || undefined,
+            date_from: appliedDateFrom || undefined,
+            date_to: appliedDateTo || undefined,
+          }),
+          getPdms(),
+        ])
+        setItems((matsRes.items ?? []) as MaterialItem[])
+        setTotal(matsRes.total ?? 0)
+        setPdms((pdmList ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code })))
+      } catch {
+        setItems([])
+        setTotal(0)
+        setPdms([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [pathname, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   const handleFilter = () => {
     setAppliedSearch(search.trim())

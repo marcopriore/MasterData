@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getDashboardStats } from '@/lib/supabase-api'
+import { RecentActivitiesList } from '@/components/recent-activities-list'
 import { useUser } from '@/contexts/user-context'
 import {
   PieChart,
@@ -67,25 +68,6 @@ const URGENCY_COLORS: Record<string, string> = {
   Baixa:  '#10B981',
   Média:  '#F59E0B',
   Alta:   '#EF4444',
-}
-
-// ─── Small helpers ────────────────────────────────────────────────────────────
-
-function formatDate(iso: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  })
-}
-
-function urgencyLabel(raw: string) {
-  return { low: 'Baixa', medium: 'Média', high: 'Alta' }[raw] ?? raw
-}
-
-function urgencyColor(raw: string) {
-  return (
-    { low: '#10B981', medium: '#F59E0B', high: '#EF4444' }[raw] ?? '#94A3B8'
-  )
 }
 
 // ─── KPI card ─────────────────────────────────────────────────────────────────
@@ -432,66 +414,14 @@ export default function DashboardPage() {
             {stats?.section_title ?? 'Atividade Recente'}
           </h2>
           <Link
-            href={user?.role_name === 'SOLICITANTE' ? '/requests' : '/governance'}
+            href="/activity"
             className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
           >
             Ver todas <ArrowRight className="size-3" />
           </Link>
         </div>
 
-        {statsLoading ? (
-          <div className="flex items-center justify-center py-10 text-muted-foreground">
-            <Loader2 className="size-4 animate-spin mr-2" />
-            Carregando…
-          </div>
-        ) : !stats?.recent_activities?.length ? (
-          <div className="flex items-center justify-center py-10 text-sm text-muted-foreground">
-            Nenhuma atividade recente.
-          </div>
-        ) : (
-          <div className="divide-y divide-[#B4B9BE]/40">
-            {stats.recent_activities.map((req) => (
-              <div
-                key={req.id}
-                className="flex items-center gap-4 px-6 py-3.5 hover:bg-slate-50/60 transition-colors"
-              >
-                {/* ID */}
-                <span className="w-16 shrink-0 font-mono text-xs font-semibold text-muted-foreground">
-                  REQ-{String(req.id).padStart(4, '0')}
-                </span>
-
-                {/* Description / requester */}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground font-mono">
-                    {req.generated_description ?? '—'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{req.requester}</p>
-                </div>
-
-                {/* Urgency badge */}
-                <span
-                  className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold"
-                  style={{
-                    backgroundColor: `${urgencyColor(req.urgency)}18`,
-                    color: urgencyColor(req.urgency),
-                  }}
-                >
-                  {urgencyLabel(req.urgency)}
-                </span>
-
-                {/* Status badge */}
-                <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                  {req.status}
-                </span>
-
-                {/* Date */}
-                <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
-                  {formatDate(req.created_at)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        <RecentActivitiesList />
       </div>
     </div>
   )

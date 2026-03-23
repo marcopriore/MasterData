@@ -370,20 +370,13 @@ export default function DatabaseDetailPage() {
     if (!id || Number.isNaN(id)) return
     setLoading(true)
     setError(null)
-    getMaterialById(id)
-      .then((m) => {
-        setMaterial(m as MaterialDetail)
-        setFormData({ ...m })
-        setAttrValues((m.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
-        setGeneratedDesc(String(m.description ?? ''))
-      })
-      .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
-      .finally(() => setLoading(false))
-  }, [id, pathname])
-
-  useEffect(() => {
-    getFieldDictionary()
-      .then((fields) => {
+    Promise.all([getMaterialById(id), getFieldDictionary()])
+      .then(([m, fields]) => {
+        const mat = m as MaterialDetail
+        setMaterial(mat)
+        setFormData({ ...mat })
+        setAttrValues((mat.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
+        setGeneratedDesc(String(mat.description ?? ''))
         const byView: Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>> = {}
         for (const f of fields) {
           const view = (f.erp_view as string) || 'Outros'
@@ -401,8 +394,10 @@ export default function DatabaseDetailPage() {
         }
         setFieldsByView(byView)
       })
-      .catch(() => setFieldsByView({}))
-  }, [])
+      .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
+      .finally(() => setLoading(false))
+  }, [id, pathname])
+
 
   useEffect(() => {
     if (material?.pdm_code) {
