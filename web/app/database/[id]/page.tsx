@@ -9,7 +9,8 @@ import {
   getPdmById,
   updateMaterialAttributes,
   updateMaterialStandardize,
-  erpIntegrateMaterials,
+  erpIntegrateMaterial,
+  getFieldDictionary,
 } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
@@ -64,6 +65,7 @@ type MaterialDetail = {
   source: string | null
   erp_status: string | null
   erp_integrated_at: string | null
+  erp_error_message?: string | null
   standardized_at: string | null
   standardized_by: number | null
   created_at: string | null
@@ -240,6 +242,7 @@ export default function DatabaseDetailPage() {
   const isGeneratedDescOverLimit = generatedDesc.length > maxLength
   const [savingAttrs, setSavingAttrs] = useState(false)
   const [isIntegrating, setIsIntegrating] = useState(false)
+  const [fieldsByView, setFieldsByView] = useState<Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>>>({})
   const measurementUnits = useMeasurementUnits()
   const [pdmTemplate, setPdmTemplate] = useState<{
     id: number
@@ -379,6 +382,29 @@ export default function DatabaseDetailPage() {
   }, [id, pathname])
 
   useEffect(() => {
+    getFieldDictionary()
+      .then((fields) => {
+        const byView: Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>> = {}
+        for (const f of fields) {
+          const view = (f.erp_view as string) || 'Outros'
+          if (!byView[view]) byView[view] = []
+          byView[view].push({
+            field_name: f.field_name as string,
+            field_label: f.field_label as string,
+            erp_view: view,
+            field_type: f.field_type as string | undefined,
+            display_order: f.display_order as number | undefined,
+          })
+        }
+        for (const arr of Object.values(byView)) {
+          arr.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999) || a.field_label.localeCompare(b.field_label))
+        }
+        setFieldsByView(byView)
+      })
+      .catch(() => setFieldsByView({}))
+  }, [])
+
+  useEffect(() => {
     if (material?.pdm_code) {
       fetchPdmTemplate(material.pdm_code)
     }
@@ -442,13 +468,15 @@ export default function DatabaseDetailPage() {
   const handleIntegrate = useCallback(async () => {
     if (!material) return
     setIsIntegrating(true)
+    setMaterial((prev) => prev ? { ...prev, erp_status: 'integrando' } : null)
     try {
-      const res = await erpIntegrateMaterials([material.id])
-      if (res.integrated?.includes(material.id)) {
-        setMaterial((prev) => prev ? { ...prev, erp_status: 'integrado', erp_integrated_at: new Date().toISOString() } : null)
-        toast.success('Material integrado com sucesso!')
+      const res = await erpIntegrateMaterial(material.id)
+      if (res.success && res.material) {
+        setMaterial(res.material as MaterialDetail)
+        toast.success(`Material integrado com sucesso! Código ERP: ${res.erp_code ?? ''}`)
       } else {
-        toast.error('Não foi possível integrar o material.')
+        setMaterial((prev) => prev && res.material ? { ...prev, ...res.material } as MaterialDetail : prev)
+        toast.error(res.error ?? 'Não foi possível integrar o material.')
       }
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Falha na integração')
@@ -513,9 +541,20 @@ export default function DatabaseDetailPage() {
                 Pendente ERP
               </span>
             )}
-            {material.erp_status === 'integrado' && (
+            {material.erp_status === 'integrando' && (
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-700 flex items-center gap-1">
+                <Loader2 className="size-3 animate-spin" />
+                Integrando...
+              </span>
+            )}
+            {(material.erp_status === 'integrado' || material.erp_status === 'integrado_erp') && (
               <span className="text-xs px-2 py-0.5 rounded-full border bg-green-50 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700">
-                Integrado ERP
+                Integrado ERP {material.id_erp && `(${material.id_erp})`}
+              </span>
+            )}
+            {material.erp_status === 'erro_erp' && (
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-red-50 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700" title={material.erp_error_message ?? ''}>
+                Erro ERP
               </span>
             )}
             {showActionBar && material.standardized_at && (
@@ -527,11 +566,11 @@ export default function DatabaseDetailPage() {
         </div>
         {showActionBar && (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {material.erp_status === 'pendente_erp' && (
+            {(material.erp_status === 'pendente_erp' || material.erp_status === 'erro_erp' || material.erp_status === 'integrando') && (
               <div className="relative group inline-block">
                 <button
                   type="button"
-                  disabled={isDescriptionOverLimit || isIntegrating}
+                  disabled={isDescriptionOverLimit || isIntegrating || material.erp_status === 'integrando'}
                   onClick={handleIntegrate}
                   className="px-4 py-2 text-sm rounded-lg bg-[#0F1C38] dark:bg-[#C69A46] text-white font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
                 >
@@ -594,6 +633,19 @@ export default function DatabaseDetailPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
+        {/* Campos do Dicionário (technical_attributes) agrupados por erp_view */}
+        {Object.keys(fieldsByView).length > 0 && Object.entries(fieldsByView).map(([viewName, viewFields]) => (
+          <SectionCard key={viewName} title={viewName}>
+            {viewFields.map((field) => {
+              const rawVal = material.technical_attributes?.[field.field_name] ?? (material as Record<string, unknown>)[field.field_name]
+              const displayVal = rawVal != null && rawVal !== '' ? formatAttrValue(rawVal) : '—'
+              return (
+                <Row key={field.field_name} label={field.field_label} value={displayVal} />
+              )
+            })}
+          </SectionCard>
+        ))}
+
         <SectionCard title="Dados Básicos">
           {editMode ? (
             <div className="flex flex-col gap-0.5">

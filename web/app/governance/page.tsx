@@ -94,7 +94,7 @@ type ApiRequest = {
   values: RequestValue[]
   assigned_to_id?: string | null
   assigned_to_name?: string | null
-  pdm_attributes?: Record<string, { label: string; type: string; options: string[] }>
+  pdm_attributes?: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
 }
 
 function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
@@ -265,8 +265,8 @@ export default function GovernancePage() {
       .catch(() => setPdms([]))
   }, [pathname])
 
-  const fetchRequests = useCallback((): Promise<ApiRequest[]> => {
-    setLoading(true)
+  const fetchRequests = useCallback((opts?: { silent?: boolean }): Promise<ApiRequest[]> => {
+    if (!opts?.silent) setLoading(true)
     return getRequests({ workflowId: selectedWorkflowId ?? undefined })
       .then((data) => {
         const arr = (data ?? []) as ApiRequest[]
@@ -277,7 +277,7 @@ export default function GovernancePage() {
         setRequests([])
         return []
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (!opts?.silent) setLoading(false) })
   }, [selectedWorkflowId])
 
   useEffect(() => {
@@ -311,16 +311,16 @@ export default function GovernancePage() {
   }
 
   const handleAssignSuccess = useCallback(
-    async (requestId: string) => {
-      const data = await fetchRequests()
-      const req = data.find((r) => String(r.id) === requestId)
-      if (req) {
-        lastInitializedRequestIdRef.current = null
-        setSelectedRequest(req)
-        setDetailsOpen(true)
-      }
+    (requestId: string) => {
+      const req = requests.find((r) => String(r.id) === requestId)
+      if (!req || !user) return
+      const updated: ApiRequest = { ...req, assigned_to_id: user.id, assigned_to_name: user.name }
+      setRequests((prev) => prev.map((r) => (String(r.id) === requestId ? updated : r)))
+      lastInitializedRequestIdRef.current = null
+      setSelectedRequest(updated)
+      setDetailsOpen(true)
     },
-    [fetchRequests]
+    [requests, user]
   )
 
   const handleCloseModal = useCallback(() => {
@@ -338,7 +338,8 @@ export default function GovernancePage() {
     selectedRequest.assigned_to_id != null &&
     selectedRequest.assigned_to_id === user.id
 
-  const canEditPdmAttributes = isAssignedToMe && user?.role_name === 'CADASTRO'
+  const isCadastroPhase = (selectedRequest?.status ?? '').toLowerCase() === 'cadastro'
+  const canEditTechnicalAttributes = isAssignedToMe && isCadastroPhase
 
   const FINAL_STATUSES = ['completed', 'finalizado', 'rejected', 'rejeitado']
   const isSelectedFinal = FINAL_STATUSES.includes((selectedRequest?.status ?? '').toLowerCase())
@@ -346,6 +347,35 @@ export default function GovernancePage() {
   const hasTechnicalAttributes =
     selectedRequest?.technical_attributes &&
     Object.keys(selectedRequest.technical_attributes).length > 0
+
+  const hasPdmAttributes = selectedRequest?.pdm_attributes && Object.keys(selectedRequest.pdm_attributes).length > 0
+  const showTechnicalAttributes = hasTechnicalAttributes || hasPdmAttributes
+
+  const generatedDescription = useMemo(() => {
+    if (!selectedRequest?.pdm_name || !selectedRequest?.pdm_attributes) return selectedRequest?.generated_description ?? ''
+    const parts = [selectedRequest.pdm_name.toUpperCase()]
+    const pdmAttrs = selectedRequest.pdm_attributes
+    const sortedKeys = Object.keys(pdmAttrs).sort()
+    for (const attrId of sortedKeys) {
+      const attr = pdmAttrs[attrId]
+      if (!attr?.includeInDescription) continue
+      const raw = attributeValues[attrId]
+      if (!raw) {
+        parts.push(`[${attr.abbreviation ?? attrId}]`)
+        continue
+      }
+      if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+        const v = raw as { value?: string; unit?: string }
+        parts.push(`${v.value ?? ''}${v.unit ?? ''}`.toUpperCase().trim())
+        continue
+      }
+      const strVal = String(raw)
+      const lov = attr.allowedValues?.find((av) => av.value === strVal)
+      const abbr = lov?.abbreviation ?? strVal
+      parts.push(abbr.toUpperCase())
+    }
+    return parts.join(' ')
+  }, [selectedRequest?.pdm_name, selectedRequest?.pdm_attributes, selectedRequest?.generated_description, attributeValues])
 
   useEffect(() => {
     if (!detailsOpen || !selectedRequest) return
@@ -356,10 +386,13 @@ export default function GovernancePage() {
     const isNewRequest = lastInitializedRequestIdRef.current !== currentId
     lastInitializedRequestIdRef.current = currentId
     const attrs = selectedRequest.technical_attributes ?? {}
+    const pdmKeys = Object.keys(selectedRequest.pdm_attributes ?? {})
+    const allKeys = [...new Set([...Object.keys(attrs), ...pdmKeys])]
     if (isNewRequest) {
       setAttributeValues(
         Object.fromEntries(
-          Object.entries(attrs).map(([k, v]) => {
+          allKeys.map((k) => {
+            const v = attrs[k]
             if (v == null) return [k, '']
             if (typeof v === 'object' && v !== null && 'value' in v) return [k, v as { value: string; unit: string }]
             return [k, applyFieldMask(k, String(v))]
@@ -369,7 +402,6 @@ export default function GovernancePage() {
     }
     const assignedToMe =
       selectedRequest.assigned_to_id != null && selectedRequest.assigned_to_id === user?.id
-    const hasAttrs = Object.keys(attrs).length > 0
 
     if (assignedToMe) {
       getMyFields(selectedRequest.status)
@@ -379,13 +411,9 @@ export default function GovernancePage() {
       setMyFields([])
     }
 
-    if (hasAttrs) {
-      getFieldLabels()
-        .then(setFieldLabels)
-        .catch(() => setFieldLabels([]))
-    } else {
-      setFieldLabels([])
-    }
+    getFieldLabels()
+      .then(setFieldLabels)
+      .catch(() => setFieldLabels([]))
   }, [detailsOpen, selectedRequest, user?.id])
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
@@ -400,7 +428,7 @@ export default function GovernancePage() {
       await advanceWorkflow(id)
       toast.success('Solicitação aprovada com sucesso!')
       handleCloseModal()
-      await fetchRequests()
+      await fetchRequests({ silent: true })
     } catch {
       toast.error('Falha ao aprovar solicitação')
     } finally {
@@ -493,7 +521,9 @@ export default function GovernancePage() {
     setInvalidFields(new Set())
     setSaveLoading(true)
     try {
-      const res = await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues))
+      const res = await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues), {
+        generated_description: canEditTechnicalAttributes ? generatedDescription : undefined,
+      })
       toast.success('Dados salvos!')
       const attrs = res?.technical_attributes ?? { ...selectedRequest.technical_attributes, ...attributeValues }
       const genDesc = res?.generated_description ?? selectedRequest.generated_description
@@ -521,11 +551,13 @@ export default function GovernancePage() {
     setSaveLoading(true)
     setApproveRejectLoading(true)
     try {
-      await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues))
+      await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues), {
+        generated_description: canEditTechnicalAttributes ? generatedDescription : undefined,
+      })
       await advanceWorkflow(selectedRequest.id)
       toast.success('Dados salvos e solicitação aprovada!')
       handleCloseModal()
-      await fetchRequests()
+      await fetchRequests({ silent: true })
     } catch {
       toast.error('Falha ao salvar ou aprovar')
     } finally {
@@ -559,7 +591,7 @@ export default function GovernancePage() {
       toast.success('Solicitação rejeitada com sucesso!')
       setRejectModalOpen(false)
       handleCloseModal()
-      await fetchRequests()
+      await fetchRequests({ silent: true })
     } catch {
       setRejectError('Falha ao rejeitar solicitação')
     } finally {
@@ -646,7 +678,7 @@ export default function GovernancePage() {
                   requests={filteredRequests}
                   workflowId={selectedWorkflowId}
                   onViewDetails={handleViewDetails}
-                  onStatusChanged={() => { fetchRequests() }}
+                  onStatusChanged={() => { fetchRequests({ silent: true }) }}
                   onAssignSuccess={handleAssignSuccess}
                   showActionButtons={showActionButtons}
                   currentUserId={user?.id ?? null}
@@ -694,13 +726,17 @@ export default function GovernancePage() {
               </div>
               <TabsContent value="detalhes" className="mt-0 flex-1 min-h-0 overflow-y-auto">
               <div className="px-6 py-4 space-y-4">
-              {/* Generated description */}
-              {selectedRequest.generated_description && (
+              {/* Descrição Gerada — atualiza em tempo real na etapa Cadastro */}
+              {(generatedDescription || selectedRequest.generated_description) && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-zinc-700/50 dark:bg-muted/20">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-1">Descrição Gerada</p>
-                  <code className="text-sm font-mono font-bold text-[#0F1C38] dark:text-[#C69A46] break-words">{selectedRequest.generated_description}</code>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-1">
+                    Descrição Gerada {canEditTechnicalAttributes ? '(atualiza ao editar)' : ''}
+                  </p>
+                  <code className="text-sm font-mono font-bold text-[#0F1C38] dark:text-[#C69A46] break-words">
+                    {canEditTechnicalAttributes ? generatedDescription : (selectedRequest.generated_description ?? generatedDescription)}
+                  </code>
                   <DescriptionLengthIndicator
-                    description={selectedRequest.generated_description || ''}
+                    description={(canEditTechnicalAttributes ? generatedDescription : selectedRequest.generated_description) || ''}
                     maxLength={user?.max_description_length ?? 40}
                   />
                 </div>
@@ -724,15 +760,18 @@ export default function GovernancePage() {
                 )}
               </div>
 
-              {/* Dados Preenchidos — editável apenas para CADASTRO atribuído */}
-              {hasTechnicalAttributes && (
+              {/* Atributos Técnicos — sempre visíveis; editáveis na etapa Cadastro, somente leitura nas demais */}
+              {showTechnicalAttributes && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
-                    Dados Preenchidos
+                    Atributos Técnicos {isCadastroPhase && isAssignedToMe ? '(editável)' : ''}
                   </p>
-                  {canEditPdmAttributes ? (
+                  {canEditTechnicalAttributes ? (
                     <div className="space-y-3">
-                      {Object.keys(selectedRequest.technical_attributes ?? {}).map((key) => {
+                      {[...new Set([
+                        ...Object.keys(selectedRequest.technical_attributes ?? {}),
+                        ...Object.keys(selectedRequest.pdm_attributes ?? {}),
+                      ])].map((key) => {
                         const pdmMeta = selectedRequest.pdm_attributes?.[key]
                         const label = pdmMeta?.label ?? fieldLabels.find((l) => l.field_name === key)?.field_label ?? key
                         const fieldType = pdmMeta?.type ?? 'text'
@@ -801,6 +840,20 @@ export default function GovernancePage() {
                                 onChange={(e) => handleFieldChange(key, e.target.value, 'date')}
                                 className="mt-1"
                               />
+                            ) : fieldType === 'currency' ? (
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-sm text-muted-foreground shrink-0">R$</span>
+                                <Input
+                                  id={`tech-${key}`}
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  value={typeof attributeValues[key] === 'object' ? (attributeValues[key] as { value?: string })?.value ?? '' : String(attributeValues[key] ?? '')}
+                                  onChange={(e) => handleFieldChange(key, e.target.value, 'number')}
+                                  placeholder="0,00"
+                                  className="flex-1"
+                                />
+                              </div>
                             ) : (
                               <Input
                                 id={`tech-${key}`}
@@ -818,26 +871,21 @@ export default function GovernancePage() {
                     <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-zinc-700/50">
                       <table className="w-full text-sm">
                         <tbody>
-                          {Object.entries(selectedRequest.technical_attributes ?? {}).map(
-                            ([key, val]) => {
-                              if (val == null || val === '') return null
-                              const label =
-                                fieldLabels.find((l) => l.field_name === key)?.field_label ?? key
-                              return (
-                                <tr
-                                  key={key}
-                                  className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40"
-                                >
-                                  <td className="w-[45%] bg-slate-50 px-4 py-3 font-medium text-slate-800 dark:bg-muted/30 dark:text-foreground">
-                                    {label}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
-                                    {formatAttrValue(val)}
-                                  </td>
-                                </tr>
-                              )
-                            }
-                          )}
+                          {[...new Set([
+                            ...Object.keys(selectedRequest.technical_attributes ?? {}),
+                            ...Object.keys(selectedRequest.pdm_attributes ?? {}),
+                          ])].map((key) => {
+                            const val = selectedRequest.technical_attributes?.[key]
+                            const label = fieldLabels.find((l) => l.field_name === key)?.field_label ?? selectedRequest.pdm_attributes?.[key]?.label ?? key
+                            return (
+                              <tr key={key} className="border-b border-slate-200 last:border-b-0 dark:border-zinc-700/40">
+                                <td className="w-[45%] bg-slate-50 px-4 py-3 font-medium text-slate-800 dark:bg-muted/30 dark:text-foreground">{label}</td>
+                                <td className="px-4 py-3 text-slate-600 dark:text-muted-foreground">
+                                  {val != null && val !== '' ? formatAttrValue(val) : '—'}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -889,6 +937,21 @@ export default function GovernancePage() {
                               className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                             />
                           )
+                        )}
+                        {f.field_type === 'currency' && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-sm text-muted-foreground shrink-0">R$</span>
+                            <Input
+                              id={`attr-${f.field_name}`}
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              value={attrValStr(attributeValues[f.field_name])}
+                              onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'number')}
+                              placeholder="0,00"
+                              className={`flex-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                            />
+                          </div>
                         )}
                         {f.field_type === 'date' && (
                           <Input
@@ -988,11 +1051,12 @@ export default function GovernancePage() {
                                   )}
                                   {fieldsChanged && Object.keys(fieldsChanged).length > 0 && (
                                     <div className="mt-2 rounded-lg bg-gray-50 p-2 text-sm dark:bg-muted/50">
-                                      {Object.entries(fieldsChanged).map(([label, val]) => {
+                                      {Object.entries(fieldsChanged).map(([fieldKey, val]) => {
                                         const isDePara = typeof val === 'object' && val !== null && 'de' in val && 'para' in val
+                                        const displayLabel = fieldLabels.find((l) => l.field_name === fieldKey)?.field_label ?? fieldKey
                                         return (
-                                          <div key={label} className="flex gap-2 text-xs">
-                                            <span className="min-w-[120px] shrink-0 font-medium text-slate-800 dark:text-foreground">{label}</span>
+                                          <div key={fieldKey} className="flex gap-2 text-xs">
+                                            <span className="min-w-[120px] shrink-0 font-medium text-slate-800 dark:text-foreground">{displayLabel}</span>
                                             {isDePara ? (
                                               <>
                                                 <span className="max-w-[100px] truncate text-gray-400 line-through dark:text-muted-foreground">

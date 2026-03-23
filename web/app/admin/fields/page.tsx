@@ -69,6 +69,7 @@ const ERP_VIEW_COLORS: Record<string, { bg: string; text: string; border: string
 const FIELD_TYPES = [
   { value: 'text', label: 'Texto', icon: Type },
   { value: 'number', label: 'Número', icon: Hash },
+  { value: 'currency', label: 'Moeda', icon: Hash },
   { value: 'date', label: 'Data', icon: Calendar },
   { value: 'select', label: 'Lista de Opções', icon: List },
 ] as const

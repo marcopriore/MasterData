@@ -278,6 +278,23 @@ export async function getRequests(params?: {
       const { data: u } = await supabase.from('users').select('name').eq('id', r.assigned_to_id).single()
       assignedName = u?.name ?? null
     }
+    let pdmAttributes: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }> = {}
+    if (pdm?.id) {
+      const { data: pdmFull } = await supabase.from('pdm_templates').select('attributes').eq('id', pdm.id).single()
+      const attrs = (pdmFull?.attributes ?? []) as Array<{ id?: string; name?: string; dataType?: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
+      for (const a of attrs) {
+        const key = a.id ?? ''
+        if (!key) continue
+        pdmAttributes[key] = {
+          label: a.name ?? key,
+          type: a.dataType === 'lov' ? 'select' : (a.dataType ?? 'text'),
+          options: (a.allowedValues ?? []).map((v) => (typeof v === 'object' ? v.value : String(v)) ?? ''),
+          includeInDescription: a.includeInDescription,
+          abbreviation: a.abbreviation,
+          allowedValues: a.allowedValues ?? [],
+        }
+      }
+    }
     result.push({
       id: r.id,
       pdm_id: r.pdm_id,
@@ -295,7 +312,7 @@ export async function getRequests(params?: {
       values: [],
       assigned_to_id: r.assigned_to_id,
       assigned_to_name: assignedName,
-      pdm_attributes: {},
+      pdm_attributes: pdmAttributes,
     })
   }
   return result
@@ -380,15 +397,44 @@ export async function moveRequestToStatus(id: number, statusKey: string): Promis
   return data as ApiRequest
 }
 
-export async function updateRequestAttributes(id: number, attributes: Record<string, string>): Promise<ApiRequest> {
+function toStr(v: unknown): string {
+  if (v == null) return ''
+  if (typeof v === 'object' && v !== null && 'value' in v) return String((v as { value?: unknown }).value ?? '')
+  return String(v)
+}
+
+export async function updateRequestAttributes(
+  id: number,
+  attributes: Record<string, string>,
+  options?: { generated_description?: string }
+): Promise<ApiRequest> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const { data: req } = await supabase.from('material_requests').select('technical_attributes, tenant_id').eq('id', id).single()
-  const merged = { ...(req?.technical_attributes ?? {}), ...attributes }
-  const { data, error } = await supabase.from('material_requests').update({ technical_attributes: merged }).eq('id', id).select().single()
+  const oldAttrs = (req?.technical_attributes ?? {}) as Record<string, unknown>
+
+  const changes: Record<string, { de: string; para: string }> = {}
+  for (const [key, newVal] of Object.entries(attributes)) {
+    if (key === 'generated_description') continue
+    const newStr = toStr(newVal)
+    const oldStr = toStr(oldAttrs[key])
+    if (newStr !== oldStr) {
+      changes[key] = { de: oldStr, para: newStr }
+    }
+  }
+
+  const merged = { ...oldAttrs }
+  for (const [k, v] of Object.entries(attributes)) {
+    if (k !== 'generated_description') merged[k] = v
+  }
+  const updatePayload: Record<string, unknown> = { technical_attributes: merged }
+  if (options?.generated_description !== undefined) {
+    updatePayload.generated_description = options.generated_description
+  }
+  const { data, error } = await supabase.from('material_requests').update(updatePayload).eq('id', id).select().single()
   if (error) handleError(error)
 
-  if (req?.tenant_id && user && Object.keys(attributes).length > 0) {
+  if (req?.tenant_id && user && Object.keys(changes).length > 0) {
     await supabase.from('request_history').insert({
       tenant_id: req.tenant_id,
       request_id: id,
@@ -396,7 +442,7 @@ export async function updateRequestAttributes(id: number, attributes: Record<str
       event_type: 'fields_saved',
       message: 'Campos atualizados',
       stage: data?.status ?? null,
-      event_data: { fields_changed: attributes },
+      event_data: { fields_changed: changes },
     })
   }
 
@@ -640,7 +686,7 @@ export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ in
   const now = new Date().toISOString()
   for (const mid of materialIds) {
     const { data: row } = await supabase.from('material_database').select('erp_status').eq('id', mid).single()
-    if (!row || row.erp_status === 'integrado') {
+    if (!row || row.erp_status === 'integrado' || row.erp_status === 'integrado_erp') {
       skipped.push(mid)
       continue
     }
@@ -653,6 +699,61 @@ export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ in
     else skipped.push(mid)
   }
   return { integrated, skipped, total: materialIds.length }
+}
+
+export type ErpIntegrateResult =
+  | { success: true; erp_code: string; material: Record<string, unknown> }
+  | { success: false; error: string; material?: Record<string, unknown> }
+
+/** Integração ERP simulada: integrando → delay 2s → 90% sucesso com id_erp, 10% erro */
+export async function erpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
+  const supabase = createClient()
+  const { data: row } = await supabase.from('material_database').select('*').eq('id', materialId).single()
+  if (!row) return { success: false, error: 'Material não encontrado' }
+  if (row.erp_status === 'integrado' || row.erp_status === 'integrado_erp') {
+    return { success: true, erp_code: row.id_erp ?? '', material: row }
+  }
+  if (row.erp_status !== 'pendente_erp') {
+    return { success: false, error: `Status atual não permite integração: ${row.erp_status}` }
+  }
+
+  await supabase.from('material_database').update({ erp_status: 'integrando' }).eq('id', materialId)
+  await new Promise((r) => setTimeout(r, 2000))
+
+  const success = Math.random() > 0.1
+  const now = new Date().toISOString()
+
+  if (success) {
+    const { count } = await supabase
+      .from('material_database')
+      .select('*', { count: 'exact', head: true })
+      .not('id_erp', 'is', null)
+    const erpCode = `MAT-${String((count ?? 0) + 1).padStart(6, '0')}`
+    const { data, error } = await supabase
+      .from('material_database')
+      .update({
+        erp_status: 'integrado_erp',
+        id_erp: erpCode,
+        erp_integrated_at: now,
+        erp_error_message: null,
+      })
+      .eq('id', materialId)
+      .select()
+      .single()
+    if (error) return { success: false, error: error.message }
+    return { success: true, erp_code: erpCode, material: data }
+  } else {
+    const { data } = await supabase
+      .from('material_database')
+      .update({
+        erp_status: 'erro_erp',
+        erp_error_message: 'Erro simulado: Timeout na conexão com SAP',
+      })
+      .eq('id', materialId)
+      .select()
+      .single()
+    return { success: false, error: 'Timeout na conexão com SAP', material: data ?? undefined }
+  }
 }
 
 // ─── Value Dictionary ────────────────────────────────────────────────────────
@@ -827,7 +928,7 @@ export type MyField = {
   field_label: string
   erp_field: string | null
   erp_view: string
-  field_type: 'text' | 'number' | 'date' | 'select'
+  field_type: 'text' | 'number' | 'currency' | 'date' | 'select'
   options: string[] | Record<string, unknown> | null
   responsible_role: string
   is_required: boolean
