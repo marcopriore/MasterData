@@ -76,13 +76,10 @@ export function AppSidebar() {
   const { isAdmin, user, logout, can } = useUser()
   const [mounted, setMounted] = useState(false)
 
-  useEffect(() => {
-    if (user) {
-      console.log('[Sidebar] user:', user.role_name, user.role_type, 'is_master:', user.is_master, 'isAdmin:', isAdmin)
-    }
-  }, [user, isAdmin])
+  const showAllLinks = user?.is_master === true
 
   const visibleNavLinks = navLinks.filter((item) => {
+    if (showAllLinks) return true
     if (item.href === '/') return true
     if (item.href === '/request') return can('can_submit_request')
     if (item.href === '/governance') return can('can_approve') || can('can_reject')
@@ -167,7 +164,7 @@ export function AppSidebar() {
               {/* ── Meu Perfil (always) + Workflows (by permission) ── */}
               {CONFIG_BASE.filter((item) =>
                 item.href === '/settings/profile' ||
-                (item.href === '/settings/workflow' && can('can_view_workflows'))
+                (item.href === '/settings/workflow' && (can('can_view_workflows') || showAllLinks))
               ).map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(item.href)
                 return (

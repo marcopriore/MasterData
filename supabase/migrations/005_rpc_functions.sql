@@ -313,7 +313,7 @@ BEGIN
       (v_step->>'order')::int, true);
   END LOOP;
 
-  -- Field dictionary básico (subset)
+  -- Field dictionary básico (subset) — colunas serão renomeadas para erp_* na migration 009
   INSERT INTO public.field_dictionary (tenant_id, field_name, field_label, sap_field, sap_view, field_type, responsible_role, is_required, display_order)
   VALUES
     (v_tenant_id, 'descricao_basica', 'Descrição Básica', 'MAKTX', 'dados_basicos', 'text', 'CADASTRO', true, 1),

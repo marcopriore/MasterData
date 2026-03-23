@@ -185,7 +185,7 @@ function filterRequests(
 
 export default function GovernancePage() {
   const pathname = usePathname()
-  const { user, ready } = useUser()
+  const { user, ready, can } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [pdms, setPdms] = useState<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>([])
@@ -290,7 +290,7 @@ export default function GovernancePage() {
   }, [ready, selectedWorkflowId, fetchRequests, pathname])
 
   const showActionButtons =
-    ['etapa', 'operacional'].includes(user?.role_type ?? '') && user?.role_name !== 'ADMIN'
+    can('can_attend') && !user?.is_master
 
   const materialRequests = useMemo(
     () => requests.map(mapToMaterialRequest),
@@ -372,7 +372,7 @@ export default function GovernancePage() {
     const hasAttrs = Object.keys(attrs).length > 0
 
     if (assignedToMe) {
-      getMyFields()
+      getMyFields(selectedRequest.status)
         .then(setMyFields)
         .catch(() => setMyFields([]))
     } else {
@@ -414,11 +414,20 @@ export default function GovernancePage() {
     setRejectModalOpen(true)
   }
 
-  function getFieldOptions(f: MyField): string[] {
+  type OptionItem = { value: string; label: string }
+  function getFieldOptions(f: MyField): OptionItem[] {
+    const normalize = (opt: unknown): OptionItem => {
+      if (typeof opt === 'object' && opt !== null && 'value' in opt) {
+        const o = opt as { value?: string; label?: string }
+        return { value: String(o.value ?? o.label ?? ''), label: String(o.label ?? o.value ?? '') }
+      }
+      const s = String(opt ?? '')
+      return { value: s, label: s }
+    }
     const o = f.options
-    if (Array.isArray(o)) return o.map(String)
+    if (Array.isArray(o)) return o.map(normalize)
     if (o && typeof o === 'object' && Array.isArray((o as { values?: unknown }).values))
-      return ((o as { values: string[] }).values).map(String)
+      return ((o as { values: unknown[] }).values).map(normalize)
     return []
   }
 
@@ -899,8 +908,8 @@ export default function GovernancePage() {
                           >
                             <option value="">Selecione...</option>
                             {getFieldOptions(f).map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
                               </option>
                             ))}
                           </select>
@@ -935,6 +944,7 @@ export default function GovernancePage() {
                           approved: { icon: '✅', color: 'text-green-600 dark:text-green-400' },
                           rejected: { icon: '❌', color: 'text-red-600 dark:text-red-400' },
                           status_changed: { icon: '🔄', color: 'text-violet-600 dark:text-violet-400' },
+                          stage_change: { icon: '🔄', color: 'text-violet-600 dark:text-violet-400' },
                           action: { icon: '⚡', color: 'text-orange-600 dark:text-orange-400' },
                         }
                         const cfg = iconMap[evt.event_type] ?? { icon: '•', color: 'text-slate-500' }

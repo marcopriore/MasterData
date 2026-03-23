@@ -67,19 +67,33 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   if (!user) return { total_requests: 0, by_status: [], by_urgency: [], recent_activities: [], pdm_count: 0, user_count: 0 }
 
   const { data: profile } = await supabase.from('users').select('tenant_id, name, roles(name, role_type)').eq('id', user.id).single()
-  const tenantId = profile?.tenant_id
   const roleName = (profile?.roles as { name?: string })?.name?.toUpperCase() ?? ''
   const roleType = (profile?.roles as { role_type?: string })?.role_type ?? 'sistema'
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
 
-  let reqQuery = supabase.from('material_requests').select('id, requester, cost_center, urgency, status, generated_description, pdm_id, created_at, user_id')
-  if (tenantId) reqQuery = reqQuery.eq('tenant_id', tenantId)
+  // Tenant efetivo: master usa app_metadata.tenant_id (switch), demais usam profile.tenant_id
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
 
+  // RLS para master retorna TODOS os tenants (is_master_user) — precisamos filtrar por effectiveTenantId
+  let reqQuery = supabase
+    .from('material_requests')
+    .select('id, requester, cost_center, urgency, status, generated_description, pdm_id, created_at, user_id')
+  if (effectiveTenantId != null) {
+    reqQuery = reqQuery.eq('tenant_id', effectiveTenantId)
+  }
   const { data: requests, error: reqErr } = await reqQuery
   if (reqErr) handleError(reqErr)
 
   const { count: pdmCount } = await supabase.from('pdm_templates').select('*', { count: 'exact', head: true })
-  const { count: userCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_active', true)
+
+  // Contar usuários apenas do tenant atual (evita master ver 8 = 1 próprio + 7 do tenant)
+  const { count: userCount } = await supabase
+    .from('users')
+    .select('*', { count: 'exact', head: true })
+    .eq('is_active', true)
+    .eq('tenant_id', effectiveTenantId ?? 0)
 
   let filtered = requests ?? []
   if (!isMaster && roleName !== 'ADMIN') {
@@ -325,6 +339,16 @@ export async function createRequest(body: {
 
   const { data, error } = await supabase.from('material_requests').insert(row).select('id').single()
   if (error) handleError(error)
+
+  await supabase.from('request_history').insert({
+    tenant_id: tenantId,
+    request_id: data.id,
+    user_id: user?.id ?? null,
+    event_type: 'created',
+    message: 'Solicitação criada',
+    stage: initialStatus,
+  })
+
   return { id: data.id }
 }
 
@@ -358,10 +382,24 @@ export async function moveRequestToStatus(id: number, statusKey: string): Promis
 
 export async function updateRequestAttributes(id: number, attributes: Record<string, string>): Promise<ApiRequest> {
   const supabase = createClient()
-  const { data: req } = await supabase.from('material_requests').select('technical_attributes').eq('id', id).single()
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: req } = await supabase.from('material_requests').select('technical_attributes, tenant_id').eq('id', id).single()
   const merged = { ...(req?.technical_attributes ?? {}), ...attributes }
   const { data, error } = await supabase.from('material_requests').update({ technical_attributes: merged }).eq('id', id).select().single()
   if (error) handleError(error)
+
+  if (req?.tenant_id && user && Object.keys(attributes).length > 0) {
+    await supabase.from('request_history').insert({
+      tenant_id: req.tenant_id,
+      request_id: id,
+      user_id: user.id,
+      event_type: 'fields_saved',
+      message: 'Campos atualizados',
+      stage: data?.status ?? null,
+      event_data: { fields_changed: attributes },
+    })
+  }
+
   return data as ApiRequest
 }
 
@@ -381,7 +419,7 @@ export async function getRequestHistory(requestId: number): Promise<HistoryEvent
     .from('request_history')
     .select('id, event_type, message, event_data, stage, created_at, user_id')
     .eq('request_id', requestId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
   if (error) handleError(error)
 
   const result: HistoryEvent[] = []
@@ -679,20 +717,20 @@ export async function getDuplicates(): Promise<DuplicateGroup[]> {
 
 export type FieldDictionary = Record<string, unknown>
 
-export async function getFieldDictionary(sapView?: string): Promise<FieldDictionary[]> {
+export async function getFieldDictionary(erpView?: string): Promise<FieldDictionary[]> {
   const supabase = createClient()
   let q = supabase.from('field_dictionary').select('*').eq('is_active', true).order('display_order')
-  if (sapView) q = q.eq('sap_view', sapView)
+  if (erpView) q = q.eq('erp_view', erpView)
   const { data, error } = await q
   if (error) handleError(error)
   return data ?? []
 }
 
 /** Admin: all fields including inactive */
-export async function getFieldDictionaryAll(sapView?: string): Promise<FieldDictionary[]> {
+export async function getFieldDictionaryAll(erpView?: string): Promise<FieldDictionary[]> {
   const supabase = createClient()
-  let q = supabase.from('field_dictionary').select('*').order('sap_view').order('display_order')
-  if (sapView) q = q.eq('sap_view', sapView)
+  let q = supabase.from('field_dictionary').select('*').order('erp_view').order('display_order')
+  if (erpView) q = q.eq('erp_view', erpView)
   const { data, error } = await q
   if (error) handleError(error)
   return data ?? []
@@ -726,21 +764,44 @@ export async function deleteField(id: number): Promise<void> {
   if (error) handleError(error)
 }
 
-/** Fields where responsible_role matches current user's role (for request form). */
-export async function getMyFields(): Promise<MyField[]> {
+/** Maps workflow status_key to field_dictionary responsible_role */
+function statusToResponsibleRole(status: string | undefined): string | null {
+  if (!status?.trim()) return null
+  const s = status.trim().toLowerCase()
+  const map: Record<string, string> = {
+    cadastro: 'CADASTRO',
+    compras: 'COMPRAS',
+    mrp: 'MRP',
+    fiscal: 'FISCAL',
+    contabilidade: 'CONTABILIDADE',
+  }
+  return map[s] ?? null
+}
+
+/** Fields for the current phase. Admin/Master: by request status (phase). Operators: by user role. */
+export async function getMyFields(requestStatus?: string): Promise<MyField[]> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return []
 
+  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
   const { data: profile } = await supabase.from('users').select('roles(name)').eq('id', user.id).single()
   const roleName = ((profile?.roles as { name?: string })?.name ?? '').trim().toUpperCase()
-  if (!roleName) return []
+
+  let responsibleRole: string | null
+  if (isMaster || roleName === 'ADMIN') {
+    responsibleRole = statusToResponsibleRole(requestStatus ?? '')
+    if (!responsibleRole) return []
+  } else {
+    if (!roleName) return []
+    responsibleRole = roleName
+  }
 
   const { data, error } = await supabase
     .from('field_dictionary')
     .select('*')
     .eq('is_active', true)
-    .eq('responsible_role', roleName)
+    .eq('responsible_role', responsibleRole)
     .order('display_order')
   if (error) handleError(error)
 
@@ -748,8 +809,8 @@ export async function getMyFields(): Promise<MyField[]> {
     id: r.id,
     field_name: r.field_name,
     field_label: r.field_label,
-    sap_field: r.sap_field,
-    sap_view: r.sap_view,
+    erp_field: r.erp_field,
+    erp_view: r.erp_view,
     field_type: r.field_type,
     options: r.options,
     responsible_role: r.responsible_role,
@@ -764,8 +825,8 @@ export type MyField = {
   id: number
   field_name: string
   field_label: string
-  sap_field: string | null
-  sap_view: string
+  erp_field: string | null
+  erp_view: string
   field_type: 'text' | 'number' | 'date' | 'select'
   options: string[] | Record<string, unknown> | null
   responsible_role: string

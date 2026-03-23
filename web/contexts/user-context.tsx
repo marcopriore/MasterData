@@ -36,6 +36,7 @@ export type RolePermissions = {
   can_manage_value_dictionary: boolean
   can_standardize: boolean
   can_bulk_import: boolean
+  can_attend: boolean
 }
 
 export type UserPreferences = {
@@ -96,6 +97,7 @@ const EMPTY_PERMISSIONS: RolePermissions = {
   can_manage_value_dictionary: false,
   can_standardize: false,
   can_bulk_import: false,
+  can_attend: false,
 }
 
 // ─── Profile helpers ───────────────────────────────────────────────────────────
@@ -326,6 +328,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       console.error('[switchTenant] API error:', err)
     }
 
+    try {
+      const supabase = createClient()
+      await supabase.auth.refreshSession()
+    } catch (err) {
+      console.error('[switchTenant] refresh error:', err)
+    }
+
     window.location.href = '/'
   }, [])
 
@@ -337,6 +346,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       await switchTenantBackApi()
     } catch (err) {
       console.error('[switchTenantBack] API error:', err)
+    }
+
+    try {
+      const supabase = createClient()
+      await supabase.auth.refreshSession()
+    } catch (err) {
+      console.error('[switchTenantBack] refresh error:', err)
     }
 
     window.location.href = '/'

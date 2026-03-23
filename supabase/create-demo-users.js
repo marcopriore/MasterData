@@ -153,11 +153,11 @@ async function main() {
   const { data: existingFields } = await supabase.from('field_dictionary').select('id').eq('tenant_id', tenantId).limit(1)
   if (!existingFields?.length) {
     const fields = [
-      { field_name: 'descricao_basica', field_label: 'Descrição Básica', sap_field: 'MAKTX', sap_view: 'dados_basicos', field_type: 'text', responsible_role: 'CADASTRO', is_required: true, display_order: 1 },
-      { field_name: 'grupo_mercadorias', field_label: 'Grupo de Mercadorias', sap_field: 'MATKL', sap_view: 'dados_basicos', field_type: 'select', responsible_role: 'CADASTRO', is_required: true, display_order: 2 },
-      { field_name: 'unidade_medida_base', field_label: 'Unidade de Medida Base', sap_field: 'MEINS', sap_view: 'dados_basicos', field_type: 'select', responsible_role: 'CADASTRO', is_required: true, display_order: 3 },
-      { field_name: 'ncm', field_label: 'NCM', sap_field: 'J_1BNCM', sap_view: 'fiscal', field_type: 'text', responsible_role: 'FISCAL', is_required: true, display_order: 1 },
-      { field_name: 'tipo_mrp', field_label: 'Tipo MRP', sap_field: 'DISMM', sap_view: 'mrp', field_type: 'select', responsible_role: 'MRP', is_required: true, display_order: 1 },
+      { field_name: 'descricao_basica', field_label: 'Descrição Básica', erp_field: 'MAKTX', erp_view: 'dados_basicos', field_type: 'text', responsible_role: 'CADASTRO', is_required: true, display_order: 1 },
+      { field_name: 'grupo_mercadorias', field_label: 'Grupo de Mercadorias', erp_field: 'MATKL', erp_view: 'dados_basicos', field_type: 'select', responsible_role: 'CADASTRO', is_required: true, display_order: 2 },
+      { field_name: 'unidade_medida_base', field_label: 'Unidade de Medida Base', erp_field: 'MEINS', erp_view: 'dados_basicos', field_type: 'select', responsible_role: 'CADASTRO', is_required: true, display_order: 3 },
+      { field_name: 'ncm', field_label: 'NCM', erp_field: 'J_1BNCM', erp_view: 'fiscal', field_type: 'text', responsible_role: 'FISCAL', is_required: true, display_order: 1 },
+      { field_name: 'tipo_mrp', field_label: 'Tipo MRP', erp_field: 'DISMM', erp_view: 'mrp', field_type: 'select', responsible_role: 'MRP', is_required: true, display_order: 1 },
     ]
     for (const f of fields) {
       await supabase.from('field_dictionary').insert({ tenant_id: tenantId, ...f })

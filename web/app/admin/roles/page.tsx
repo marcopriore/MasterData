@@ -46,6 +46,9 @@ type Permissions = {
   // Operações
   can_standardize: boolean
   can_bulk_import: boolean
+
+  // Atendimento (Governança)
+  can_attend: boolean
 }
 
 type Role = {
@@ -66,6 +69,7 @@ const PERMISSION_GROUPS: {
       { key: 'can_submit_request', label: 'Criar Solicitações',  description: 'Abrir novas solicitações de cadastro' },
       { key: 'can_approve',        label: 'Aprovar Solicitações', description: 'Aprovar solicitações de cadastro' },
       { key: 'can_reject',         label: 'Rejeitar Solicitações', description: 'Rejeitar solicitações de cadastro' },
+      { key: 'can_attend',         label: 'Pode Atender Solicitações', description: 'Iniciar atendimento de solicitações no Kanban (Admin e operadores de fase)' },
     ],
   },
   {
@@ -133,6 +137,7 @@ function emptyPermissions(): Permissions {
     can_manage_value_dictionary: false,
     can_standardize: false,
     can_bulk_import: false,
+    can_attend: false,
   }
 }
 

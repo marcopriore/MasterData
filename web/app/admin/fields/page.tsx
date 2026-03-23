@@ -34,8 +34,8 @@ type FieldDictionary = {
   id: number
   field_name: string
   field_label: string
-  sap_field: string | null
-  sap_view: string
+  erp_field: string | null
+  erp_view: string
   field_type: string
   options: string[] | Record<string, unknown> | null
   responsible_role: string
@@ -47,7 +47,7 @@ type FieldDictionary = {
 
 type Role = { id: number; name: string }
 
-const SAP_VIEWS = [
+const ERP_VIEWS = [
   { value: '', label: 'Todos' },
   { value: 'dados_basicos', label: 'Dados Básicos' },
   { value: 'fiscal', label: 'Fiscal' },
@@ -57,7 +57,7 @@ const SAP_VIEWS = [
   { value: 'vendas', label: 'Vendas' },
 ] as const
 
-const SAP_VIEW_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+const ERP_VIEW_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   dados_basicos: { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' },
   fiscal: { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' },
   compras: { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0' },
@@ -137,8 +137,8 @@ interface FieldModalProps {
 function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps) {
   const [fieldLabel, setFieldLabel] = useState(initial?.field_label ?? '')
   const [fieldName, setFieldName] = useState(initial?.field_name ?? '')
-  const [sapField, setSapField] = useState(initial?.sap_field ?? '')
-  const [sapView, setSapView] = useState(initial?.sap_view ?? 'dados_basicos')
+  const [erpField, setErpField] = useState(initial?.erp_field ?? '')
+  const [erpView, setErpView] = useState(initial?.erp_view ?? 'dados_basicos')
   const [fieldType, setFieldType] = useState(initial?.field_type ?? 'text')
   const [responsibleRole, setResponsibleRole] = useState(initial?.responsible_role ?? '')
   const [isRequired, setIsRequired] = useState(initial?.is_required ?? false)
@@ -192,8 +192,8 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
       const body = {
         field_name: fieldName.trim(),
         field_label: fieldLabel.trim(),
-        sap_field: sapField.trim() || null,
-        sap_view: sapView,
+        erp_field: erpField.trim() || null,
+        erp_view: erpView,
         field_type: fieldType,
         options: fieldType === 'select' ? parseOptionsJson(optionsJson) ?? [] : null,
         responsible_role: roleName,
@@ -255,24 +255,24 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
             />
           </div>
           <div>
-            <Label htmlFor="sap_field">Campo ERP</Label>
+            <Label htmlFor="erp_field">Campo ERP</Label>
             <Input
-              id="sap_field"
-              value={sapField}
-              onChange={(e) => setSapField(e.target.value)}
+              id="erp_field"
+              value={erpField}
+              onChange={(e) => setErpField(e.target.value)}
               placeholder="Ex: MAKTX"
               className="mt-1 font-mono text-sm"
             />
           </div>
           <div>
-            <Label htmlFor="sap_view">Visão ERP *</Label>
+            <Label htmlFor="erp_view">Visão ERP *</Label>
             <select
-              id="sap_view"
-              value={sapView}
-              onChange={(e) => setSapView(e.target.value)}
+              id="erp_view"
+              value={erpView}
+              onChange={(e) => setErpView(e.target.value)}
               className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
             >
-              {SAP_VIEWS.filter((v) => v.value).map((v) => (
+              {ERP_VIEWS.filter((v) => v.value).map((v) => (
                 <option key={v.value} value={v.value}>
                   {v.label}
                 </option>
@@ -372,7 +372,7 @@ export default function FieldsPage() {
   const [fields, setFields] = useState<FieldDictionary[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
-  const [sapViewFilter, setSapViewFilter] = useState('')
+  const [erpViewFilter, setErpViewFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<ModalMode>('create')
   const [editTarget, setEditTarget] = useState<FieldDictionary | null>(null)
@@ -381,7 +381,7 @@ export default function FieldsPage() {
     setLoading(true)
     try {
       const [f, r] = await Promise.all([
-        getFieldDictionaryAll(sapViewFilter || undefined),
+        getFieldDictionaryAll(erpViewFilter || undefined),
         getRoles(),
       ])
       setFields(f as FieldDictionary[])
@@ -392,7 +392,7 @@ export default function FieldsPage() {
     } finally {
       setLoading(false)
     }
-  }, [sapViewFilter])
+  }, [erpViewFilter])
 
   useEffect(() => {
     fetchData()
@@ -470,12 +470,12 @@ export default function FieldsPage() {
 
       {/* Tabs filter */}
       <div className="flex flex-wrap gap-2">
-        {SAP_VIEWS.map((v) => (
+        {ERP_VIEWS.map((v) => (
           <button
             key={v.value || 'all'}
-            onClick={() => setSapViewFilter(v.value)}
+            onClick={() => setErpViewFilter(v.value)}
             className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              sapViewFilter === v.value
+              erpViewFilter === v.value
                 ? 'bg-[#0F1C38] text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
@@ -496,7 +496,7 @@ export default function FieldsPage() {
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
             <BookOpen className="size-8 opacity-30" />
             <p className="text-sm">
-              {sapViewFilter
+              {erpViewFilter
                 ? 'Nenhum campo nesta visão.'
                 : 'Nenhum campo cadastrado.'}
             </p>
@@ -518,7 +518,7 @@ export default function FieldsPage() {
               </thead>
               <tbody>
                 {fields.map((f) => {
-                  const viewStyle = SAP_VIEW_COLORS[f.sap_view] ?? {
+                  const viewStyle = ERP_VIEW_COLORS[f.erp_view] ?? {
                     bg: '#F8FAFC',
                     text: '#475569',
                     border: '#E2E8F0',
@@ -541,9 +541,9 @@ export default function FieldsPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3.5">
-                        {f.sap_field ? (
+                        {f.erp_field ? (
                           <span className="inline-flex rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-600">
-                            {f.sap_field}
+                            {f.erp_field}
                           </span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
@@ -558,7 +558,7 @@ export default function FieldsPage() {
                             borderColor: viewStyle.border,
                           }}
                         >
-                          {SAP_VIEWS.find((v) => v.value === f.sap_view)?.label ?? f.sap_view}
+                          {ERP_VIEWS.find((v) => v.value === f.erp_view)?.label ?? f.erp_view}
                         </span>
                       </td>
                       <td className="px-5 py-3.5">

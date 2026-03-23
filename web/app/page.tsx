@@ -187,6 +187,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const pathname = usePathname()
   const { user, ready, isAdmin, can } = useUser()
+  const showAllAccess = user?.is_master === true
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -241,7 +242,7 @@ export default function DashboardPage() {
           Acesso Rápido
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {(isAdmin || can('can_edit_pdm')) && (
+          {(showAllAccess || isAdmin || can('can_edit_pdm')) && (
             <NavCard
               href="/admin-pdm"
               icon={Database}
@@ -249,7 +250,7 @@ export default function DashboardPage() {
               description="Configure padrões de descrição"
             />
           )}
-          {(isAdmin || can('can_approve')) && (
+          {(showAllAccess || isAdmin || can('can_approve')) && (
             <NavCard
               href="/governance"
               icon={ShieldCheck}
@@ -257,7 +258,7 @@ export default function DashboardPage() {
               description="Políticas e controle de qualidade"
             />
           )}
-          {isAdmin && (
+          {(showAllAccess || isAdmin) && (
             <NavCard
               href="/settings/workflow"
               icon={GitBranch}
@@ -265,7 +266,7 @@ export default function DashboardPage() {
               description="Etapas de aprovação"
             />
           )}
-          {(isAdmin || can('can_submit_request')) && (
+          {(showAllAccess || isAdmin || can('can_submit_request')) && (
             <NavCard
               href="/request"
               icon={FilePlus}

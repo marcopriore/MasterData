@@ -90,8 +90,8 @@ FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM public.workflow_config WHERE tenant_id = 1);
 
 -- ─── 6. Field Dictionary (campos ERP) para Master tenant ──────────────────────
-INSERT INTO public.field_dictionary (tenant_id, field_name, field_label, sap_field, sap_view, field_type, options, responsible_role, is_required, display_order)
-SELECT 1, f.field_name, f.field_label, f.sap_field, f.sap_view, f.field_type, f.options::jsonb, f.responsible_role, f.is_required, f.display_order
+INSERT INTO public.field_dictionary (tenant_id, field_name, field_label, erp_field, erp_view, field_type, options, responsible_role, is_required, display_order)
+SELECT 1, f.field_name, f.field_label, f.erp_field, f.erp_view, f.field_type, f.options::jsonb, f.responsible_role, f.is_required, f.display_order
 FROM (VALUES
   ('descricao_basica', 'Descrição Básica', 'MAKTX', 'dados_basicos', 'text', NULL::text, 'CADASTRO', true, 1),
   ('grupo_mercadorias', 'Grupo de Mercadorias', 'MATKL', 'dados_basicos', 'select', '["001 - Matéria-prima","002 - Semimanufaturado","003 - Produto acabado","004 - Mercadoria para revenda"]', 'CADASTRO', true, 2),
@@ -107,7 +107,7 @@ FROM (VALUES
   ('conta_estoque', 'Conta de Estoque', NULL, 'contabilidade', 'text', NULL::text, 'CONTABILIDADE', true, 1),
   ('grupo_valoracao', 'Grupo de Valoração', 'BKLAS', 'contabilidade', 'select', '["3000 - Matéria-prima","7900 - Produto acabado","7920 - Mercadoria para revenda"]', 'CONTABILIDADE', true, 3),
   ('controle_preco', 'Controle de Preço', 'VPRSV', 'contabilidade', 'select', '["S - Preço padrão","V - Custo médio móvel","D - Preço de mercado"]', 'CONTABILIDADE', true, 4)
-) AS f(field_name, field_label, sap_field, sap_view, field_type, options, responsible_role, is_required, display_order)
+) AS f(field_name, field_label, erp_field, erp_view, field_type, options, responsible_role, is_required, display_order)
 WHERE NOT EXISTS (SELECT 1 FROM public.field_dictionary WHERE tenant_id = 1 LIMIT 1);
 
 -- ─── 7. PDM Template: Rolamento Industrial ────────────────────────────────────
