@@ -432,6 +432,118 @@ export async function createRequest(body: {
   return { id: data.id }
 }
 
+function normalizeAttrs(data: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(data ?? {})) {
+    if (v === null || v === undefined) continue
+
+    let s: string
+    if (typeof v === 'object' && v !== null && !Array.isArray(v) && 'value' in v) {
+      const o = v as { value?: unknown; unit?: unknown }
+      const val = o.value != null ? String(o.value) : ''
+      const unit = o.unit != null ? String(o.unit) : ''
+      s = `${val}${unit}`.toLowerCase().trim()
+    } else if (typeof v === 'string') {
+      s = v.toLowerCase().trim()
+    } else if (typeof v === 'number') {
+      s = String(v).toLowerCase().trim()
+    } else {
+      s = String(v).trim().toLowerCase()
+    }
+
+    if (s === '') continue
+    out[k] = s
+  }
+  return out
+}
+
+function normalizedAttrsMatch(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keysA = Object.keys(a)
+  if (keysA.length !== Object.keys(b).length) return false
+  for (const k of keysA) {
+    if (a[k] !== b[k]) return false
+  }
+  return true
+}
+
+const DUPLICATE_CHECK_NEGATIVE: {
+  isDuplicate: false
+  existingCode: null
+  existingId: null
+  source: null
+} = { isDuplicate: false, existingCode: null, existingId: null, source: null }
+
+export async function checkDuplicateRequest(params: {
+  pdm_id: number
+  formData: Record<string, unknown>
+}): Promise<{
+  isDuplicate: boolean
+  existingCode: string | null
+  existingId: number | null
+  source: 'request' | 'material' | null
+}> {
+  try {
+    const supabase = createClient()
+    const target = normalizeAttrs(params.formData)
+
+    const { data: openRequests, error: reqErr } = await supabase
+      .from('material_requests')
+      .select('id, technical_attributes, generated_description')
+      .eq('pdm_id', params.pdm_id)
+      .neq('status', 'finalizado')
+      .neq('status', 'rejected')
+
+    if (reqErr) throw reqErr
+
+    for (const row of openRequests ?? []) {
+      const rowNorm = normalizeAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
+      if (normalizedAttrsMatch(target, rowNorm)) {
+        return {
+          isDuplicate: true,
+          existingCode: `REQ-${String(row.id).padStart(4, '0')}`,
+          existingId: row.id,
+          source: 'request',
+        }
+      }
+    }
+
+    const { data: pdmRow, error: pdmErr } = await supabase
+      .from('pdm_templates')
+      .select('internal_code')
+      .eq('id', params.pdm_id)
+      .single()
+
+    if (pdmErr) throw pdmErr
+    const pdmCode = pdmRow?.internal_code
+    if (!pdmCode) return { ...DUPLICATE_CHECK_NEGATIVE }
+
+    const { data: materials, error: matErr } = await supabase
+      .from('material_database')
+      .select('id, id_sistema, technical_attributes')
+      .eq('pdm_code', pdmCode)
+
+    if (matErr) throw matErr
+
+    for (const row of materials ?? []) {
+      const rowNorm = normalizeAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
+      if (normalizedAttrsMatch(target, rowNorm)) {
+        const code = row.id_sistema != null ? String(row.id_sistema) : null
+        return {
+          isDuplicate: true,
+          existingCode: code,
+          existingId: row.id,
+          source: 'material',
+        }
+      }
+    }
+
+    return { ...DUPLICATE_CHECK_NEGATIVE }
+  } catch (e) {
+    console.error('checkDuplicateRequest', e)
+    return { ...DUPLICATE_CHECK_NEGATIVE }
+  }
+}
+
 export async function assignRequest(id: number): Promise<ApiRequest> {
   const supabase = createClient()
   const { data, error } = await supabase.rpc('assign_request', { p_request_id: id })
@@ -715,6 +827,33 @@ export async function getMaterials(params: {
   const { data, error, count } = await q.order('created_at', { ascending: false }).range(from, from + limit - 1)
   if (error) handleError(error)
   return { total: count ?? 0, page, limit, items: data ?? [] }
+}
+
+/** IDs that share the same tenant-scoped (description case-insensitive + pdm_code) with at least one other row. */
+export async function getDuplicateMaterials(): Promise<Set<number>> {
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase.from('material_database').select('id, description, pdm_code')
+    if (error) throw error
+    const rows = data ?? []
+    const byKey = new Map<string, number[]>()
+    for (const row of rows) {
+      const desc = (row.description ?? '').toLowerCase()
+      const pdm = row.pdm_code ?? ''
+      const key = `${desc}\0${pdm}`
+      const list = byKey.get(key)
+      if (list) list.push(row.id)
+      else byKey.set(key, [row.id])
+    }
+    const dup = new Set<number>()
+    for (const ids of byKey.values()) {
+      if (ids.length >= 2) for (const id of ids) dup.add(id)
+    }
+    return dup
+  } catch (e) {
+    console.error('getDuplicateMaterials', e)
+    return new Set()
+  }
 }
 
 export async function getMaterialById(id: number): Promise<MaterialDetail> {

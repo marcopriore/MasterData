@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
-import { getPdms, getPdmById, searchMaterials, createRequest, uploadRequestAttachment } from '@/lib/supabase-api'
+import { getPdms, getPdmById, searchMaterials, createRequest, checkDuplicateRequest, uploadRequestAttachment } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Stepper, type StepItem } from '@/components/request/stepper'
@@ -13,8 +13,15 @@ import { PhaseSpecs } from '@/components/request/phase-specs'
 import { PhaseDocs } from '@/components/request/phase-docs'
 import { RequestSummary } from '@/components/request/request-summary'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
-import { Check, ChevronLeft, ChevronRight, FileText, Loader2, Search } from 'lucide-react'
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, FileText, Loader2, Search } from 'lucide-react'
 
 const STEPS: StepItem[] = [
   { id: 0, label: 'Pesquisa', description: 'Verificar Base de Dados', indicator: <Search className="size-4" /> },
@@ -79,6 +86,11 @@ export default function NewMaterialRequestPage() {
   const { user } = useUser()
   const [currentStep, setCurrentStep] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    existingCode: string | null
+    source: 'request' | 'material' | null
+  } | null>(null)
 
   // Step 0 – Link de Pesquisa
   const [hasSearched, setHasSearched] = useState(false)
@@ -223,7 +235,8 @@ export default function NewMaterialRequestPage() {
       const generatedDescription = selectedPdmObj
         ? [
             selectedPdmObj.name.toUpperCase(),
-            ...attributes
+            ...[...attributes]
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
               .filter((a) => a.includeInDescription)
               .map((a) => {
                 const val = formData[a.id]
@@ -248,6 +261,16 @@ export default function NewMaterialRequestPage() {
         generated_description: generatedDescription,
         values: formData,
         attachments: uploadedFiles.map((f) => f.file.name),
+      }
+
+      const dupCheck = await checkDuplicateRequest({
+        pdm_id: selectedPdm,
+        formData: formData as Record<string, unknown>,
+      })
+      if (dupCheck.isDuplicate) {
+        setDuplicateInfo({ existingCode: dupCheck.existingCode, source: dupCheck.source })
+        setDuplicateModalOpen(true)
+        return
       }
 
       setIsSubmitting(true)
@@ -453,6 +476,48 @@ export default function NewMaterialRequestPage() {
           )}
         </div>
       </div>
+
+      <Dialog open={duplicateModalOpen} onOpenChange={() => {}}>
+        <DialogContent
+          showCloseButton={false}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          className="sm:max-w-md"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 pr-8">
+              <AlertTriangle className="size-5 shrink-0 text-amber-500" aria-hidden />
+              Material já cadastrado
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-sm text-muted-foreground space-y-3">
+            {duplicateInfo?.source === 'request' && (
+              <p>
+                Já existe uma solicitação em andamento com os mesmos atributos técnicos. Utilize o código{' '}
+                <span className="font-mono font-bold text-[#0F1C38]">{duplicateInfo.existingCode ?? '—'}</span>{' '}
+                para acompanhar.
+              </p>
+            )}
+            {duplicateInfo?.source === 'material' && (
+              <p>
+                Este material já está cadastrado na Base de Dados com o código{' '}
+                <span className="font-mono font-bold text-[#0F1C38]">{duplicateInfo.existingCode ?? '—'}</span>
+                . Utilize este código no seu processo.
+              </p>
+            )}
+          </div>
+          <DialogFooter className="sm:justify-stretch">
+            <Button
+              type="button"
+              className="w-full bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90"
+              onClick={() => setDuplicateModalOpen(false)}
+            >
+              Entendido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Toaster position="top-right" richColors duration={3000} />
     </main>
   )
