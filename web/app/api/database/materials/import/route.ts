@@ -15,8 +15,11 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  const tenantId = profile?.tenant_id
-  if (!tenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
+  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
+  if (!effectiveTenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null
@@ -169,7 +172,7 @@ export async function POST(request: Request) {
     const d = r.data as Record<string, unknown>
     if (r.operacao === 'C') {
       const { error } = await supabaseAdmin.from('material_database').insert({
-        tenant_id: tenantId,
+        tenant_id: effectiveTenantId,
         description: d.description,
         pdm_code: d.pdm_code,
         status: d.status ?? 'Ativo',
@@ -190,7 +193,7 @@ export async function POST(request: Request) {
       const { data: existing } = await supabaseAdmin
         .from('material_database')
         .select('id')
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenantId)
         .eq('id_erp', r.codigo_material)
         .single()
       if (existing) {

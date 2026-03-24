@@ -13,7 +13,9 @@ export async function GET() {
   const canManage = roleName === 'ADMIN' || roleName === 'MASTER' || isMaster
   if (!canManage) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
 
-  const tenantId = profile?.tenant_id as number | undefined
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
   let q = supabaseAdmin.from('users').select(`
     id,
     name,
@@ -24,7 +26,7 @@ export async function GET() {
     tenants(id, name)
   `).order('created_at', { ascending: false })
 
-  if (!isMaster && tenantId) q = q.eq('tenant_id', tenantId)
+  if (!isMaster && effectiveTenantId) q = q.eq('tenant_id', effectiveTenantId)
   const { data: users, error: usersError } = await q
   if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 })
 
@@ -58,13 +60,17 @@ export async function POST(request: Request) {
   const canManage = roleName === 'ADMIN' || roleName === 'MASTER' || isMaster
   if (!canManage) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
 
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
+
   const body = await request.json()
   const { email, password, name, tenant_id, role_id } = body
   if (!email || !password || !name || !role_id) {
     return NextResponse.json({ error: 'Campos obrigatórios: email, password, name, role_id' }, { status: 400 })
   }
 
-  const tenantId = tenant_id != null ? Number(tenant_id) : (profile?.tenant_id as number)
+  const tenantId = tenant_id != null ? Number(tenant_id) : effectiveTenantId
   const roleId = Number(role_id)
   if (!tenantId) return NextResponse.json({ error: 'tenant_id é obrigatório' }, { status: 400 })
   if (!isMaster && profile?.tenant_id !== tenantId) {

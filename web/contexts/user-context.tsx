@@ -370,8 +370,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const isAdmin = user?.role_name === 'ADMIN'
 
   const can = useCallback(
-    (permission: keyof RolePermissions) =>
-      user?.role_permissions?.[permission] ?? false,
+    (permission: keyof RolePermissions) => {
+      if (user?.is_master) return true
+      return user?.role_permissions?.[permission] ?? false
+    },
     [user]
   )
 

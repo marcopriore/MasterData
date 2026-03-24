@@ -113,27 +113,52 @@ export default function MDMDashboard() {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  const handleSelectPdm = useCallback((pdm: PDMTemplate) => {
+  const handleSelectPdm = useCallback(async (pdm: PDMTemplate) => {
     setIsCreatingNew(false)
     setIsEditMode(false)
     setSelectedPdmId(pdm.id)
     setPdmName(pdm.name)
     setPdmCode((pdm.internal_code ?? "").slice(0, 7))
-    setPdmActive(pdm.is_active)
-    setAttributes(
-      (pdm.attributes ?? []).map((a) => ({
-        id: a.id,
-        order: a.order,
-        name: a.name,
-        dataType: a.dataType as "numeric" | "text" | "lov",
-        isRequired: a.isRequired,
-        includeInDescription: a.includeInDescription,
-        abbreviation: a.abbreviation,
-        allowedValues: a.allowedValues ?? [],
-      }))
-    )
+    setPdmActive(pdm.is_active ?? true)
+    setAttributes([])
     setSearchQuery(pdm.name)
     setSearchFocused(false)
+
+    try {
+      const full = await getPdmById(pdm.id)
+      const attrs = (full.attributes ?? []) as Array<{
+        id?: string
+        order?: number
+        name?: string
+        dataType?: string
+        isRequired?: boolean
+        includeInDescription?: boolean
+        abbreviation?: string
+        allowedValues?: unknown[]
+      }>
+      setAttributes(
+        attrs.map((a) => {
+          const av = a.allowedValues ?? []
+          const mappedAv = av.map((v) =>
+            typeof v === "object" && v != null && "value" in v
+              ? { value: String((v as { value?: unknown }).value ?? ""), abbreviation: String((v as { abbreviation?: unknown }).abbreviation ?? "") }
+              : { value: String(v), abbreviation: "" }
+          )
+          return {
+            id: a.id ?? "",
+            order: a.order ?? 0,
+            name: a.name ?? "",
+            dataType: (a.dataType ?? "text") as "numeric" | "text" | "lov",
+            isRequired: a.isRequired ?? false,
+            includeInDescription: a.includeInDescription ?? false,
+            abbreviation: a.abbreviation ?? "",
+            allowedValues: mappedAv,
+          }
+        })
+      )
+    } catch (err) {
+      console.error("[handleSelectPdm] getPdmById failed:", err)
+    }
   }, [])
 
   const handleNewPdm = useCallback(() => {

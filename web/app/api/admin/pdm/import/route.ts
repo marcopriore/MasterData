@@ -223,8 +223,11 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  const tenantId = profile?.tenant_id
-  if (!tenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
+  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
+  if (!effectiveTenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null
@@ -253,7 +256,7 @@ export async function POST(request: Request) {
   const { data: existingPdms } = await supabaseAdmin
     .from('pdm_templates')
     .select('id, internal_code, attributes')
-    .eq('tenant_id', tenantId)
+    .eq('tenant_id', effectiveTenantId)
   const pdmCodesInDb = new Set((existingPdms ?? []).map((p) => (p.internal_code as string) ?? '').filter(Boolean))
 
   const existingAttrKeys = new Set<string>()
@@ -341,7 +344,7 @@ export async function POST(request: Request) {
       const { data: inserted, error } = await supabaseAdmin
         .from('pdm_templates')
         .insert({
-          tenant_id: tenantId,
+          tenant_id: effectiveTenantId,
           name: nome || pdmCode,
           internal_code: pdmCode,
           is_active: isActive,
@@ -373,7 +376,7 @@ export async function POST(request: Request) {
   const { data: afterPdms } = await supabaseAdmin
     .from('pdm_templates')
     .select('id, internal_code, name, attributes')
-    .eq('tenant_id', tenantId)
+    .eq('tenant_id', effectiveTenantId)
   for (const p of afterPdms ?? []) {
     const code = (p.internal_code as string) ?? ''
     if (code) pdmByCode[code] = { ...p, attributes: (p.attributes as unknown[]) ?? [] } as never

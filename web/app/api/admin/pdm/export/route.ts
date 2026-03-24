@@ -12,13 +12,16 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  const tenantId = profile?.tenant_id
-  if (!tenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
+  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
+  if (!effectiveTenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
 
   const { data: pdms, error } = await supabaseAdmin
     .from('pdm_templates')
     .select('id, name, internal_code, is_active, attributes')
-    .eq('tenant_id', tenantId)
+    .eq('tenant_id', effectiveTenantId)
     .order('name')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
