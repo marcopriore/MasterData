@@ -179,8 +179,13 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
     }
     if (fieldType === 'select') {
       const parsed = parseOptionsJson(optionsJson)
-      if (parsed === undefined) {
-        setOptionsError('JSON inválido. Use: ["Opção 1", "Opção 2"]')
+      if (parsed === null || parsed.length === 0) {
+        setOptionsError('Informe ao menos uma opção válida. Use: ["Opção 1", "Opção 2"]')
+        return
+      }
+      const hasInvalid = parsed.some((v) => !v.trim())
+      if (hasInvalid) {
+        setOptionsError('Todas as opções devem ter valor não vazio.')
         return
       }
       setOptionsError(null)
@@ -197,7 +202,9 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
         erp_field: erpField.trim() || null,
         erp_view: erpView,
         field_type: fieldType,
-        options: fieldType === 'select' ? parseOptionsJson(optionsJson) ?? [] : null,
+        options: fieldType === 'select'
+          ? (parseOptionsJson(optionsJson) ?? []).map((v) => v.trim()).filter(Boolean)
+          : null,
         responsible_role: roleName,
         is_required: isRequired,
         is_active: true,

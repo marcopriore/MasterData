@@ -482,7 +482,7 @@ export default function NewMaterialRequestPage() {
           showCloseButton={false}
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
-          className="sm:max-w-md"
+          className="border-[#B4B9BE] bg-white text-slate-900 shadow-lg dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 sm:max-w-md"
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 pr-8">
