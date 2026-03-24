@@ -10,6 +10,7 @@ import {
   bulkUpdateWorkflowConfig,
   createWorkflow,
   updateWorkflow,
+  migrateRequestsToWorkflow,
 } from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -325,6 +326,10 @@ export default function WorkflowConfigPage() {
   const [archiveLoading, setArchiveLoading] = useState(false)
   const [confirmActivateOpen, setConfirmActivateOpen] = useState(false)
   const [pendingActivate, setPendingActivate] = useState<boolean | null>(null)
+  const [oldWorkflowSteps, setOldWorkflowSteps] = useState<WorkflowStep[]>([])
+  const [newWorkflowSteps, setNewWorkflowSteps] = useState<WorkflowStep[]>([])
+  const [stepMapping, setStepMapping] = useState<Record<string, string>>({})
+  const [mappingLoading, setMappingLoading] = useState(false)
 
   const fetchWorkflows = useCallback(() => {
     getWorkflows()
@@ -564,8 +569,25 @@ export default function WorkflowConfigPage() {
     if (checked === true) {
       const otherActive = workflows.find((w) => w.is_active && w.id !== selectedWorkflowId)
       if (otherActive) {
+        setMappingLoading(true)
         setPendingActivate(true)
         setConfirmActivateOpen(true)
+        Promise.all([
+          getWorkflowConfig(otherActive.id),
+          getWorkflowConfig(selectedWorkflowId),
+        ])
+          .then(([oldSteps, newSteps]) => {
+            setOldWorkflowSteps(oldSteps)
+            setNewWorkflowSteps(newSteps)
+            const initial: Record<string, string> = {}
+            for (const old of oldSteps) {
+              const sk = old.status_key ?? ''
+              const matched = newSteps.find((n) => (n.status_key ?? '') === sk)
+              initial[sk] = matched?.status_key ?? ''
+            }
+            setStepMapping(initial)
+          })
+          .finally(() => setMappingLoading(false))
         return
       }
     }
@@ -590,14 +612,32 @@ export default function WorkflowConfigPage() {
         await updateWorkflow(currentActive.id, { is_active: false })
       }
       await updateWorkflow(selectedWorkflowId, { is_active: true })
+      let migratedCount = 0
+      if (currentActive) {
+        const { migrated } = await migrateRequestsToWorkflow({
+          fromWorkflowId: currentActive.id,
+          toWorkflowId: selectedWorkflowId,
+          statusMap: stepMapping,
+        })
+        migratedCount = migrated
+      }
       toast.success(
         currentActive
-          ? `"${currentActive.name}" foi desativado e este workflow está agora ativo.`
+          ? `"${currentActive.name}" desativado. ${migratedCount} solicitação(ões) migrada(s) para o novo workflow.`
           : 'Workflow ativado'
       )
       await fetchWorkflows()
+      setWorkflows((prev) =>
+        prev.map((w) => ({
+          ...w,
+          is_active: w.id === selectedWorkflowId,
+        }))
+      )
       setConfirmActivateOpen(false)
       setPendingActivate(null)
+      setOldWorkflowSteps([])
+      setNewWorkflowSteps([])
+      setStepMapping({})
     } catch {
       toast.error('Falha ao atualizar status')
     } finally {
@@ -1051,7 +1091,12 @@ export default function WorkflowConfigPage() {
       {/* Confirm Activate Workflow Modal */}
       <Dialog open={confirmActivateOpen} onOpenChange={(open) => {
         setConfirmActivateOpen(open)
-        if (!open) setPendingActivate(null)
+        if (!open) {
+          setPendingActivate(null)
+          setOldWorkflowSteps([])
+          setNewWorkflowSteps([])
+          setStepMapping({})
+        }
       }}>
         <DialogContent
           overlayClassName="bg-slate-900/20 backdrop-blur-sm"
@@ -1066,12 +1111,72 @@ export default function WorkflowConfigPage() {
               Deseja continuar?
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-4 py-4">
+            {mappingLoading ? (
+              <div className="space-y-3">
+                <div className="h-4 w-3/4 rounded bg-slate-200 animate-pulse dark:bg-slate-600" />
+                <div className="h-4 w-full rounded bg-slate-200 animate-pulse dark:bg-slate-600" />
+                <div className="h-4 w-1/2 rounded bg-slate-200 animate-pulse dark:bg-slate-600" />
+              </div>
+            ) : oldWorkflowSteps.length > 0 ? (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900 dark:text-foreground">
+                    Migração de Solicitações em Andamento
+                  </p>
+                  <p className="text-xs text-slate-600 dark:text-muted-foreground mt-1">
+                    Indique para qual etapa do novo workflow cada etapa atual deve ser migrada.
+                  </p>
+                </div>
+                <div className="space-y-2 rounded-2xl border border-[#B4B9BE]/40 p-3 dark:border-zinc-400/40">
+                  {oldWorkflowSteps.map((old) => {
+                    const sk = old.status_key ?? ''
+                    return (
+                      <div
+                        key={old.id}
+                        className="flex items-center gap-2"
+                      >
+                        <span className="text-sm font-medium text-slate-900 dark:text-foreground min-w-[120px] shrink-0">
+                          {old.step_name}
+                        </span>
+                        <ArrowRight className="size-4 shrink-0 text-slate-400" />
+                        <Select
+                          value={stepMapping[sk] ?? ''}
+                          onValueChange={(v) =>
+                            setStepMapping((prev) => ({ ...prev, [sk]: v }))
+                          }
+                        >
+                          <SelectTrigger className="h-9 flex-1 border-slate-200 dark:border-zinc-400/40">
+                            <SelectValue placeholder="Selecionar etapa" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {newWorkflowSteps.map((n) => (
+                              <SelectItem key={n.id} value={n.status_key ?? ''}>
+                                {n.step_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600 dark:text-muted-foreground">
+                Nenhuma solicitação em andamento para migrar.
+              </p>
+            )}
+          </div>
           <DialogFooter className="gap-2 pt-2">
             <Button
               variant="outline"
               onClick={() => {
                 setConfirmActivateOpen(false)
                 setPendingActivate(null)
+                setOldWorkflowSteps([])
+                setNewWorkflowSteps([])
+                setStepMapping({})
               }}
               className="border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
             >

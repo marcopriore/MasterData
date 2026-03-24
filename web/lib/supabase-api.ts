@@ -1577,3 +1577,30 @@ export async function getRecentActivities(params?: { limit?: number; offset?: nu
     return { data: [], count: 0 }
   }
 }
+
+export async function migrateRequestsToWorkflow(params: {
+  fromWorkflowId: number
+  toWorkflowId: number
+  statusMap: Record<string, string>
+}): Promise<{ migrated: number }> {
+  const supabase = createClient()
+  const { fromWorkflowId, toWorkflowId, statusMap } = params
+  const { data: rawRows, error: fetchError } = await supabase
+    .from('material_requests')
+    .select('id, status')
+    .eq('workflow_id', fromWorkflowId)
+  if (fetchError) handleError(fetchError)
+  const rows = (rawRows ?? []).filter((r) => r.status !== 'finalizado' && r.status !== 'rejected')
+  if (!rows.length) return { migrated: 0 }
+  let migrated = 0
+  for (const row of rows) {
+    const newStatus = statusMap[row.status]
+    const payload = newStatus != null
+      ? { workflow_id: toWorkflowId, status: newStatus }
+      : { workflow_id: toWorkflowId }
+    const { error } = await supabase.from('material_requests').update(payload).eq('id', row.id)
+    if (error) handleError(error)
+    migrated++
+  }
+  return { migrated }
+}
