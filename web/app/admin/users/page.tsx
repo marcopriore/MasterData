@@ -305,7 +305,12 @@ export default function UsersPage() {
     setLoading(true)
     try {
       const [u, r, t] = await Promise.all([getUsersApi(), getRoles(), getTenants()])
-      setUsers(u as User[])
+      setUsers(u.map((usr) => ({
+        ...usr,
+        role_name: (Array.isArray(usr.roles)
+          ? usr.roles[0]?.name
+          : (usr.roles as { name?: string } | null)?.name) ?? '—',
+      })) as User[])
       setRoles(r)
       setTenants(t)
     } catch (err) {

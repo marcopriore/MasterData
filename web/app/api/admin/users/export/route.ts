@@ -10,8 +10,11 @@ export async function GET() {
 
   const { data: profile } = await supabase.from('users').select('tenant_id, roles(name)').eq('id', user.id).single()
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
+  const effectiveTenantId = isMaster
+    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
+    : profile?.tenant_id
   let q = supabaseAdmin.from('users').select('id, name, tenant_id, role_id, is_active, roles(name), tenants(name, slug)').order('created_at', { ascending: false })
-  if (!isMaster && profile?.tenant_id) q = q.eq('tenant_id', profile.tenant_id)
+  if (effectiveTenantId) q = q.eq('tenant_id', effectiveTenantId)
   const { data: users, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

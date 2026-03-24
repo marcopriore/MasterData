@@ -26,7 +26,7 @@ export async function GET() {
     tenants(id, name)
   `).order('created_at', { ascending: false })
 
-  if (!isMaster && effectiveTenantId) q = q.eq('tenant_id', effectiveTenantId)
+  if (effectiveTenantId) q = q.eq('tenant_id', effectiveTenantId)
   const { data: users, error: usersError } = await q
   if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 })
 
