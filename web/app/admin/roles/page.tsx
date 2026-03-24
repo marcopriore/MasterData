@@ -216,7 +216,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl border border-[#B4B9BE] bg-white shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl border border-[#B4B9BE] bg-white shadow-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#B4B9BE] px-6 py-4">
           <div className="flex items-center gap-2">
@@ -234,7 +234,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
           <div className="space-y-1.5">
             <Label htmlFor="r-name" className="text-sm font-medium">Nome do perfil</Label>
             <Input
@@ -277,7 +277,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 
           <Separator />
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex justify-end gap-2 pt-4 border-t border-[#B4B9BE] mt-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
               Cancelar
             </Button>
