@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   X,
   Check,
+  Pencil,
 } from 'lucide-react'
 import { useValueDictionary, type ValueDictionaryEntry, type DuplicateGroup } from '@/hooks/useValueDictionary'
 
@@ -25,6 +26,7 @@ export default function ValueDictionaryPage() {
   const canAccess = can('can_manage_value_dictionary')
   const {
     entries,
+    similars,
     loading,
     error,
     fetchEntries,
@@ -32,6 +34,9 @@ export default function ValueDictionaryPage() {
     mergeEntries,
     syncWithPdms,
     getDuplicates,
+    getSimilars,
+    dismissSimilar,
+    mergeSimilar,
   } = useValueDictionary()
 
   const [search, setSearch] = useState('')
@@ -41,8 +46,12 @@ export default function ValueDictionaryPage() {
   const [duplicatesOpen, setDuplicatesOpen] = useState(false)
   const [mergeKeepByGroup, setMergeKeepByGroup] = useState<Record<number, number>>({})
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
   const [editAbbr, setEditAbbr] = useState('')
+  const [similarPopoverId, setSimilarPopoverId] = useState<number | null>(null)
+  const [mergingPairId, setMergingPairId] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const similarPopoverRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (canAccess) {
@@ -54,8 +63,9 @@ export default function ValueDictionaryPage() {
   useEffect(() => {
     if (canAccess && entries.length > 0) {
       getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
+      getSimilars()
     }
-  }, [canAccess, entries.length, getDuplicates, pathname])
+  }, [canAccess, entries.length, getDuplicates, getSimilars, pathname])
 
   const loadDuplicates = useCallback(async () => {
     try {
@@ -74,13 +84,29 @@ export default function ValueDictionaryPage() {
     }
   }, [duplicatesOpen, duplicates.length, getDuplicates])
 
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        similarPopoverRef.current &&
+        !similarPopoverRef.current.contains(e.target as Node)
+      ) {
+        setSimilarPopoverId(null)
+      }
+    }
+    if (similarPopoverId !== null) {
+      document.addEventListener('mousedown', handler)
+    }
+    return () => document.removeEventListener('mousedown', handler)
+  }, [similarPopoverId])
+
   const handleSync = async () => {
     setSyncing(true)
     try {
       const res = await syncWithPdms()
-      toast.success(`Sincronizado: ${(res as { created?: number }).created ?? 0} entradas criadas`)
+      toast.success(`Sincronizado: ${res.created ?? 0} entradas criadas, ${res.updated ?? 0} atualizadas`)
       fetchEntries(search || undefined)
       loadDuplicates()
+      getSimilars()
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -90,21 +116,24 @@ export default function ValueDictionaryPage() {
 
   const startEdit = (e: ValueDictionaryEntry) => {
     setEditingId(e.id)
+    setEditValue(e.value)
     setEditAbbr(e.abbreviation || '')
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const cancelEdit = () => {
     setEditingId(null)
+    setEditValue('')
     setEditAbbr('')
   }
 
   const saveEdit = async () => {
     if (editingId == null) return
     try {
-      await updateEntry(editingId, editAbbr)
-      toast.success('Abreviação salva')
+      await updateEntry(editingId, editAbbr, editValue)
+      toast.success('Valor atualizado e propagado para PDMs e materiais')
       fetchEntries(search || undefined)
+      getSimilars()
       cancelEdit()
     } catch (e) {
       toast.error((e as Error).message)
@@ -195,25 +224,19 @@ export default function ValueDictionaryPage() {
 
       {/* Duplicates alert */}
       {dupCount > 0 && (
-        <div
-          className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-3"
+        <button
+          type="button"
+          onClick={loadDuplicates}
+          className="flex w-full items-center justify-between gap-4 rounded-lg border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 px-4 py-3 text-left hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors cursor-pointer"
           role="alert"
         >
-          <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
-            <AlertTriangle className="size-5 shrink-0" />
+          <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
+            <AlertTriangle className="size-5 shrink-0 text-yellow-600 dark:text-yellow-400" />
             <span>
-              {dupCount} grupo(s) de valores duplicados detectados.
+              {dupCount} valor(es) duplicado(s) encontrado(s). Clique para sanear.
             </span>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={loadDuplicates}
-            className="border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/50"
-          >
-            Ver duplicatas
-          </Button>
-        </div>
+        </button>
       )}
 
       {/* Table */}
@@ -247,13 +270,120 @@ export default function ValueDictionaryPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayEntries.map((e) => (
+                {displayEntries.map((e) => {
+                  const similarPairs = similars.filter((s) => s.id_a === e.id || s.id_b === e.id)
+                  const hasSimilar = similarPairs.length > 0
+                  const similarNames = similarPairs.map((s) =>
+                    s.id_a === e.id ? s.value_b : s.value_a
+                  ).join(', ')
+                  return (
                   <tr
                     key={e.id}
                     className="border-b border-slate-100 dark:border-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-800/30"
                   >
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-zinc-100">
-                      {e.value}
+                    <td className="relative px-4 py-3 font-medium text-slate-900 dark:text-zinc-100">
+                      {editingId === e.id ? (
+                        <Input
+                          value={editValue}
+                          onChange={(ev) => setEditValue(ev.target.value)}
+                          onKeyDown={(ev) => handleKeyDown(ev, e.id)}
+                          className="h-8 max-w-[220px] bg-white dark:bg-zinc-800"
+                        />
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <button
+                            onClick={() => startEdit(e)}
+                            className="text-left hover:underline flex items-center gap-1"
+                          >
+                            {e.value}
+                            <Pencil className="size-3 opacity-50" />
+                          </button>
+                          {hasSimilar && (
+                            <span
+                              className="ml-1 inline-flex cursor-pointer items-center rounded-full bg-orange-100 dark:bg-orange-900/30 px-2 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800"
+                              title={`Similar a: ${similarNames}`}
+                              onClick={() =>
+                                setSimilarPopoverId(similarPopoverId === e.id ? null : e.id)
+                              }
+                            >
+                              similar
+                            </span>
+                          )}
+                          {similarPopoverId === e.id && (
+                            <div
+                              ref={similarPopoverRef}
+                              className="absolute z-50 mt-1 rounded-lg border border-orange-200 dark:border-orange-800 bg-white dark:bg-zinc-900 shadow-lg p-3 min-w-[220px]"
+                            >
+                              <p className="text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-2">
+                                Valores similares:
+                              </p>
+                              {similarPairs.map((pair) => {
+                                const otherValue = pair.id_a === e.id ? pair.value_b : pair.value_a
+                                const otherId = pair.id_a === e.id ? pair.id_b : pair.id_a
+                                return (
+                                  <div
+                                    key={otherId}
+                                    className="flex items-center justify-between gap-3 py-1"
+                                  >
+                                    <span className="text-xs text-slate-600 dark:text-zinc-400">
+                                      {otherValue}
+                                    </span>
+                                    <span className="flex shrink-0 items-center gap-1">
+                                      <button
+                                        title={`Manter "${e.value}", remover "${otherValue}"`}
+                                        onClick={async () => {
+                                          setMergingPairId(otherId)
+                                          try {
+                                            await mergeSimilar(e.id, otherId)
+                                            toast.success(`"${otherValue}" mesclado em "${e.value}"`)
+                                            setSimilarPopoverId(null)
+                                            fetchEntries(search || undefined)
+                                          } catch {
+                                            toast.error('Falha ao mesclar')
+                                          } finally {
+                                            setMergingPairId(null)
+                                          }
+                                        }}
+                                        disabled={mergingPairId === otherId}
+                                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                                      >
+                                        {mergingPairId === otherId ? (
+                                          <Loader2 className="size-3 animate-spin" />
+                                        ) : (
+                                          'Mesclar aqui'
+                                        )}
+                                      </button>
+                                      <span className="mx-1 text-slate-300 dark:text-zinc-600">
+                                        ·
+                                      </span>
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            await dismissSimilar(e.id, otherId)
+                                            toast.success('Par dispensado')
+                                            setSimilarPopoverId(null)
+                                          } catch {
+                                            toast.error('Falha ao dispensar')
+                                          }
+                                        }}
+                                        className="text-xs text-orange-600 dark:text-orange-400 hover:underline"
+                                      >
+                                        Dispensar
+                                      </button>
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                              <button
+                                onClick={() => setSimilarPopoverId(null)}
+                                className="mt-2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300"
+                              >
+                                Fechar
+                              </button>
+                            </div>
+                          )}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2">
                       {editingId === e.id ? (
@@ -292,13 +422,30 @@ export default function ValueDictionaryPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-600 dark:text-zinc-400">
-                      {e.pdm_usage && e.pdm_usage.length > 0
-                        ? e.pdm_usage.join(', ')
-                        : '—'}
+                      {e.pdm_usage && e.pdm_usage.length > 0 ? (
+                        <span className="inline-flex flex-wrap gap-x-1 gap-y-0.5">
+                          {e.pdm_usage.slice(0, 3).map((name) => (
+                            <span
+                              key={name}
+                              className="inline-flex items-center rounded-full bg-slate-100 dark:bg-zinc-700 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-zinc-300 mr-1 mb-0.5"
+                            >
+                              {name}
+                            </span>
+                          ))}
+                          {e.pdm_usage.length > 3 && (
+                            <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-zinc-700 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-zinc-300 mr-1 mb-0.5">
+                              +{e.pdm_usage.length - 3}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-4 py-2" />
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

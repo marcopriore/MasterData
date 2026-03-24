@@ -831,11 +831,51 @@ export type ValueDictionaryEntry = { id: number; value: string; abbreviation: st
 
 export async function getValueDictionary(search?: string): Promise<ValueDictionaryEntry[]> {
   const supabase = createClient()
-  let q = supabase.from('value_dictionary').select('*').order('value')
-  if (search?.trim()) q = q.ilike('value', `%${search.trim()}%`)
-  const { data, error } = await q
-  if (error) handleError(error)
-  return (data ?? []).map((r) => ({ id: r.id, value: r.value, abbreviation: r.abbreviation ?? '', pdm_usage: [] }))
+  let vdQ = supabase.from('value_dictionary').select('*').order('value')
+  if (search?.trim()) vdQ = vdQ.ilike('value', `%${search.trim()}%`)
+
+  const [vdRes, pdmRes] = await Promise.all([
+    vdQ,
+    supabase.from('pdm_templates').select('name, internal_code, attributes'),
+  ])
+  if (vdRes.error) handleError(vdRes.error)
+  if (pdmRes.error) handleError(pdmRes.error)
+
+  const vdRows = vdRes.data ?? []
+  const pdms = pdmRes.data ?? []
+
+  const findPdmsUsingValue = (val: string): string[] => {
+    const valLower = String(val ?? '').trim().toLowerCase()
+    if (!valLower) return []
+    const used: string[] = []
+    for (const p of pdms) {
+      let found = false
+      const attrs = (p.attributes ?? []) as Array<{ dataType?: string; allowedValues?: Array<{ value?: string }>; options?: Array<{ value?: string }> }>
+      for (const attr of attrs) {
+        if (found) break
+        const dt = (attr.dataType ?? '').toLowerCase()
+        if (dt !== 'lov' && dt !== 'select') continue
+        const opts = attr.allowedValues ?? attr.options ?? []
+        for (const opt of opts) {
+          const optVal = String(opt?.value ?? '').trim().toLowerCase()
+          if (optVal === valLower) {
+            const label = `[${p.internal_code ?? ''}] ${p.name ?? ''}`.trim()
+            if (label) used.push(label)
+            found = true
+            break
+          }
+        }
+      }
+    }
+    return used
+  }
+
+  return vdRows.map((r) => ({
+    id: r.id,
+    value: r.value,
+    abbreviation: r.abbreviation ?? '',
+    pdm_usage: findPdmsUsingValue(r.value),
+  }))
 }
 
 export async function updateValueDictionaryEntry(
@@ -848,11 +888,14 @@ export async function updateValueDictionaryEntry(
   return { id: data.id, value: data.value, abbreviation: data.abbreviation ?? '' }
 }
 
-export async function syncValueDictionary(): Promise<{ created: number }> {
+export async function syncValueDictionary(): Promise<{ created: number; updated: number }> {
   const supabase = createClient()
   const { data, error } = await supabase.rpc('sync_value_dictionary')
   if (error) handleError(error)
-  return { created: (data?.created as number) ?? 0 }
+  return {
+    created: (data?.created as number) ?? 0,
+    updated: (data?.updated as number) ?? 0
+  }
 }
 
 export async function mergeDictionaryEntries(
@@ -881,6 +924,44 @@ export async function getDuplicates(): Promise<DuplicateGroup[]> {
   return Object.entries(groups)
     .filter(([, v]) => v.length > 1)
     .map(([, values]) => ({ values, suggested_canonical: values[0].charAt(0).toUpperCase() + values[0].slice(1).toLowerCase() }))
+}
+
+export type SimilarValuePair = {
+  id_a: number
+  value_a: string
+  id_b: number
+  value_b: string
+  similarity_score: number
+}
+
+export async function getSimilarValues(): Promise<SimilarValuePair[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('get_similar_values')
+  if (error) handleError(error)
+  return (data ?? []).map((r: { id_a: number; value_a: string; id_b: number; value_b: string; similarity_score: number }) => ({
+    id_a: r.id_a,
+    value_a: r.value_a ?? '',
+    id_b: r.id_b,
+    value_b: r.value_b ?? '',
+    similarity_score: r.similarity_score ?? 0
+  }))
+}
+
+export async function dismissSimilarPair(
+  idA: number,
+  idB: number
+): Promise<{ dismissed: boolean; id_a: number; id_b: number }> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('dismiss_similar_pair', {
+    p_id_a: idA,
+    p_id_b: idB
+  })
+  if (error) handleError(error)
+  return {
+    dismissed: (data?.dismissed as boolean) ?? true,
+    id_a: (data?.id_a as number) ?? Math.min(idA, idB),
+    id_b: (data?.id_b as number) ?? Math.max(idA, idB)
+  }
 }
 
 // ─── Field Dictionary ────────────────────────────────────────────────────────
@@ -1603,4 +1684,37 @@ export async function migrateRequestsToWorkflow(params: {
     migrated++
   }
   return { migrated }
+}
+
+/** Propaga alteração de valor do dicionário para PDMs (allowedValues/options). */
+export async function propagateValueToPdms(
+  oldValue: string,
+  newValue: string,
+  newAbbreviation: string
+): Promise<{ updated_pdms: number }> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('propagate_value_to_pdms', {
+    p_old_value: oldValue,
+    p_new_value: newValue,
+    p_new_abbreviation: newAbbreviation
+  })
+  if (error) handleError(error)
+  return { updated_pdms: (data?.updated_pdms as number) ?? 0 }
+}
+
+/** Propaga alteração de valor para technical_attributes de requests e materials. */
+export async function propagateValueToMaterials(
+  oldValue: string,
+  newValue: string
+): Promise<{ updated_requests: number; updated_materials: number }> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('propagate_value_to_requests_and_materials', {
+    p_old_value: oldValue,
+    p_new_value: newValue
+  })
+  if (error) handleError(error)
+  return {
+    updated_requests: (data?.updated_requests as number) ?? 0,
+    updated_materials: (data?.updated_materials as number) ?? 0
+  }
 }
