@@ -620,8 +620,9 @@ export async function getWorkflowConfig(workflowId?: number): Promise<WorkflowSt
 export async function createWorkflow(payload: { name: string; description?: string }): Promise<WorkflowHeader> {
   const supabase = createClient()
   const tenantId = await getCurrentUserTenantId()
-  const { data, error } = await supabase.from('workflow_header').insert({ ...payload, tenant_id: tenantId, is_active: true }).select().single()
+  const { data, error } = await supabase.from('workflow_header').insert({ ...payload, tenant_id: tenantId, is_active: false }).select().single()
   if (error) handleError(error)
+  invalidateApiCache()
   return data
 }
 

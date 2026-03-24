@@ -17,9 +17,10 @@ import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog'
 import {
   AlertDialog,
@@ -322,6 +323,8 @@ export default function WorkflowConfigPage() {
   const [mappings, setMappings] = useState<Record<string, string>>({})
   const [migrationLoading, setMigrationLoading] = useState(false)
   const [archiveLoading, setArchiveLoading] = useState(false)
+  const [confirmActivateOpen, setConfirmActivateOpen] = useState(false)
+  const [pendingActivate, setPendingActivate] = useState<boolean | null>(null)
 
   const fetchWorkflows = useCallback(() => {
     getWorkflows()
@@ -548,8 +551,9 @@ export default function WorkflowConfigPage() {
       const created = await createWorkflow({ name, description: undefined })
       setNewWorkflowModalOpen(false)
       setNewWorkflowName('')
-      fetchWorkflows()
+      await fetchWorkflows()
       setSelectedWorkflowId(created.id)
+      toast.warning('Workflow criado como inativo. Ative-o quando estiver pronto para uso.')
     } catch {
       toast.error('Falha ao criar workflow')
     }
@@ -557,11 +561,43 @@ export default function WorkflowConfigPage() {
 
   const handleActiveToggle = async (checked: boolean) => {
     if (!selectedWorkflowId) return
+    if (checked === true) {
+      const otherActive = workflows.find((w) => w.is_active && w.id !== selectedWorkflowId)
+      if (otherActive) {
+        setPendingActivate(true)
+        setConfirmActivateOpen(true)
+        return
+      }
+    }
     setActiveToggleLoading(true)
     try {
       await updateWorkflow(selectedWorkflowId, { is_active: checked })
       toast.success(checked ? 'Workflow ativado' : 'Workflow desativado')
       fetchWorkflows()
+    } catch {
+      toast.error('Falha ao atualizar status')
+    } finally {
+      setActiveToggleLoading(false)
+    }
+  }
+
+  const handleConfirmActivate = async () => {
+    if (!selectedWorkflowId) return
+    const currentActive = workflows.find((w) => w.is_active && w.id !== selectedWorkflowId)
+    setActiveToggleLoading(true)
+    try {
+      if (currentActive) {
+        await updateWorkflow(currentActive.id, { is_active: false })
+      }
+      await updateWorkflow(selectedWorkflowId, { is_active: true })
+      toast.success(
+        currentActive
+          ? `"${currentActive.name}" foi desativado e este workflow está agora ativo.`
+          : 'Workflow ativado'
+      )
+      await fetchWorkflows()
+      setConfirmActivateOpen(false)
+      setPendingActivate(null)
     } catch {
       toast.error('Falha ao atualizar status')
     } finally {
@@ -1009,6 +1045,46 @@ export default function WorkflowConfigPage() {
           ) : (
             <p className="py-4 text-sm text-slate-500">Carregando...</p>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Activate Workflow Modal */}
+      <Dialog open={confirmActivateOpen} onOpenChange={(open) => {
+        setConfirmActivateOpen(open)
+        if (!open) setPendingActivate(null)
+      }}>
+        <DialogContent
+          overlayClassName="bg-slate-900/20 backdrop-blur-sm"
+          className="border-slate-200 bg-white text-slate-900 sm:max-w-md shadow-lg dark:border-zinc-600 dark:bg-white dark:text-slate-900"
+        >
+          <DialogHeader className="pb-2">
+            <DialogTitle className="text-slate-900 font-semibold">
+              Ativar Workflow
+            </DialogTitle>
+            <DialogDescription className="text-slate-600 dark:text-slate-500">
+              O workflow &quot;{workflows.find((w) => w.is_active && w.id !== selectedWorkflowId)?.name ?? ''}&quot; está atualmente ativo e será desativado.
+              Deseja continuar?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConfirmActivateOpen(false)
+                setPendingActivate(null)
+              }}
+              className="border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmActivate}
+              disabled={activeToggleLoading}
+              className="gap-2 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90"
+            >
+              Confirmar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
