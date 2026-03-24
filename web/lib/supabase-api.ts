@@ -40,9 +40,25 @@ async function getCurrentUserTenantId(): Promise<number> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) handleError(new Error('Não autenticado'))
-  const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  if (!profile?.tenant_id) handleError(new Error('Perfil sem tenant'))
-  return profile.tenant_id
+
+  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
+  let tenantId: number | null | undefined
+
+  if (isMaster) {
+    const metaTenant = user.app_metadata?.tenant_id as number | undefined
+    if (metaTenant != null) {
+      tenantId = metaTenant
+    } else {
+      const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
+      tenantId = profile?.tenant_id
+    }
+  } else {
+    const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
+    tenantId = profile?.tenant_id
+  }
+
+  if (tenantId == null) handleError(new Error('Perfil sem tenant'))
+  return tenantId
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
