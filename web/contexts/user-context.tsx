@@ -16,6 +16,7 @@ import {
   useState,
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { logAction } from '@/lib/supabase-api'
 import type { Session } from '@supabase/supabase-js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -307,6 +308,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               'Perfil não encontrado. Verifique se o usuário existe em public.users.',
           }
         }
+        void logAction({
+          category: 'auth',
+          action: 'login',
+          description: `Login realizado por ${loaded.email}`,
+        })
         return { ok: true, user: loaded }
       } catch (err) {
         return {
@@ -320,6 +326,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   const switchTenant = useCallback(async (tenantId: number) => {
     document.cookie = `mdm_selected_tenant=${tenantId}; path=/; max-age=${60 * 60 * 24 * 365}`
+
+    void logAction({
+      category: 'auth',
+      action: 'switch_tenant',
+      description: `Master trocou para tenant ${tenantId}`,
+      event_data: { tenant_id: tenantId },
+    })
 
     try {
       const { switchTenantApi } = await import('@/lib/supabase-api')
@@ -359,13 +372,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    await logAction({
+      category: 'auth',
+      action: 'logout',
+      description: `Logout de ${user?.email ?? 'usuário'}`,
+    })
     const supabase = createClient()
     await supabase.auth.signOut()
     document.cookie = 'mdm_selected_tenant=; path=/; max-age=0'
     setUserState(null)
     setAccessTokenState(null)
     window.location.href = '/login'
-  }, [])
+  }, [user?.email])
 
   const isAdmin = user?.role_name === 'ADMIN'
 

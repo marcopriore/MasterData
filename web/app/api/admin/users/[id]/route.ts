@@ -2,6 +2,29 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
+async function insertLog(params: {
+  tenant_id: number
+  user_id: string
+  category: string
+  action: string
+  description: string
+  event_data?: Record<string, unknown>
+}) {
+  try {
+    const { error } = await supabaseAdmin.from('system_logs').insert({
+      tenant_id: params.tenant_id,
+      user_id: params.user_id,
+      category: params.category,
+      action: params.action,
+      description: params.description.slice(0, 500),
+      event_data: params.event_data ?? null,
+    })
+    if (error) console.error('[insertLog]', error.message, params)
+  } catch (e) {
+    console.error('[insertLog]', e, params)
+  }
+}
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -44,6 +67,19 @@ export async function PUT(
     .select('*, roles(id, name), tenants(id, name)')
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  const logTenantId =
+    (data as { tenant_id?: number }).tenant_id ?? profile?.tenant_id
+  if (logTenantId != null) {
+    await insertLog({
+      tenant_id: logTenantId,
+      user_id: user.id,
+      category: 'users',
+      action: 'user_updated',
+      description: 'Usuário atualizado',
+      event_data: { updated_fields: body },
+    })
+  }
 
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(id)
   return NextResponse.json({ ...data, email: authUser?.user?.email ?? '' })

@@ -422,6 +422,13 @@ export async function createRequest(body: {
     stage: initialStatus,
   })
 
+  void logAction({
+    category: 'requests',
+    action: 'request_created',
+    description: 'Solicitação criada',
+    event_data: { request_id: data.id, pdm_id: body.pdm_id, requester: body.requester },
+  })
+
   return { id: data.id }
 }
 
@@ -429,6 +436,12 @@ export async function assignRequest(id: number): Promise<ApiRequest> {
   const supabase = createClient()
   const { data, error } = await supabase.rpc('assign_request', { p_request_id: id })
   if (error) handleError(error)
+  void logAction({
+    category: 'requests',
+    action: 'request_assigned',
+    description: 'Atendimento iniciado',
+    event_data: { request_id: id },
+  })
   return data as ApiRequest
 }
 
@@ -436,6 +449,12 @@ export async function advanceWorkflow(id: number): Promise<ApiRequest> {
   const supabase = createClient()
   const { data, error } = await supabase.rpc('advance_workflow', { p_request_id: id })
   if (error) handleError(error)
+  void logAction({
+    category: 'requests',
+    action: 'request_advanced',
+    description: 'Solicitação avançada no workflow',
+    event_data: { request_id: id },
+  })
   return data as ApiRequest
 }
 
@@ -443,6 +462,12 @@ export async function rejectRequest(id: number, reason?: string): Promise<ApiReq
   const supabase = createClient()
   const { data, error } = await supabase.rpc('reject_request', { p_request_id: id, p_reason: reason ?? '' })
   if (error) handleError(error)
+  void logAction({
+    category: 'requests',
+    action: 'request_rejected',
+    description: 'Solicitação rejeitada',
+    event_data: { request_id: id, reason: reason ?? '' },
+  })
   return data as ApiRequest
 }
 
@@ -729,6 +754,12 @@ export async function updateMaterialStandardize(id: number, body: Record<string,
     .select()
     .single()
   if (error) handleError(error)
+  void logAction({
+    category: 'database',
+    action: 'material_standardized',
+    description: 'Material padronizado',
+    event_data: { material_id: id },
+  })
   return data
 }
 
@@ -809,7 +840,21 @@ export async function erpIntegrateMaterial(materialId: number): Promise<ErpInteg
       .eq('id', materialId)
       .select()
       .single()
-    if (error) return { success: false, error: error.message }
+    if (error) {
+      void logAction({
+        category: 'database',
+        action: 'erp_integration_failed',
+        description: 'Falha na integração ERP',
+        event_data: { material_id: materialId },
+      })
+      return { success: false, error: error.message }
+    }
+    void logAction({
+      category: 'database',
+      action: 'erp_integrated',
+      description: 'Material integrado ao ERP',
+      event_data: { material_id: materialId, erp_code: erpCode },
+    })
     return { success: true, erp_code: erpCode, material: data }
   } else {
     const { data } = await supabase
@@ -821,10 +866,15 @@ export async function erpIntegrateMaterial(materialId: number): Promise<ErpInteg
       .eq('id', materialId)
       .select()
       .single()
+    void logAction({
+      category: 'database',
+      action: 'erp_integration_failed',
+      description: 'Falha na integração ERP',
+      event_data: { material_id: materialId },
+    })
     return { success: false, error: 'Timeout na conexão com SAP', material: data ?? undefined }
   }
 }
-
 // ─── Value Dictionary ────────────────────────────────────────────────────────
 
 export type ValueDictionaryEntry = { id: number; value: string; abbreviation: string; pdm_usage?: string[] }
@@ -1716,5 +1766,52 @@ export async function propagateValueToMaterials(
   return {
     updated_requests: (data?.updated_requests as number) ?? 0,
     updated_materials: (data?.updated_materials as number) ?? 0
+  }
+}
+
+export async function logAction(params: {
+  category:
+    | 'auth'
+    | 'users'
+    | 'roles'
+    | 'requests'
+    | 'fields'
+    | 'workflows'
+    | 'system'
+    | 'pdm'
+    | 'database'
+  action: string
+  description: string
+  event_data?: Record<string, unknown>
+}): Promise<void> {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    let tenantId: number | null = null
+    try {
+      tenantId = await getCurrentUserTenantId()
+    } catch {
+      tenantId = null
+    }
+
+    if (tenantId == null) {
+      console.warn('[logAction] ignorado: tenant_id indisponível', params)
+      return
+    }
+
+    const { error } = await supabase.from('system_logs').insert({
+      tenant_id: tenantId,
+      user_id: user?.id ?? null,
+      category: params.category,
+      action: params.action,
+      description: params.description.slice(0, 500),
+      event_data: params.event_data ?? null,
+    })
+    if (error) {
+      console.error('[logAction] insert falhou:', error.message, params)
+    }
+  } catch (e) {
+    console.error('[logAction] erro:', e, params)
   }
 }

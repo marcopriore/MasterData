@@ -8,6 +8,7 @@ import {
   createField,
   updateField,
   deleteField,
+  logAction,
 } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
@@ -206,9 +207,19 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
       let saved: FieldDictionary
       if (mode === 'create') {
         saved = await createField(body) as FieldDictionary
+        void logAction({
+          category: 'fields',
+          action: 'field_created',
+          description: `Campo "${fieldLabel.trim()}" criado`,
+        })
         toast.success('Campo criado com sucesso.')
       } else {
         saved = await updateField(initial!.id, body) as FieldDictionary
+        void logAction({
+          category: 'fields',
+          action: 'field_updated',
+          description: `Campo "${fieldLabel.trim()}" atualizado`,
+        })
         toast.success('Campo atualizado.')
       }
       onSaved(saved)
@@ -424,9 +435,19 @@ export default function FieldsPage() {
     try {
       if (f.is_active) {
         await deleteField(f.id)
+        void logAction({
+          category: 'fields',
+          action: 'field_deleted',
+          description: `Campo "${f.field_label}" removido`,
+        })
         toast.success('Campo desativado.')
       } else {
         await updateField(f.id, { ...f, is_active: true })
+        void logAction({
+          category: 'fields',
+          action: 'field_updated',
+          description: `Campo "${f.field_label}" atualizado`,
+        })
         toast.success('Campo reativado.')
       }
       fetchData()

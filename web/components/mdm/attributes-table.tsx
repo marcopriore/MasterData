@@ -313,7 +313,6 @@ export function AttributesTable({
                                   size="icon"
                                   className="size-7"
                                   onClick={() => onOpenValueDictionary(attr.id)}
-                                  disabled={readOnly}
                                 >
                                   <BookOpen className="size-3.5 text-primary" />
                                 </Button>

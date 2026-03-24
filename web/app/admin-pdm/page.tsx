@@ -30,6 +30,7 @@ import {
   downloadPdmImportTemplate,
   downloadPdmsExport,
   uploadPdmsImport,
+  logAction,
 } from "@/lib/supabase-api"
 
 export default function MDMDashboard() {
@@ -206,6 +207,8 @@ export default function MDMDashboard() {
       })),
     }
 
+    const wasNewPdm = selectedPdmId == null
+    const editingPdmId = selectedPdmId
     try {
       const raw =
         selectedPdmId != null
@@ -215,6 +218,21 @@ export default function MDMDashboard() {
         ...raw,
         is_active: raw.is_active ?? true,
         attributes: (raw.attributes ?? []) as PDMTemplate["attributes"],
+      }
+      if (wasNewPdm) {
+        void logAction({
+          category: 'pdm',
+          action: 'pdm_created',
+          description: `PDM "${pdmName}" criado`,
+          event_data: { internal_code: pdmCode },
+        })
+      } else if (editingPdmId != null) {
+        void logAction({
+          category: 'pdm',
+          action: 'pdm_updated',
+          description: `PDM "${pdmName}" atualizado`,
+          event_data: { id: editingPdmId, internal_code: pdmCode },
+        })
       }
       toast.success("Estrutura salva com sucesso!", {
         description: `PDM "${pdmName}" foi salvo.`,
@@ -281,6 +299,17 @@ export default function MDMDashboard() {
     try {
       const res = await uploadPdmsImport(pdmImportFile, false)
       if (!('pdm_created' in res)) throw new Error("Resposta inesperada")
+      void logAction({
+        category: 'pdm',
+        action: 'pdm_imported',
+        description: 'Importação em massa de PDMs concluída',
+        event_data: {
+          pdm_created: res.pdm_created,
+          pdm_updated: res.pdm_updated,
+          attr_created: res.attr_created,
+          attr_updated: res.attr_updated,
+        },
+      })
       toast.success(
         `Importação concluída: ${res.pdm_created + res.pdm_updated} PDM(s), ${res.attr_created + res.attr_updated} atributo(s) criados/atualizados, ${res.attr_deleted} deletados`
       )
@@ -304,6 +333,11 @@ export default function MDMDashboard() {
     setPdmExporting(true)
     try {
       await downloadPdmsExport()
+      void logAction({
+        category: 'pdm',
+        action: 'pdm_exported',
+        description: 'Exportação de PDMs realizada',
+      })
       toast.success("Exportação concluída!")
     } catch (err) {
       toast.error((err as Error)?.message ?? "Falha ao exportar")
@@ -360,6 +394,12 @@ export default function MDMDashboard() {
         is_active: raw.is_active ?? true,
         attributes: (raw.attributes ?? []) as PDMTemplate["attributes"],
       }
+      void logAction({
+        category: 'pdm',
+        action: 'pdm_cloned',
+        description: `PDM "${cloneName.trim()}" clonado`,
+        event_data: { source_name: pdmName, internal_code: cloneCode.trim().slice(0, 7) },
+      })
       toast.success("PDM clonado!", {
         description: `"${saved.name}" foi criado com sucesso.`,
       })
@@ -566,6 +606,7 @@ export default function MDMDashboard() {
         onOpenChange={setValueDictOpen}
         attribute={selectedAttribute}
         onUpdateValues={handleUpdateValues}
+        readOnly={!isEditMode}
       />
 
       {/* Clone PDM Modal */}

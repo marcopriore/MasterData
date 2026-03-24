@@ -2,6 +2,29 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
+async function insertLog(params: {
+  tenant_id: number
+  user_id: string
+  category: string
+  action: string
+  description: string
+  event_data?: Record<string, unknown>
+}) {
+  try {
+    const { error } = await supabaseAdmin.from('system_logs').insert({
+      tenant_id: params.tenant_id,
+      user_id: params.user_id,
+      category: params.category,
+      action: params.action,
+      description: params.description.slice(0, 500),
+      event_data: params.event_data ?? null,
+    })
+    if (error) console.error('[insertLog]', error.message, params)
+  } catch (e) {
+    console.error('[insertLog]', e, params)
+  }
+}
+
 export async function GET() {
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -99,6 +122,15 @@ export async function POST(request: Request) {
     await supabaseAdmin.auth.admin.deleteUser(authUser.user.id)
     return NextResponse.json({ error: profileError.message }, { status: 400 })
   }
+
+  await insertLog({
+    tenant_id: tenantId,
+    user_id: user.id,
+    category: 'users',
+    action: 'user_created',
+    description: `Usuário "${name}" criado (${email})`,
+    event_data: { email, role_id: roleId, tenant_id: tenantId },
+  })
 
   return NextResponse.json({
     id: profileRow.id,

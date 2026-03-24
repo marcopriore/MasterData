@@ -11,6 +11,7 @@ import {
   updateMaterialStandardize,
   erpIntegrateMaterial,
   getFieldDictionary,
+  logAction,
 } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
@@ -353,6 +354,12 @@ export default function DatabaseDetailPage() {
         pdm_code: material.pdm_code ?? undefined,
         pdm_name: material.pdm_name ?? undefined,
       }) as MaterialDetail
+      void logAction({
+        category: 'database',
+        action: 'material_updated',
+        description: 'Atributos do material atualizados',
+        event_data: { material_id: material.id },
+      })
       setMaterial((prev) => (prev ? { ...prev, ...updated, description: generatedDesc } : { ...updated, description: generatedDesc }))
       setFormData((prev) => ({ ...prev, ...updated }))
       setIsDirty(true)

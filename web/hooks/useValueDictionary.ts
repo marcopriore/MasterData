@@ -11,6 +11,7 @@ import {
   dismissSimilarPair,
   propagateValueToPdms,
   propagateValueToMaterials,
+  logAction,
 } from '@/lib/supabase-api'
 import { createClient } from '@/lib/supabase/client'
 import type { ValueDictionaryEntry, DuplicateGroup, SimilarValuePair } from '@/lib/supabase-api'
@@ -53,6 +54,13 @@ export function useValueDictionary(_accessToken?: string | null) {
 
       const result = await updateValueDictionaryEntry(id, body)
 
+      void logAction({
+        category: 'fields',
+        action: 'value_updated',
+        description: 'Valor do dicionário atualizado',
+        event_data: { id, abbreviation: body.abbreviation, value: body.value },
+      })
+
       const valueChanged = body.value !== undefined && body.value !== oldValue
       if (valueChanged) {
         await propagateValueToPdms(oldValue, body.value!, body.abbreviation ?? oldAbbreviation ?? '')
@@ -71,8 +79,14 @@ export function useValueDictionary(_accessToken?: string | null) {
   }, [])
 
   const syncWithPdms = useCallback(async (): Promise<{ created: number; updated: number }> => {
-    const { created, updated } = await syncValueDictionary()
-    return { created, updated }
+    const result = await syncValueDictionary()
+    void logAction({
+      category: 'fields',
+      action: 'value_dict_synced',
+      description: 'Dicionário de valores sincronizado com PDMs',
+      event_data: { created: result.created, updated: result.updated },
+    })
+    return { created: result.created, updated: result.updated }
   }, [])
 
   const getSimilars = useCallback(async (): Promise<SimilarValuePair[]> => {
@@ -110,6 +124,12 @@ export function useValueDictionary(_accessToken?: string | null) {
 
       try {
         await mergeEntries(keepId, discardId)
+        void logAction({
+          category: 'fields',
+          action: 'value_merged',
+          description: 'Valores mesclados no dicionário',
+          event_data: { keep_id: keepId, discard_id: discardId },
+        })
         await propagateValueToPdms(discardValue, keepValue, keepAbbreviation)
         await propagateValueToMaterials(discardValue, keepValue)
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
 import { usePathname } from 'next/navigation'
-import { getRoles, createRole, updateRole } from '@/lib/supabase-api'
+import { getRoles, createRole, updateRole, logAction } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -197,6 +197,11 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
       let saved: Role
       if (mode === 'create') {
         saved = (await createRole({ name: name.trim(), role_type: 'sistema', permissions: perms })) as Role
+        void logAction({
+          category: 'roles',
+          action: 'role_created',
+          description: `Perfil "${name.trim()}" criado`,
+        })
         toast.success('Perfil criado com sucesso.')
       } else {
         saved = (await updateRole(initial!.id, {
@@ -204,6 +209,11 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
           role_type: initial?.role_type ?? 'sistema',
           permissions: perms,
         })) as Role
+        void logAction({
+          category: 'roles',
+          action: 'role_updated',
+          description: `Perfil "${name.trim()}" atualizado`,
+        })
         toast.success('Perfil atualizado.')
       }
       onSaved(saved)

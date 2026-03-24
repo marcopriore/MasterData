@@ -11,6 +11,7 @@ import {
   createWorkflow,
   updateWorkflow,
   migrateRequestsToWorkflow,
+  logAction,
 } from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -412,6 +413,12 @@ export default function WorkflowConfigPage() {
         })),
       }
       await bulkUpdateWorkflowConfig(payload)
+      void logAction({
+        category: 'workflows',
+        action: 'workflow_updated',
+        description: 'Workflow atualizado',
+        event_data: { workflow_id: selectedWorkflowId, steps_count: steps.length },
+      })
       toast.success('Fluxo salvo com sucesso!')
       fetchSteps()
     } catch {
@@ -554,6 +561,11 @@ export default function WorkflowConfigPage() {
     }
     try {
       const created = await createWorkflow({ name, description: undefined })
+      void logAction({
+        category: 'workflows',
+        action: 'workflow_created',
+        description: `Workflow "${name}" criado`,
+      })
       setNewWorkflowModalOpen(false)
       setNewWorkflowName('')
       await fetchWorkflows()
@@ -633,6 +645,15 @@ export default function WorkflowConfigPage() {
           is_active: w.id === selectedWorkflowId,
         }))
       )
+      void logAction({
+        category: 'workflows',
+        action: 'workflow_activated',
+        description: 'Workflow ativado',
+        event_data: {
+          activated_id: selectedWorkflowId,
+          deactivated_id: currentActive?.id ?? null,
+        },
+      })
       setConfirmActivateOpen(false)
       setPendingActivate(null)
       setOldWorkflowSteps([])

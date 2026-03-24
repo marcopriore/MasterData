@@ -25,6 +25,7 @@ interface ValueDictionaryProps {
     attrId: string,
     values: { value: string; abbreviation: string }[]
   ) => void
+  readOnly?: boolean
 }
 
 export function ValueDictionary({
@@ -32,6 +33,7 @@ export function ValueDictionary({
   onOpenChange,
   attribute,
   onUpdateValues,
+  readOnly = false,
 }: ValueDictionaryProps) {
   const [newValue, setNewValue] = useState("")
   const [newAbbr, setNewAbbr] = useState("")
@@ -120,6 +122,7 @@ export function ValueDictionary({
         <Separator />
 
         <div className="flex flex-col gap-4 py-4 px-4">
+          {!readOnly && (
           <div className="rounded-lg border border-border bg-muted/30 p-4">
             <p className="mb-3 text-sm font-medium text-foreground">Adicionar Novo Valor</p>
             <div className="space-y-3">
@@ -154,6 +157,7 @@ export function ValueDictionary({
               </Button>
             </div>
           </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -184,7 +188,7 @@ export function ValueDictionary({
                         key={i}
                         className="flex items-center justify-between gap-2 rounded-md border border-slate-200 dark:border-zinc-600 bg-white dark:bg-zinc-900/50 px-3 py-2.5 transition-colors hover:bg-slate-50 dark:hover:bg-zinc-800/50"
                       >
-                        {editingIndex === i ? (
+                        {editingIndex === i && !readOnly ? (
                           <div className="flex items-center gap-2 flex-1 min-w-0">
                             <input
                               className="flex-1 min-w-0 rounded border border-slate-300 dark:border-zinc-500 px-2 py-1 text-sm bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-slate-400 dark:focus:ring-zinc-500"
@@ -229,24 +233,28 @@ export function ValueDictionary({
                               {item.abbreviation && (
                                 <span className="text-xs text-slate-500 dark:text-zinc-400 shrink-0">= {item.abbreviation}</span>
                               )}
+                              {!readOnly && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7 shrink-0 text-slate-400 hover:text-slate-600 dark:text-zinc-400 dark:hover:text-zinc-200"
+                                  onClick={() => startEdit(i, item.value, item.abbreviation || "")}
+                                  title="Editar"
+                                >
+                                  <Pencil className="size-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                            {!readOnly && (
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="size-7 shrink-0 text-slate-400 hover:text-slate-600 dark:text-zinc-400 dark:hover:text-zinc-200"
-                                onClick={() => startEdit(i, item.value, item.abbreviation || "")}
-                                title="Editar"
+                                className="size-7 shrink-0"
+                                onClick={() => removeValue(i)}
                               >
-                                <Pencil className="size-3.5" />
+                                <Trash2 className="size-3.5 text-destructive" />
                               </Button>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7 shrink-0"
-                              onClick={() => removeValue(i)}
-                            >
-                              <Trash2 className="size-3.5 text-destructive" />
-                            </Button>
+                            )}
                           </>
                         )}
                       </div>
