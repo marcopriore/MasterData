@@ -414,7 +414,14 @@ export default function DatabaseDetailPage() {
         setGeneratedDesc(String(mat.description ?? ''))
         const byView: Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>> = {}
         for (const f of fields) {
-          const view = (f.erp_view as string) || 'Outros'
+          const rawView = (f.erp_view as string) || 'Outros'
+          const viewMap: Record<string, string> = {
+            'dados_basicos': 'Dados Básicos',
+            'dados basicos': 'Dados Básicos',
+            'classificação fiscal': 'Fiscal',
+            'classificacao fiscal': 'Fiscal',
+          }
+          const view = viewMap[rawView.toLowerCase()] ?? rawView
           if (!byView[view]) byView[view] = []
           byView[view].push({
             field_name: f.field_name as string,
@@ -539,6 +546,18 @@ export default function DatabaseDetailPage() {
       </div>
     )
   }
+
+  const techAttrs = material.technical_attributes as Record<string, unknown> | null | undefined
+  const unitVal =
+    material.unit_of_measure ??
+    techAttrs?.['unidade_medida_base'] ??
+    techAttrs?.['unit_of_measure'] ??
+    '—'
+  const matTypeVal =
+    material.material_type ??
+    techAttrs?.['tipo_material'] ??
+    techAttrs?.['material_type'] ??
+    '—'
 
   return (
     <div className={`space-y-6 ${showActionBar ? 'pb-24' : ''}`}>
@@ -686,25 +705,33 @@ export default function DatabaseDetailPage() {
             </div>
 
             <div className="flex flex-col gap-3">
-              <EditableRow
-                label="Unidade de Medida"
-                isDark={isDark}
-                fieldKey="unit_of_measure"
-                editMode={editMode}
-                formData={formData}
-                material={material}
-                onUpdate={handleUpdate}
-              />
+              {editMode ? (
+                <EditableRow
+                  label="Unidade de Medida"
+                  isDark={isDark}
+                  fieldKey="unit_of_measure"
+                  editMode={editMode}
+                  formData={formData}
+                  material={material}
+                  onUpdate={handleUpdate}
+                />
+              ) : (
+                <Row label="Unidade de Medida" value={String(unitVal)} />
+              )}
 
-              <EditableRow
-                label="Tipo de Material"
-                isDark={isDark}
-                fieldKey="material_type"
-                editMode={editMode}
-                formData={formData}
-                material={material}
-                onUpdate={handleUpdate}
-              />
+              {editMode ? (
+                <EditableRow
+                  label="Tipo de Material"
+                  isDark={isDark}
+                  fieldKey="material_type"
+                  editMode={editMode}
+                  formData={formData}
+                  material={material}
+                  onUpdate={handleUpdate}
+                />
+              ) : (
+                <Row label="Tipo de Material" value={String(matTypeVal)} />
+              )}
 
               {editMode ? (
                 <div className="flex flex-col gap-0.5">
@@ -723,6 +750,23 @@ export default function DatabaseDetailPage() {
               ) : (
                 <Row label="Status" value={<Cell value={material.status} />} />
               )}
+
+              {(fieldsByView['Dados Básicos'] ?? [])
+                .filter(
+                  (field) =>
+                    field.field_name !== 'material_type' &&
+                    field.field_name !== 'tipo_material'
+                )
+                .map((field) => {
+                  const rawVal =
+                    material.technical_attributes?.[field.field_name] ??
+                    (material as Record<string, unknown>)[field.field_name]
+                  const displayVal = rawVal != null && rawVal !== ''
+                    ? formatAttrValue(rawVal) : '—'
+                  return (
+                    <Row key={field.field_name} label={field.field_label} value={displayVal} />
+                  )
+                })}
             </div>
           </div>
         </SectionCard>
@@ -929,7 +973,7 @@ export default function DatabaseDetailPage() {
           const entries = Object.entries(fieldsByView) as Array<[string, any]>
           const orderedEntries: Array<[string, any]> = [
             ...VIEW_ORDER.map((v) => entries.find((e) => e[0] === v)).filter((e): e is [string, any] => Boolean(e)),
-            ...entries.filter((e) => !VIEW_ORDER.includes(e[0])),
+            ...entries.filter((e) => e[0] !== 'Dados Básicos' && !VIEW_ORDER.includes(e[0])),
           ]
 
           return orderedEntries.map(([viewName, viewFields]) => (
@@ -944,253 +988,6 @@ export default function DatabaseDetailPage() {
             </SectionCard>
           ))
         })()}
-
-        <SectionCard title="Classificação Fiscal">
-          <EditableRow
-            label="NCM"
-            isDark={isDark}
-            fieldKey="ncm"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          {(editMode || (material.cst_ipi != null && String(material.cst_ipi).trim() !== '')) && (
-            <EditableRow
-              label="CST IPI"
-              isDark={isDark}
-              fieldKey="cst_ipi"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          {(editMode || (material.cst_pis_cofins != null && String(material.cst_pis_cofins).trim() !== '')) && (
-            <EditableRow
-              label="CST PIS/COFINS"
-              isDark={isDark}
-              fieldKey="cst_pis_cofins"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          {(editMode || (material.stock_account != null && String(material.stock_account).trim() !== '')) && (
-            <EditableRow
-              label="Conta Estoque"
-              isDark={isDark}
-              fieldKey="stock_account"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          <EditableRow
-            label="CFOP"
-            isDark={isDark}
-            fieldKey="cfop"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <EditableRow
-            label="Origem do Material"
-            isDark={isDark}
-            fieldKey="origin"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-        </SectionCard>
-
-        <SectionCard title="Compras">
-          <EditableRow
-            label="Grupo de Compras"
-            isDark={isDark}
-            fieldKey="purchase_group"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          {(editMode || (material.delivery_tolerance != null)) && (
-            <EditableRow
-              label="Tolerância Entrega"
-              isDark={isDark}
-              fieldKey="delivery_tolerance"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-              formatDisplay={formatNumDisplay}
-            />
-          )}
-          {(editMode || (material.preferred_supplier != null && String(material.preferred_supplier).trim() !== '')) && (
-            <EditableRow
-              label="Fornecedor Preferencial"
-              isDark={isDark}
-              fieldKey="preferred_supplier"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          <EditableRow
-            label="Prazo de Entrega (dias)"
-            isDark={isDark}
-            fieldKey="lead_time"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-            formatDisplay={formatNumDisplay}
-          />
-          <EditableRow
-            label="Unidade de Pedido"
-            isDark={isDark}
-            fieldKey="unit_of_measure"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          {(editMode || (material.order_unit != null && String(material.order_unit).trim() !== '')) && (
-            <EditableRow
-              label="Unidade Medida Pedido"
-              isDark={isDark}
-              fieldKey="order_unit"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-        </SectionCard>
-
-        <SectionCard title="MRP">
-          <EditableRow
-            label="Tipo MRP"
-            isDark={isDark}
-            fieldKey="mrp_type"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          {(editMode || (material.mrp_controller != null && String(material.mrp_controller).trim() !== '')) && (
-            <EditableRow
-              label="Responsável MRP"
-              isDark={isDark}
-              fieldKey="mrp_controller"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          {(editMode || (material.lot_size != null)) && (
-            <EditableRow
-              label="Tamanho Lote"
-              isDark={isDark}
-              fieldKey="lot_size"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-              formatDisplay={formatNumDisplay}
-            />
-          )}
-          {(editMode || (material.forecast_profile != null && String(material.forecast_profile).trim() !== '')) && (
-            <EditableRow
-              label="Perfil Previsão"
-              isDark={isDark}
-              fieldKey="forecast_profile"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          <EditableRow
-            label="Estoque Mínimo"
-            isDark={isDark}
-            fieldKey="min_stock"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-            formatDisplay={formatNumDisplay}
-          />
-          <EditableRow
-            label="Estoque Máximo"
-            isDark={isDark}
-            fieldKey="max_stock"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-            formatDisplay={formatNumDisplay}
-          />
-        </SectionCard>
-
-        <SectionCard title="Contabilidade">
-          <EditableRow
-            label="Classe de Valoração"
-            isDark={isDark}
-            fieldKey="valuation_class"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          {(editMode || (material.price_control != null && String(material.price_control).trim() !== '')) && (
-            <EditableRow
-              label="Controle Preço"
-              isDark={isDark}
-              fieldKey="price_control"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          {(editMode || (material.valuation_group != null && String(material.valuation_group).trim() !== '')) && (
-            <EditableRow
-              label="Grupo Valoração"
-              isDark={isDark}
-              fieldKey="valuation_group"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          <EditableRow
-            label="Preço Padrão"
-            isDark={isDark}
-            fieldKey="standard_price"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-            formatDisplay={formatCurrDisplay}
-          />
-          <EditableRow
-            label="Centro de Lucro"
-            isDark={isDark}
-            fieldKey="profit_center"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-        </SectionCard>
       </div>
     </div>
   )
