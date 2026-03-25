@@ -265,6 +265,7 @@ export default function DatabaseDetailPage() {
   const [savingAttrs, setSavingAttrs] = useState(false)
   const [isIntegrating, setIsIntegrating] = useState(false)
   const [fieldsByView, setFieldsByView] = useState<Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>>>({})
+  const [fieldsByViewOptions, setFieldsByViewOptions] = useState<Record<string, string[]>>({})
   const measurementUnits = useMeasurementUnits()
   const [pdmTemplate, setPdmTemplate] = useState<{
     id: number
@@ -423,7 +424,12 @@ export default function DatabaseDetailPage() {
       .then(([m, fields]) => {
         const mat = m as MaterialDetail
         setMaterial(mat)
-        setFormData({ ...mat })
+        setFormData({
+          ...mat,
+          ...(typeof mat.technical_attributes === 'object' && mat.technical_attributes !== null
+            ? mat.technical_attributes
+            : {}),
+        })
         setAttrValues((mat.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
         setGeneratedDesc(String(mat.description ?? ''))
         const byView: Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>> = {}
@@ -449,6 +455,14 @@ export default function DatabaseDetailPage() {
           arr.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999) || a.field_label.localeCompare(b.field_label))
         }
         setFieldsByView(byView)
+        const optionsMap: Record<string, string[]> = {}
+        for (const f of fields) {
+          const opts = f.options
+          if (Array.isArray(opts)) {
+            optionsMap[f.field_name as string] = opts.map(String)
+          }
+        }
+        setFieldsByViewOptions(optionsMap)
       })
       .catch((e: unknown) => setError((e as Error)?.message ?? 'Erro ao carregar'))
       .finally(() => setLoading(false))
@@ -468,7 +482,12 @@ export default function DatabaseDetailPage() {
 
   const handleCancelEdit = () => {
     if (material) {
-      setFormData({ ...material })
+      setFormData({
+        ...material,
+        ...(typeof material.technical_attributes === 'object' && material.technical_attributes !== null
+          ? material.technical_attributes
+          : {}),
+      })
       setAttrValues((material.technical_attributes as Record<string, string | { value: string; unit: string }>) || {})
       setGeneratedDesc(material.description || '')
     }
@@ -497,12 +516,36 @@ export default function DatabaseDetailPage() {
           payload[k] = formData[k]
         }
       }
+      const allDictFields = Object.values(fieldsByView).flat()
+      const dictPayload: Record<string, unknown> = {
+        ...(material.technical_attributes ?? {}),
+      }
+      let hasDictChanges = false
+      for (const field of allDictFields) {
+        if (field.field_name in formData) {
+          const newVal = formData[field.field_name]
+          const oldVal = material.technical_attributes?.[field.field_name]
+          if (newVal !== oldVal) {
+            dictPayload[field.field_name] = newVal
+            hasDictChanges = true
+          }
+        }
+      }
+      if (hasDictChanges) {
+        payload.technical_attributes = dictPayload
+      }
       const updated = await updateMaterialStandardize(
         material.id,
         Object.keys(payload).length ? payload : formData
       )
       setMaterial(updated as MaterialDetail)
-      setFormData({ ...updated })
+      const upd = updated as MaterialDetail
+      setFormData({
+        ...upd,
+        ...(typeof upd.technical_attributes === 'object' && upd.technical_attributes !== null
+          ? upd.technical_attributes
+          : {}),
+      })
       setEditMode(false)
       setIsDirty(false)
       toast.success('Padronização salva com sucesso!')
@@ -997,7 +1040,52 @@ export default function DatabaseDetailPage() {
                   material.technical_attributes?.[field.field_name] ??
                   (material as Record<string, unknown>)[field.field_name]
                 const displayVal = rawVal != null && rawVal !== '' ? formatAttrValue(rawVal) : '—'
-                return <Row key={field.field_name} label={field.field_label} value={displayVal} />
+                if (!editMode) {
+                  return <Row key={field.field_name} label={field.field_label} value={displayVal} />
+                }
+                const currentVal =
+                  formData[field.field_name] !== undefined
+                    ? String(formData[field.field_name] ?? '')
+                    : rawVal != null
+                      ? String(rawVal)
+                      : ''
+                const selectOpts = fieldsByViewOptions[field.field_name] ?? []
+                const isSelect = field.field_type === 'select' && Array.isArray(selectOpts)
+                return (
+                  <div key={field.field_name} className="flex flex-col gap-0.5">
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">{field.field_label}</span>
+                    {isSelect ? (
+                      <select
+                        value={currentVal}
+                        onChange={(e) => handleUpdate(field.field_name, e.target.value)}
+                        className={INPUT_BASE}
+                        style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                      >
+                        <option value="">Selecione...</option>
+                        {selectOpts.map((opt: string) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={field.field_type === 'number' ? 'number' : 'text'}
+                        value={currentVal}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          if (field.field_type === 'number') {
+                            handleUpdate(field.field_name, v === '' ? null : parseFloat(v))
+                          } else {
+                            handleUpdate(field.field_name, v.toUpperCase())
+                          }
+                        }}
+                        className={field.field_type === 'number' ? INPUT_BASE : `${INPUT_BASE} uppercase`}
+                        style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                      />
+                    )}
+                  </div>
+                )
               })}
             </SectionCard>
           ))
