@@ -106,6 +106,26 @@ function formatCurrency(v: number | null): string {
     currency: 'BRL',
   }).format(v)
 }
+function generateDetailedDescription(
+  pdmName: string,
+  attributes: Array<{ id: string; name?: string }>,
+  attrValues: Record<string, unknown>
+): string {
+  const lines: string[] = [pdmName.toUpperCase(), '']
+  for (const attr of attributes) {
+    const label = (attr.name ?? attr.id).toUpperCase()
+    const raw = attrValues[attr.id]
+    let val = ''
+    if (raw && typeof raw === 'object' && 'value' in raw) {
+      const o = raw as { value?: string; unit?: string }
+      val = `${o.value ?? ''}${o.unit ?? ''}`.toUpperCase().trim()
+    } else if (raw != null && raw !== '') {
+      val = String(raw).toUpperCase().trim()
+    }
+    if (val) lines.push(`${label}: ${val}`)
+  }
+  return lines.join('\n')
+}
 const formatCurrDisplay = (v: unknown) => formatCurrency(v as number | null)
 
 function Cell({ value }: { value: string | number | null }) {
@@ -260,6 +280,7 @@ export default function DatabaseDetailPage() {
       allowedValues?: Array<{ value: string; abbreviation?: string } | string>
     }>
   } | null>(null)
+  const [detailedDesc, setDetailedDesc] = useState<string>('')
 
   const generateDescription = useCallback(
     (
@@ -329,6 +350,13 @@ export default function DatabaseDetailPage() {
         })
         setAttrValues(merged)
         setGeneratedDesc(generateDescription(full.name || '', merged, full))
+        setDetailedDesc(
+          generateDetailedDescription(
+            full.name ?? '',
+            (full.attributes ?? []) as Array<{ id: string; name?: string }>,
+            merged
+          )
+        )
       } catch {
         setPdmTemplate(null)
       }
@@ -635,129 +663,68 @@ export default function DatabaseDetailPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
-        {/* Campos do Dicionário (technical_attributes) agrupados por erp_view */}
-        {Object.keys(fieldsByView).length > 0 && Object.entries(fieldsByView).map(([viewName, viewFields]) => (
-          <SectionCard key={viewName} title={viewName}>
-            {viewFields.map((field) => {
-              const rawVal = material.technical_attributes?.[field.field_name] ?? (material as Record<string, unknown>)[field.field_name]
-              const displayVal = rawVal != null && rawVal !== '' ? formatAttrValue(rawVal) : '—'
-              return (
-                <Row key={field.field_name} label={field.field_label} value={displayVal} />
-              )
-            })}
-          </SectionCard>
-        ))}
-
         <SectionCard title="Dados Básicos">
-          {editMode ? (
-            <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">Status</span>
-              <select
-                value={String(formData.status ?? material.status)}
-                onChange={(e) => handleUpdate('status', e.target.value)}
-                className={INPUT_BASE}
-                style={{ colorScheme: isDark ? 'dark' : 'light' }}
-              >
-                <option value="Ativo">Ativo</option>
-                <option value="Bloqueado">Bloqueado</option>
-                <option value="Obsoleto">Obsoleto</option>
-              </select>
+          <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-xs text-slate-500 dark:text-muted-foreground">Descrição Curta</p>
+              <p className="mt-0.5 font-bold font-mono text-slate-800 dark:text-foreground">
+                {material.description || '—'}
+              </p>
+              <DescriptionLengthIndicator
+                description={material.description || ''}
+                maxLength={maxLength}
+              />
+
+              {detailedDesc.trim() !== '' && (
+                <div className="mt-3">
+                  <p className="text-xs text-slate-500">Descrição Detalhada</p>
+                  <pre className="mt-0.5 text-sm font-bold font-mono whitespace-pre-wrap bg-slate-50 dark:bg-zinc-800/50 rounded-lg p-3 text-slate-800 dark:text-foreground">
+                    {detailedDesc}
+                  </pre>
+                </div>
+              )}
             </div>
-          ) : (
-            <Row label="Status" value={<Cell value={material.status} />} />
-          )}
-          {material.id_sistema && (
-            <Row label="ID Sistema" value={<span className="font-mono font-medium">{material.id_sistema}</span>} />
-          )}
-          <EditableRow
-            label="Código ERP"
-            isDark={isDark}
-            fieldKey="id_erp"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <EditableRow
-            label="Grupo de Mercadorias"
-            isDark={isDark}
-            fieldKey="material_group"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <EditableRow
-            label="Unidade de Medida"
-            isDark={isDark}
-            fieldKey="unit_of_measure"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <EditableRow
-            label="Tipo de Material"
-            isDark={isDark}
-            fieldKey="material_type"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          {(editMode || (material.sales_org != null && String(material.sales_org).trim() !== '')) && (
-            <EditableRow
-              label="Org Vendas"
-              isDark={isDark}
-              fieldKey="sales_org"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          {(editMode || (material.distribution_channel != null && String(material.distribution_channel).trim() !== '')) && (
-            <EditableRow
-              label="Canal Distribuição"
-              isDark={isDark}
-              fieldKey="distribution_channel"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          {(editMode || (material.sales_unit != null && String(material.sales_unit).trim() !== '')) && (
-            <EditableRow
-              label="Unidade de Venda"
-              isDark={isDark}
-              fieldKey="sales_unit"
-              editMode={editMode}
-              formData={formData}
-              material={material}
-              onUpdate={handleUpdate}
-            />
-          )}
-          <EditableRow
-            label="Peso Bruto"
-            isDark={isDark}
-            fieldKey="gross_weight"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-            formatDisplay={formatNumDisplay}
-          />
-          <EditableRow
-            label="Peso Líquido"
-            isDark={isDark}
-            fieldKey="net_weight"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-            formatDisplay={formatNumDisplay}
-          />
+
+            <div className="flex flex-col gap-3">
+              <EditableRow
+                label="Unidade de Medida"
+                isDark={isDark}
+                fieldKey="unit_of_measure"
+                editMode={editMode}
+                formData={formData}
+                material={material}
+                onUpdate={handleUpdate}
+              />
+
+              <EditableRow
+                label="Tipo de Material"
+                isDark={isDark}
+                fieldKey="material_type"
+                editMode={editMode}
+                formData={formData}
+                material={material}
+                onUpdate={handleUpdate}
+              />
+
+              {editMode ? (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">Status</span>
+                  <select
+                    value={String(formData.status ?? material.status)}
+                    onChange={(e) => handleUpdate('status', e.target.value)}
+                    className={INPUT_BASE}
+                    style={{ colorScheme: isDark ? 'dark' : 'light' }}
+                  >
+                    <option value="Ativo">Ativo</option>
+                    <option value="Bloqueado">Bloqueado</option>
+                    <option value="Obsoleto">Obsoleto</option>
+                  </select>
+                </div>
+              ) : (
+                <Row label="Status" value={<Cell value={material.status} />} />
+              )}
+            </div>
+          </div>
         </SectionCard>
 
         {editingAttributes ? (
@@ -882,47 +849,101 @@ export default function DatabaseDetailPage() {
           </div>
         ) : (
           <SectionCard title="Atributos Técnicos">
-            <div>
-              <p className="text-xs text-slate-500 dark:text-muted-foreground">Descrição Curta</p>
-              <p className="mt-0.5 font-bold font-mono text-slate-800 dark:text-foreground">
-                {material.description || '—'}
-              </p>
-              <DescriptionLengthIndicator
-                description={material.description || ''}
-                maxLength={maxLength}
-              />
-            </div>
+            <Row
+              label="Código PDM"
+              value={
+                <span className="font-mono font-medium">
+                  {material.pdm_code ?? '—'}
+                </span>
+              }
+            />
+            <Row label="Nome PDM" value={material.pdm_name ?? '—'} />
             {(() => {
-              const pdmAttrKeys = (pdmTemplate?.attributes ?? []).map((a: { id?: string }) => String(a.id ?? ''))
+              const sortedAttrDefs = [...(pdmTemplate?.attributes ?? [])].sort(
+                (a, b) =>
+                  ((a as { order?: number }).order ?? 0) - ((b as { order?: number }).order ?? 0)
+              )
+              const pdmAttrKeys = sortedAttrDefs.map((a: { id?: string }) => String(a.id ?? ''))
               const displayAttrs = pdmAttrKeys.length > 0
                 ? Object.fromEntries(
                     Object.entries(material.technical_attributes ?? {}).filter(([key]) => pdmAttrKeys.includes(key))
                   )
                 : material.technical_attributes ?? {}
               const attrLabelMap = Object.fromEntries(
-                (pdmTemplate?.attributes ?? []).map((a: { id?: string; name?: string }) => [String(a.id ?? ''), a.name ?? String(a.id ?? '')])
+                sortedAttrDefs.map((a: { id?: string; name?: string }) => [
+                  String(a.id ?? ''),
+                  a.name ?? String(a.id ?? ''),
+                ])
               )
+              const orderedKeys =
+                pdmAttrKeys.length > 0
+                  ? pdmAttrKeys.filter((key) => Object.prototype.hasOwnProperty.call(displayAttrs, key))
+                  : Object.keys(displayAttrs)
+
               return displayAttrs && Object.keys(displayAttrs).length > 0 ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                {Object.entries(displayAttrs).map(([key, value]) => (
-                  <div key={key}>
-                    <p className="text-xs capitalize text-slate-500 dark:text-muted-foreground">
-                      {(attrLabelMap[key] ?? key).replace(/_/g, ' ')}
-                    </p>
-                    <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">
-                      {formatAttrValue(value)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-400 dark:text-muted-foreground">
-                Nenhum atributo técnico registrado.
-              </p>
-            )
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {orderedKeys.map((key) => (
+                    <div key={key}>
+                      <p className="text-xs capitalize text-slate-500 dark:text-muted-foreground">
+                        {(attrLabelMap[key] ?? key).replace(/_/g, ' ')}
+                      </p>
+                      <p className="mt-0.5 font-medium text-slate-800 dark:text-foreground">
+                        {formatAttrValue((displayAttrs as Record<string, unknown>)[key])}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 dark:text-muted-foreground">
+                  Nenhum atributo técnico registrado.
+                </p>
+              )
             })()}
           </SectionCard>
         )}
+
+        <SectionCard title="Metadados">
+          <Row
+            label="ID Sistema"
+            value={
+              <span className="font-mono font-medium">
+                {material.id_sistema ?? '—'}
+              </span>
+            }
+          />
+          <Row
+            label="Código ERP"
+            value={
+              <span className="font-mono font-medium">
+                {material.id_erp ?? '—'}
+              </span>
+            }
+          />
+          <Row label="Data de Criação" value={formatDate(material.created_at)} />
+          <Row label="Última Alteração" value={formatDate(material.updated_at)} />
+        </SectionCard>
+
+        {/* Campos do Dicionário (technical_attributes) agrupados por erp_view */}
+        {Object.keys(fieldsByView).length > 0 && (() => {
+          const VIEW_ORDER = ['Fiscal', 'Compras', 'MRP', 'Contabilidade', 'Vendas']
+          const entries = Object.entries(fieldsByView) as Array<[string, any]>
+          const orderedEntries: Array<[string, any]> = [
+            ...VIEW_ORDER.map((v) => entries.find((e) => e[0] === v)).filter((e): e is [string, any] => Boolean(e)),
+            ...entries.filter((e) => !VIEW_ORDER.includes(e[0])),
+          ]
+
+          return orderedEntries.map(([viewName, viewFields]) => (
+            <SectionCard key={viewName} title={viewName}>
+              {(viewFields as any[]).map((field) => {
+                const rawVal =
+                  material.technical_attributes?.[field.field_name] ??
+                  (material as Record<string, unknown>)[field.field_name]
+                const displayVal = rawVal != null && rawVal !== '' ? formatAttrValue(rawVal) : '—'
+                return <Row key={field.field_name} label={field.field_label} value={displayVal} />
+              })}
+            </SectionCard>
+          ))
+        })()}
 
         <SectionCard title="Classificação Fiscal">
           <EditableRow
@@ -1169,29 +1190,6 @@ export default function DatabaseDetailPage() {
             material={material}
             onUpdate={handleUpdate}
           />
-        </SectionCard>
-
-        <SectionCard title="Metadados">
-          <EditableRow
-            label="Código PDM"
-            isDark={isDark}
-            fieldKey="pdm_code"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <EditableRow
-            label="Nome PDM"
-            isDark={isDark}
-            fieldKey="pdm_name"
-            editMode={editMode}
-            formData={formData}
-            material={material}
-            onUpdate={handleUpdate}
-          />
-          <Row label="Data de Criação" value={formatDate(material.created_at)} />
-          <Row label="Data de Atualização" value={formatDate(material.updated_at)} />
         </SectionCard>
       </div>
     </div>
