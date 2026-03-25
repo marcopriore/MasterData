@@ -12,8 +12,10 @@ import {
   getFieldLabels,
   advanceWorkflow,
   updateRequestAttributes,
+  checkDuplicateRequest,
   rejectRequest,
   getRequestHistory,
+  getRequestById,
   type MyField,
   type FieldLabelItem,
 } from '@/lib/supabase-api'
@@ -34,7 +36,7 @@ import {
 } from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
-import { ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
 import { formatAttrValue } from '@/lib/format-attr-value'
@@ -424,6 +426,11 @@ export default function GovernancePage() {
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectJustification, setRejectJustification] = useState('')
   const [rejectError, setRejectError] = useState<string | null>(null)
+  const [dupModalOpen, setDupModalOpen] = useState(false)
+  const [dupInfo, setDupInfo] = useState<{
+    existingCode: string | null
+    source: 'request' | 'material' | null
+  } | null>(null)
 
   const handleAprovar = async (id: number) => {
     if (!window.confirm('Deseja aprovar esta solicitação?')) return
@@ -559,6 +566,18 @@ export default function GovernancePage() {
       await updateRequestAttributes(selectedRequest.id, toPayloadAttributes(attributeValues), {
         generated_description: canEditTechnicalAttributes ? generatedDescription : undefined,
       })
+      const freshRequest = await getRequestById(selectedRequest.id)
+      const dupCheck = await checkDuplicateRequest({
+        pdm_id: selectedRequest.pdm_id,
+        formData: (freshRequest?.technical_attributes ?? {}) as Record<string, unknown>,
+      })
+      if (dupCheck.isDuplicate && dupCheck.existingId !== selectedRequest.id) {
+        setDupInfo({ existingCode: dupCheck.existingCode, source: dupCheck.source })
+        setDupModalOpen(true)
+        setSaveLoading(false)
+        setApproveRejectLoading(false)
+        return
+      }
       await advanceWorkflow(selectedRequest.id)
       toast.success('Dados salvos e solicitação aprovada!')
       handleCloseModal()
@@ -1144,6 +1163,50 @@ export default function GovernancePage() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dupModalOpen} onOpenChange={() => {}}>
+        <DialogContent
+          showCloseButton={false}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          className="border-[#B4B9BE] bg-white text-slate-900 shadow-lg dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 sm:max-w-md"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 pr-8">
+              <AlertTriangle className="size-5 shrink-0 text-amber-500" aria-hidden />
+              Material já cadastrado
+            </DialogTitle>
+          </DialogHeader>
+          <div className="text-sm text-muted-foreground space-y-3">
+            {dupInfo?.source === 'request' && (
+              <p>
+                Já existe uma solicitação em andamento com os mesmos atributos técnicos. Utilize o código{' '}
+                <span className="font-mono font-bold text-[#0F1C38]">{dupInfo.existingCode ?? '—'}</span>{' '}
+                para acompanhar.
+              </p>
+            )}
+            {dupInfo?.source === 'material' && (
+              <p>
+                Este material já está cadastrado na Base de Dados com o código{' '}
+                <span className="font-mono font-bold text-[#0F1C38]">{dupInfo.existingCode ?? '—'}</span>
+                . Utilize este código no seu processo.
+              </p>
+            )}
+            <p>
+              A solicitação permanecerá na etapa atual até que os atributos sejam corrigidos ou ela seja rejeitada.
+            </p>
+          </div>
+          <DialogFooter className="sm:justify-stretch">
+            <Button
+              type="button"
+              className="w-full bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90"
+              onClick={() => setDupModalOpen(false)}
+            >
+              Entendido
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

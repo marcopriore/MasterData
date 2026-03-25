@@ -484,19 +484,46 @@ export async function checkDuplicateRequest(params: {
 }> {
   try {
     const supabase = createClient()
-    const target = normalizeAttrs(params.formData)
+
+    const { data: pdmRow, error: pdmErr } = await supabase
+      .from('pdm_templates')
+      .select('internal_code, attributes')
+      .eq('id', params.pdm_id)
+      .single()
+
+    if (pdmErr) throw pdmErr
+
+    const pdmAttrs = (pdmRow?.attributes ?? []) as Array<{ id?: string; includeInDescription?: boolean }>
+    const descriptionKeys = pdmAttrs
+      .filter((a) => a.includeInDescription === true)
+      .map((a) => a.id)
+      .filter((id): id is string => Boolean(id))
+
+    if (descriptionKeys.length === 0) return { ...DUPLICATE_CHECK_NEGATIVE }
+
+    function filterDescriptionAttrs(attrs: Record<string, unknown>): Record<string, string> {
+      const src = attrs ?? {}
+      const filtered: Record<string, unknown> = {}
+      for (const k of descriptionKeys) {
+        if (Object.prototype.hasOwnProperty.call(src, k)) {
+          filtered[k] = src[k]
+        }
+      }
+      return normalizeAttrs(filtered)
+    }
+
+    const target = filterDescriptionAttrs(params.formData)
 
     const { data: openRequests, error: reqErr } = await supabase
       .from('material_requests')
       .select('id, technical_attributes, generated_description')
       .eq('pdm_id', params.pdm_id)
-      .neq('status', 'finalizado')
-      .neq('status', 'rejected')
+      .not('status', 'in', '("finalizado","rejected","rejeitado","completed")')
 
     if (reqErr) throw reqErr
 
     for (const row of openRequests ?? []) {
-      const rowNorm = normalizeAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
+      const rowNorm = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
       if (normalizedAttrsMatch(target, rowNorm)) {
         return {
           isDuplicate: true,
@@ -507,13 +534,6 @@ export async function checkDuplicateRequest(params: {
       }
     }
 
-    const { data: pdmRow, error: pdmErr } = await supabase
-      .from('pdm_templates')
-      .select('internal_code')
-      .eq('id', params.pdm_id)
-      .single()
-
-    if (pdmErr) throw pdmErr
     const pdmCode = pdmRow?.internal_code
     if (!pdmCode) return { ...DUPLICATE_CHECK_NEGATIVE }
 
@@ -525,7 +545,8 @@ export async function checkDuplicateRequest(params: {
     if (matErr) throw matErr
 
     for (const row of materials ?? []) {
-      const rowNorm = normalizeAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
+      const rowFiltered = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
+      const rowNorm = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
       if (normalizedAttrsMatch(target, rowNorm)) {
         const code = row.id_sistema != null ? String(row.id_sistema) : null
         return {
