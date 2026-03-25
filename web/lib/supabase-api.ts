@@ -514,26 +514,6 @@ export async function checkDuplicateRequest(params: {
 
     const target = filterDescriptionAttrs(params.formData)
 
-    const { data: openRequests, error: reqErr } = await supabase
-      .from('material_requests')
-      .select('id, technical_attributes, generated_description')
-      .eq('pdm_id', params.pdm_id)
-      .not('status', 'in', '("finalizado","rejected","rejeitado","completed")')
-
-    if (reqErr) throw reqErr
-
-    for (const row of openRequests ?? []) {
-      const rowNorm = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
-      if (normalizedAttrsMatch(target, rowNorm)) {
-        return {
-          isDuplicate: true,
-          existingCode: `REQ-${String(row.id).padStart(4, '0')}`,
-          existingId: row.id,
-          source: 'request',
-        }
-      }
-    }
-
     const pdmCode = pdmRow?.internal_code
     if (!pdmCode) return { ...DUPLICATE_CHECK_NEGATIVE }
 
@@ -554,6 +534,26 @@ export async function checkDuplicateRequest(params: {
           existingCode: code,
           existingId: row.id,
           source: 'material',
+        }
+      }
+    }
+
+    const { data: openRequests, error: reqErr } = await supabase
+      .from('material_requests')
+      .select('id, technical_attributes, generated_description')
+      .eq('pdm_id', params.pdm_id)
+      .not('status', 'in', '("finalizado","rejected","rejeitado","completed")')
+
+    if (reqErr) throw reqErr
+
+    for (const row of openRequests ?? []) {
+      const rowNorm = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
+      if (normalizedAttrsMatch(target, rowNorm)) {
+        return {
+          isDuplicate: true,
+          existingCode: `REQ-${String(row.id).padStart(4, '0')}`,
+          existingId: row.id,
+          source: 'request',
         }
       }
     }
@@ -850,30 +850,42 @@ export async function getMaterials(params: {
   return { total: count ?? 0, page, limit, items: data ?? [] }
 }
 
-/** IDs that share the same tenant-scoped (description case-insensitive + pdm_code) with at least one other row. */
-export async function getDuplicateMaterials(): Promise<Set<number>> {
+/** Map of duplicated material IDs -> other duplicated materials' id_sistema codes (same description + pdm_code). */
+export async function getDuplicateMaterials(): Promise<Map<number, string[]>> {
   try {
     const supabase = createClient()
-    const { data, error } = await supabase.from('material_database').select('id, description, pdm_code')
+    const { data, error } = await supabase.from('material_database').select('id, id_sistema, description, pdm_code')
     if (error) throw error
+
     const rows = data ?? []
-    const byKey = new Map<string, number[]>()
-    for (const row of rows) {
+    const byKey = new Map<string, Array<{ id: number; id_sistema: string }>>()
+
+    for (const row of rows as Array<{ id: number; id_sistema?: string | null; description?: string | null; pdm_code?: string | null }>) {
       const desc = (row.description ?? '').toLowerCase()
       const pdm = row.pdm_code ?? ''
       const key = `${desc}\0${pdm}`
+      const code = row.id_sistema ?? 'MDM-?'
       const list = byKey.get(key)
-      if (list) list.push(row.id)
-      else byKey.set(key, [row.id])
+      const item = { id: row.id, id_sistema: code }
+      if (list) list.push(item)
+      else byKey.set(key, [item])
     }
-    const dup = new Set<number>()
-    for (const ids of byKey.values()) {
-      if (ids.length >= 2) for (const id of ids) dup.add(id)
+
+    const map = new Map<number, string[]>()
+    for (const group of byKey.values()) {
+      if (group.length < 2) continue
+      for (const row of group) {
+        const others = group
+          .filter((x) => x.id !== row.id)
+          .map((x) => (x.id_sistema ?? 'MDM-?'))
+        map.set(row.id, others)
+      }
     }
-    return dup
+
+    return map
   } catch (e) {
     console.error('getDuplicateMaterials', e)
-    return new Set()
+    return new Map()
   }
 }
 

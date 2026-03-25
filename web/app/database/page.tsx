@@ -134,7 +134,7 @@ export default function DatabasePage() {
   const { user, can } = useUser()
   const maxLength = user?.max_description_length ?? 40
   const [items, setItems] = useState<MaterialItem[]>([])
-  const [duplicateIds, setDuplicateIds] = useState<Set<number>>(new Set())
+  const [duplicateIds, setDuplicateIds] = useState<Map<number, string[]>>(new Map())
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -740,14 +740,23 @@ export default function DatabasePage() {
                         return (
                           <td key={key} className="px-4 py-3 font-mono text-xs font-medium">
                             {row.id_sistema ?? '—'}
-                            {duplicateIds.has(row.id) && (
-                              <span
-                                title="Material duplicado — mesma descrição e PDM"
-                                className="ml-1.5 inline-flex items-center rounded-full bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 cursor-help"
-                              >
-                                DUP
-                              </span>
-                            )}
+                            {duplicateIds.has(row.id) && (() => {
+                              const others = duplicateIds.get(row.id) ?? []
+                              const tooltipText = others.length > 0
+                                ? `Duplicado com: ${others.join(', ')}`
+                                : 'Material duplicado — mesma descrição e PDM'
+                              return (
+                                <span
+                                  title={tooltipText}
+                                  className="ml-1.5 inline-flex items-center rounded-full bg-red-100
+          dark:bg-red-900/30 px-1.5 py-0.5 text-[10px] font-semibold
+          text-red-600 dark:text-red-400 border border-red-200
+          dark:border-red-800 cursor-help"
+                                >
+                                  DUP
+                                </span>
+                              )
+                            })()}
                           </td>
                         )
                       }
