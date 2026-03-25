@@ -260,7 +260,113 @@ export async function updatePdm(id: number, payload: Partial<PDMTemplate>): Prom
   const supabase = createClient()
   const { data, error } = await supabase.from('pdm_templates').update(payload).eq('id', id).select().single()
   if (error) handleError(error)
+  if (payload.attributes && data?.internal_code) {
+    try {
+      await regenerateMaterialDescriptions(
+        data.internal_code,
+        data.name ?? '',
+        payload.attributes as Array<{
+          id: string
+          name?: string
+          order?: number
+          includeInDescription?: boolean
+          abbreviation?: string
+          allowedValues?: Array<{ value: string; abbreviation?: string }>
+        }>
+      )
+    } catch (e) {
+      console.error('[updatePdm] regenerate descriptions failed:', e)
+    }
+  }
   return data
+}
+
+export async function regenerateMaterialDescriptions(
+  pdmInternalCode: string,
+  pdmName: string,
+  attributes: Array<{
+    id: string
+    name?: string
+    order?: number
+    includeInDescription?: boolean
+    abbreviation?: string
+    allowedValues?: Array<{ value: string; abbreviation?: string }>
+  }>
+): Promise<{ updated: number }> {
+  const extractDisplay = (raw: unknown): string => {
+    if (raw == null || raw === '') return ''
+    if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+      const o = raw as { value?: string; unit?: string }
+      return `${o.value ?? ''}${o.unit ?? ''}`.trim()
+    }
+    return String(raw).trim()
+  }
+
+  const shortSegment = (
+    attr: {
+      id: string
+      abbreviation?: string
+      allowedValues?: Array<{ value: string; abbreviation?: string }>
+    },
+    technical: Record<string, unknown>
+  ): string => {
+    const raw = technical[attr.id]
+    const display = extractDisplay(raw)
+    if (!display) return `[${attr.abbreviation ?? ''}]`
+    if (attr.allowedValues && attr.allowedValues.length > 0) {
+      const match = attr.allowedValues.find((av) => av.value === display)
+      if (match?.abbreviation && match.abbreviation.trim() !== '') return match.abbreviation
+      return display.toUpperCase()
+    }
+    if (raw && typeof raw === 'object' && 'value' in raw) {
+      const o = raw as { value?: string; unit?: string }
+      return `${o.value ?? ''}${o.unit ?? ''}`.toUpperCase().trim()
+    }
+    return display.toUpperCase()
+  }
+
+  try {
+    const supabase = createClient()
+    const { data: materials, error: fetchErr } = await supabase
+      .from('material_database')
+      .select('id, technical_attributes')
+      .eq('pdm_code', pdmInternalCode)
+    if (fetchErr) {
+      console.error('regenerateMaterialDescriptions', fetchErr)
+      throw fetchErr
+    }
+    const rows = (materials ?? []) as Array<{ id: number; technical_attributes?: unknown }>
+    const forShort = [...attributes]
+      .filter((a) => a.includeInDescription === true)
+      .sort((x, y) => (x.order ?? 0) - (y.order ?? 0))
+    const forDetailed = [...attributes].sort((x, y) => (x.order ?? 0) - (y.order ?? 0))
+    const detailedAttrs = forDetailed.map((a) => ({ id: a.id, name: a.name, order: a.order }))
+
+    let updated = 0
+    for (const row of rows) {
+      const technical =
+        row.technical_attributes && typeof row.technical_attributes === 'object'
+          ? (row.technical_attributes as Record<string, unknown>)
+          : {}
+      const parts: string[] = [pdmName.toUpperCase()]
+      for (const attr of forShort) parts.push(shortSegment(attr, technical))
+      const novaDesc = parts.join(' ')
+      const detailedDesc = buildDetailedDescription(pdmName, detailedAttrs, technical)
+      const { error: upErr } = await supabase
+        .from('material_database')
+        .update({ description: novaDesc, detailed_description: detailedDesc })
+        .eq('id', row.id)
+      if (upErr) {
+        console.error('regenerateMaterialDescriptions', upErr)
+        throw upErr
+      }
+      updated += 1
+    }
+    return { updated }
+  } catch (e) {
+    console.error('regenerateMaterialDescriptions', e)
+    throw e
+  }
 }
 
 export async function deletePdm(id: number): Promise<void> {
