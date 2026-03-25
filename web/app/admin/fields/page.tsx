@@ -257,10 +257,10 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
             <Input
               id="field_label"
               value={fieldLabel}
-              onChange={(e) => setFieldLabel(e.target.value)}
+              onChange={(e) => setFieldLabel(e.target.value.toUpperCase())}
               onBlur={syncFieldNameFromLabel}
               placeholder="Ex: Descrição Básica"
-              className="mt-1"
+              className="mt-1 uppercase"
             />
           </div>
           <div>
@@ -278,9 +278,9 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
             <Input
               id="erp_field"
               value={erpField}
-              onChange={(e) => setErpField(e.target.value)}
+              onChange={(e) => setErpField(e.target.value.toUpperCase())}
               placeholder="Ex: MAKTX"
-              className="mt-1 font-mono text-sm"
+              className="mt-1 font-mono text-sm uppercase"
             />
           </div>
           <div>

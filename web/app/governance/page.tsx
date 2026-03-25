@@ -883,8 +883,8 @@ export default function GovernancePage() {
                                 id={`tech-${key}`}
                                 type="text"
                                 value={typeof attributeValues[key] === 'object' ? (attributeValues[key] as { value?: string })?.value ?? '' : String(attributeValues[key] ?? '')}
-                                onChange={(e) => handleFieldChange(key, e.target.value, 'text')}
-                                className="mt-1"
+                                onChange={(e) => handleFieldChange(key, e.target.value.toUpperCase(), 'text')}
+                                className="mt-1 uppercase"
                               />
                             )}
                           </div>
@@ -937,9 +937,9 @@ export default function GovernancePage() {
                             id={`attr-${f.field_name}`}
                             type="text"
                             value={attrValStr(attributeValues[f.field_name])}
-                            onChange={(e) => handleFieldChange(f.field_name, e.target.value, 'text')}
+                            onChange={(e) => handleFieldChange(f.field_name, e.target.value.toUpperCase(), 'text')}
                             maxLength={100}
-                            className={`mt-1 ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+                            className={`mt-1 uppercase ${invalidFields.has(f.field_name) ? 'border-red-500 ring-1 ring-red-500' : ''}`}
                           />
                         )}
                         {f.field_type === 'number' && (
@@ -1237,9 +1237,9 @@ export default function GovernancePage() {
               </label>
               <textarea
                 value={rejectJustification}
-                onChange={(e) => setRejectJustification(e.target.value)}
+                onChange={(e) => setRejectJustification(e.target.value.toUpperCase())}
                 maxLength={500}
-                className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm uppercase ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 placeholder="Informe a justificativa..."
                 disabled={approveRejectLoading}
               />

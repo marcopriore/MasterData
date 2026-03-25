@@ -170,9 +170,9 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
             <Input
               id="u-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => setName(e.target.value.toUpperCase())}
               placeholder="Ex: João Silva"
-              className="h-10"
+              className="h-10 uppercase"
             />
           </div>
 

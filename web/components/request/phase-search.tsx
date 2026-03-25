@@ -172,9 +172,9 @@ export function PhaseSearch({
           <Input
             placeholder="Digite a descrição ou código do material..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setQuery(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            className="pl-9"
+            className="pl-9 uppercase"
           />
         </div>
         <Button

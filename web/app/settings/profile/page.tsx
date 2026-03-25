@@ -413,9 +413,9 @@ export default function ProfilePage() {
                 <Input
                   id="name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => setName(e.target.value.toUpperCase())}
                   placeholder="Seu nome completo"
-                  className="h-10"
+                  className="h-10 uppercase"
                 />
               </div>
               <div className="space-y-1.5">

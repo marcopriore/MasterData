@@ -828,11 +828,11 @@ export default function DatabaseDetailPage() {
                     ) : (
                       <input
                         type="text"
-                        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background px-3 py-2 text-sm text-slate-800 dark:text-foreground"
+                        className="mt-1 w-full rounded-lg border border-slate-200 dark:border-border bg-white dark:bg-background px-3 py-2 text-sm uppercase text-slate-800 dark:text-foreground"
                         value={typeof rawVal === 'string' ? rawVal : numericVal}
                         placeholder={`Informe ${label.toLowerCase()}...`}
                         onChange={(e) => {
-                          const newVals = { ...attrValues, [attr.id]: e.target.value }
+                          const newVals = { ...attrValues, [attr.id]: e.target.value.toUpperCase() }
                           setAttrValues(newVals)
                           setGeneratedDesc(
                             generateDescription(material.pdm_name || '', newVals, pdmTemplate)
