@@ -820,7 +820,7 @@ export async function bulkUpdateWorkflowConfig(payload: {
 export type MaterialDetail = Record<string, unknown>
 export type MaterialsResponse = { total: number; page: number; limit: number; items: MaterialDetail[] }
 
-const MATERIALS_LIST_COLS = 'id, id_sistema, id_erp, description, status, pdm_code, pdm_name, material_group, unit_of_measure, ncm, material_type, erp_status, standardized_at, created_at'
+const MATERIALS_LIST_COLS = 'id, id_sistema, id_erp, description, detailed_description, status, pdm_code, pdm_name, material_group, unit_of_measure, ncm, material_type, erp_status, standardized_at, created_at'
 
 export async function getMaterials(params: {
   page?: number
@@ -854,16 +854,27 @@ export async function getMaterials(params: {
 export async function getDuplicateMaterials(): Promise<Map<number, string[]>> {
   try {
     const supabase = createClient()
-    const { data, error } = await supabase.from('material_database').select('id, id_sistema, description, pdm_code')
+    const { data, error } = await supabase
+      .from('material_database')
+      .select('id, id_sistema, description, detailed_description, pdm_code')
     if (error) throw error
 
     const rows = data ?? []
     const byKey = new Map<string, Array<{ id: number; id_sistema: string }>>()
 
-    for (const row of rows as Array<{ id: number; id_sistema?: string | null; description?: string | null; pdm_code?: string | null }>) {
-      const desc = (row.description ?? '').toLowerCase()
-      const pdm = row.pdm_code ?? ''
-      const key = `${desc}\0${pdm}`
+    for (const row of rows as Array<{
+      id: number
+      id_sistema?: string | null
+      description?: string | null
+      detailed_description?: string | null
+      pdm_code?: string | null
+    }>) {
+      const detailedRaw = row.detailed_description
+      const detailed = typeof detailedRaw === 'string' ? detailedRaw.trim() : ''
+      const key =
+        detailed !== ''
+          ? detailed.toLowerCase()
+          : `${(row.description ?? '').toLowerCase()}\0${row.pdm_code ?? ''}`
       const code = row.id_sistema ?? 'MDM-?'
       const list = byKey.get(key)
       const item = { id: row.id, id_sistema: code }
@@ -935,17 +946,64 @@ export async function updateMaterialStandardize(id: number, body: Record<string,
   return data
 }
 
+function buildDetailedDescription(
+  pdmName: string,
+  attributes: Array<{ id: string; name?: string; order?: number }>,
+  technicalAttrs: Record<string, unknown>
+): string {
+  const sorted = [...attributes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  const lines: string[] = [pdmName.toUpperCase(), '']
+  for (const attr of sorted) {
+    const label = (attr.name ?? attr.id).toUpperCase()
+    const raw = technicalAttrs[attr.id]
+    let val = ''
+    if (raw && typeof raw === 'object' && 'value' in raw) {
+      const o = raw as { value?: string; unit?: string }
+      val = `${o.value ?? ''}${o.unit ?? ''}`.toUpperCase().trim()
+    } else if (raw != null && raw !== '') {
+      val = String(raw).toUpperCase().trim()
+    }
+    if (val) lines.push(`${label}: ${val}`)
+  }
+  return lines.join('\n')
+}
+
 export async function updateMaterialAttributes(id: number, body: Record<string, unknown>): Promise<MaterialDetail> {
   const supabase = createClient()
-  const { data: req } = await supabase.from('material_database').select('technical_attributes').eq('id', id).single()
+  const { data: matRow } = await supabase
+    .from('material_database')
+    .select('technical_attributes, pdm_code, pdm_name')
+    .eq('id', id)
+    .single()
   const attrs = body.technical_attributes ?? body
   const merged = typeof attrs === 'object' && attrs !== null
-    ? { ...(req?.technical_attributes ?? {}), ...attrs }
-    : (req?.technical_attributes ?? {})
+    ? { ...(matRow?.technical_attributes ?? {}), ...attrs }
+    : (matRow?.technical_attributes ?? {})
   const updates: Record<string, unknown> = { technical_attributes: merged }
   if (body.description !== undefined) updates.description = body.description
   if (body.pdm_code !== undefined) updates.pdm_code = body.pdm_code
   if (body.pdm_name !== undefined) updates.pdm_name = body.pdm_name
+
+  const mat = matRow as { pdm_code?: string | null; pdm_name?: string | null } | null
+  const pdmCode = (body.pdm_code !== undefined ? body.pdm_code : mat?.pdm_code) as string | null | undefined
+  if (pdmCode) {
+    const { data: pdmRow } = await supabase
+      .from('pdm_templates')
+      .select('name, attributes')
+      .eq('internal_code', pdmCode)
+      .single()
+    if (pdmRow) {
+      const pdmNameFallback =
+        body.pdm_name !== undefined ? body.pdm_name : mat?.pdm_name
+      const detailedDesc = buildDetailedDescription(
+        (pdmRow as { name?: string }).name ?? String(pdmNameFallback ?? ''),
+        ((pdmRow as { attributes?: unknown }).attributes ?? []) as Array<{ id: string; name?: string; order?: number }>,
+        merged as Record<string, unknown>
+      )
+      updates.detailed_description = detailedDesc
+    }
+  }
+
   const { data, error } = await supabase.from('material_database').update(updates).eq('id', id).select().single()
   if (error) handleError(error)
   return data

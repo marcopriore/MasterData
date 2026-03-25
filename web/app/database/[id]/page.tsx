@@ -29,6 +29,7 @@ type MaterialDetail = {
   id_sistema?: string | null
   id_erp: string | null
   description: string
+  detailed_description?: string | null
   status: string
   technical_attributes?: Record<string, string> | null
   pdm_code?: string | null
@@ -388,7 +389,20 @@ export default function DatabaseDetailPage() {
         description: 'Atributos do material atualizados',
         event_data: { material_id: material.id },
       })
-      setMaterial((prev) => (prev ? { ...prev, ...updated, description: generatedDesc } : { ...updated, description: generatedDesc }))
+      setMaterial((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...updated,
+              description: generatedDesc,
+              detailed_description:
+                (updated.detailed_description as string | null | undefined) ?? prev.detailed_description,
+            }
+          : { ...updated, description: generatedDesc }
+      )
+      if (updated.detailed_description) {
+        setDetailedDesc(String(updated.detailed_description))
+      }
       setFormData((prev) => ({ ...prev, ...updated }))
       setIsDirty(true)
       setEditingAttributes(false)
@@ -399,7 +413,7 @@ export default function DatabaseDetailPage() {
     } finally {
       setSavingAttrs(false)
     }
-  }, [material, attrValues, generatedDesc])
+  }, [material, attrValues, generatedDesc, setDetailedDesc])
 
   useEffect(() => {
     if (!id || Number.isNaN(id)) return
