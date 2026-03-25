@@ -531,6 +531,21 @@ export default function DatabaseDetailPage() {
           }
         }
       }
+      if (editingAttributes) {
+        for (const [k, v] of Object.entries(attrValues)) {
+          let strVal: string
+          if (typeof v === 'object' && v !== null && 'value' in v) {
+            strVal = `${(v as { value?: string }).value ?? ''}${(v as { unit?: string }).unit ?? ''}`
+          } else {
+            strVal = String(v ?? '')
+          }
+          if (strVal !== '') {
+            dictPayload[k] = strVal
+            hasDictChanges = true
+          }
+        }
+        payload.description = generatedDesc
+      }
       if (hasDictChanges) {
         payload.technical_attributes = dictPayload
       }
@@ -548,6 +563,7 @@ export default function DatabaseDetailPage() {
       })
       setEditMode(false)
       setIsDirty(false)
+      setEditingAttributes(false)
       toast.success('Padronização salva com sucesso!')
     } catch (err) {
       console.error('Erro ao salvar padronização:', err)
@@ -1077,10 +1093,22 @@ export default function DatabaseDetailPage() {
                           if (field.field_type === 'number') {
                             handleUpdate(field.field_name, v === '' ? null : parseFloat(v))
                           } else {
-                            handleUpdate(field.field_name, v.toUpperCase())
+                            const mask =
+                              field.field_name === 'ncm'
+                                ? maskNCM
+                                : field.field_name === 'cfop'
+                                  ? maskCFOP
+                                  : null
+                            handleUpdate(field.field_name, mask ? mask(v) : v.toUpperCase())
                           }
                         }}
-                        className={field.field_type === 'number' ? INPUT_BASE : `${INPUT_BASE} uppercase`}
+                        className={
+                          field.field_type === 'number'
+                            ? INPUT_BASE
+                            : field.field_name === 'ncm' || field.field_name === 'cfop'
+                              ? INPUT_BASE
+                              : `${INPUT_BASE} uppercase`
+                        }
                         style={{ colorScheme: isDark ? 'dark' : 'light' }}
                       />
                     )}
