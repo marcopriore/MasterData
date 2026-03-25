@@ -551,7 +551,7 @@ export default function DatabaseDetailPage() {
       }
       const updated = await updateMaterialStandardize(
         material.id,
-        Object.keys(payload).length ? payload : formData
+        Object.keys(payload).length ? payload : { status: material.status }
       )
       setMaterial(updated as MaterialDetail)
       const upd = updated as MaterialDetail
