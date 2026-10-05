@@ -70,6 +70,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: profileError.message }, { status: 400 })
   }
 
+  await supabaseAdmin.from('user_role_groups').insert({
+    user_id: authUser.user.id,
+    role_id: adminRole.id,
+  })
+
   return NextResponse.json({
     tenant_id: tenantId,
     admin_user_id: authUser.user.id,

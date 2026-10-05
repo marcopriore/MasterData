@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, FormEvent } from 'react'
 import { usePathname } from 'next/navigation'
 import { getUsersApi, createUserApi, updateUserApi, getRoles, getTenants, downloadFile, uploadUsersImport } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
+import { keysCoveredByGroups, PERMISSION_GROUPS } from '@/lib/permissions'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,11 +29,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  Lock,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Role = { id: number; name: string }
+type Role = { id: number; name: string; permissions?: Record<string, boolean> }
 
 type User = {
   id: string
@@ -40,6 +42,9 @@ type User = {
   email: string
   role_id: number
   role_name?: string | null
+  group_ids?: number[]
+  group_names?: string[]
+  permission_grants?: string[]
   is_active: boolean
   created_at?: string | null
   tenant_id?: number
@@ -94,12 +99,29 @@ interface UserModalProps {
 }
 
 function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose, onSaved }: UserModalProps) {
+  const baseGroups = initial?.group_ids?.length
+    ? [...initial.group_ids]
+    : (initial?.role_id ? [initial.role_id] : (roles[0] ? [roles[0].id] : []))
+  if (initial?.role_id && !baseGroups.includes(initial.role_id)) baseGroups.push(initial.role_id)
+  const initialGroups = baseGroups
   const [name, setName] = useState(initial?.name ?? '')
   const [email, setEmail] = useState(initial?.email ?? '')
   const [password, setPassword] = useState('')
-  const [roleId, setRoleId] = useState<number>(initial?.role_id ?? roles[0]?.id ?? 0)
+  const [groupIds, setGroupIds] = useState<number[]>(initialGroups)
+  const [stageRoleId, setStageRoleId] = useState<number>(initial?.role_id || initialGroups[0] || 0)
+  const [extraKeys, setExtraKeys] = useState<string[]>(initial?.permission_grants ?? [])
   const [showPw, setShowPw] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const covered = keysCoveredByGroups(roles.filter((role) => groupIds.includes(role.id)))
+
+  function toggleGroup(id: number, enabled: boolean) {
+    setGroupIds((prev) => {
+      const next = enabled ? [...new Set([...prev, id])] : prev.filter((item) => item !== id)
+      setStageRoleId((current) => (next.includes(current) ? current : (next[0] ?? 0)))
+      return next
+    })
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -111,26 +133,34 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
       toast.error('Informe uma senha para o novo usuário.')
       return
     }
-    if (!roleId) {
-      toast.error('Selecione um perfil.')
+    if (groupIds.length === 0 || !stageRoleId) {
+      toast.error('Selecione ao menos um grupo e o papel de etapa.')
       return
     }
 
+    const grants = extraKeys.filter((key) => !covered.has(key as never))
     setSaving(true)
     try {
       let saved: User
       if (mode === 'create') {
-        const body: { name: string; email: string; password: string; role_id: number; tenant_id?: number } = {
+        const body: { name: string; email: string; password: string; role_id: number; tenant_id?: number; group_ids: number[]; permission_grants: string[] } = {
           name: name.trim(),
           email: email.trim().toLowerCase(),
           password,
-          role_id: roleId,
+          role_id: stageRoleId,
+          group_ids: groupIds,
+          permission_grants: grants,
         }
         if (currentUserTenantId) body.tenant_id = currentUserTenantId
         saved = await createUserApi(body) as User
         toast.success('Usuário criado com sucesso.')
       } else {
-        const body: Record<string, unknown> = { name: name.trim(), role_id: roleId }
+        const body: Record<string, unknown> = {
+          name: name.trim(),
+          role_id: stageRoleId,
+          group_ids: groupIds,
+          permission_grants: grants,
+        }
         if (password) body.password = password
         saved = await updateUserApi(initial!.id, body) as User
         toast.success('Usuário atualizado.')
@@ -145,7 +175,7 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl border border-[#B4B9BE] bg-white shadow-2xl">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[#B4B9BE] bg-white shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#B4B9BE] px-6 py-4">
           <div className="flex items-center gap-2">
@@ -163,7 +193,7 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
+        <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto px-6 py-5">
           {/* Name */}
           <div className="space-y-1.5">
             <Label htmlFor="u-name" className="text-sm font-medium">Nome completo</Label>
@@ -218,19 +248,79 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
             </div>
           </div>
 
-          {/* Role */}
-          <div className="space-y-1.5">
-            <Label htmlFor="u-role" className="text-sm font-medium">Perfil de acesso</Label>
-            <select
-              id="u-role"
-              value={roleId}
-              onChange={(e) => setRoleId(Number(e.target.value))}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Grupos de perfil</Label>
+            <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border border-input p-3">
+              {roles.map((role) => (
+                <label key={role.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={groupIds.includes(role.id)}
+                    onChange={(e) => toggleGroup(role.id, e.target.checked)}
+                  />
+                  <span className="font-medium">{role.name}</span>
+                </label>
               ))}
-            </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Papel de etapa</Label>
+            <p className="text-xs text-muted-foreground">Define quais campos da governança este usuário preenche. Precisa ser um dos grupos marcados.</p>
+            <div className="space-y-2">
+              {roles.filter((role) => groupIds.includes(role.id)).map((role) => (
+                <label key={role.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="stage-role"
+                    checked={stageRoleId === role.id}
+                    onChange={() => setStageRoleId(role.id)}
+                  />
+                  {role.name}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Permissões individuais</Label>
+            <p className="text-xs text-muted-foreground">Marcadas e travadas já vêm de um grupo. As demais são extras deste usuário.</p>
+            <div className="max-h-48 space-y-3 overflow-y-auto rounded-lg border border-input p-3">
+              {PERMISSION_GROUPS.map((group) => (
+                <div key={group.title} className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground">{group.title}</p>
+                  {group.items.map((item) => {
+                    const locked = covered.has(item.key)
+                    const checked = locked || extraKeys.includes(item.key)
+                    return (
+                      <label key={item.key} className={`flex items-start gap-2 text-sm ${locked ? 'opacity-80' : ''}`}>
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          disabled={locked}
+                          onChange={(e) => {
+                            if (locked) return
+                            setExtraKeys((prev) => e.target.checked
+                              ? [...new Set([...prev, item.key])]
+                              : prev.filter((key) => key !== item.key))
+                          }}
+                        />
+                        <span>
+                          {item.label}
+                          {locked && (
+                            <span className="ml-2 inline-flex items-center text-[10px] text-muted-foreground">
+                              <Lock className="mr-1 size-3" />
+                              Via grupo
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
 
           <Separator />
@@ -429,7 +519,8 @@ export default function UsersPage() {
       !q ||
       u.name.toLowerCase().includes(q) ||
       u.email.toLowerCase().includes(q) ||
-      (u.role_name ?? '').toLowerCase().includes(q)
+      (u.role_name ?? '').toLowerCase().includes(q) ||
+      (u.group_names ?? []).some((name) => name.toLowerCase().includes(q))
     )
   })
 
@@ -523,7 +614,7 @@ export default function UsersPage() {
                 <tr className="border-b border-[#B4B9BE] text-left">
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Usuário</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">E-mail</th>
-                  <th className="px-5 py-3 font-semibold text-muted-foreground">Perfil</th>
+                  <th className="px-5 py-3 font-semibold text-muted-foreground">Grupos</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Status</th>
                   {canManageUsers && (
                     <th className="px-5 py-3 font-semibold text-muted-foreground text-right">Ações</th>
@@ -562,17 +653,24 @@ export default function UsersPage() {
 
                       {/* Role badge */}
                       <td className="px-5 py-3.5">
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
-                          style={{
-                            backgroundColor: badge.bg,
-                            color: badge.text,
-                            borderColor: badge.border,
-                          }}
-                        >
-                          <ShieldCheck className="size-3" />
-                          {u.role_name ?? '—'}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span
+                            className="inline-flex w-fit items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold"
+                            style={{
+                              backgroundColor: badge.bg,
+                              color: badge.text,
+                              borderColor: badge.border,
+                            }}
+                          >
+                            <ShieldCheck className="size-3" />
+                            {u.role_name ?? '—'}
+                          </span>
+                          {(u.group_names ?? []).filter((name) => name !== u.role_name).length > 0 && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {(u.group_names ?? []).filter((name) => name !== u.role_name).join(', ')}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Status */}

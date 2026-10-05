@@ -18,6 +18,8 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { useUser } from '@/contexts/user-context'
+import { mergeRolePermissions } from '@/lib/permissions'
+import { canSeeAdminHref, canSeeMainNav, canSeeSettingsHref } from '@/lib/nav-access'
 
 const NAV_WIDTH = '14rem'
 
@@ -38,7 +40,7 @@ const CONFIG_BASE = [
 // Items visible only to ADMIN role
 const CONFIG_ADMIN = [
   { href: '/admin/users',  label: 'Gestão de Usuários',     icon: Users      },
-  { href: '/admin/roles',  label: 'Perfis de Acesso',       icon: ShieldHalf },
+  { href: '/admin/roles',  label: 'Grupos de perfil',       icon: ShieldHalf },
   { href: '/admin/fields', label: 'Dicionário de Campos',   icon: BookOpen   },
   { href: '/admin/value-dictionary', label: 'Dicionário de Valores', icon: BookMarked },
   { href: '/admin/logs',   label: 'Log do Sistema',         icon: ScrollText },
@@ -73,20 +75,15 @@ function NavLink({
 export function AppSidebar() {
   const pathname = usePathname()
   const { setTheme, resolvedTheme } = useTheme()
-  const { isAdmin, user, logout, can } = useUser()
+  const { user, logout } = useUser()
   const [mounted, setMounted] = useState(false)
 
-  const showAllLinks = user?.is_master === true
+  const access = {
+    isMaster: user?.is_master === true,
+    permissions: user?.role_permissions ?? mergeRolePermissions([], []),
+  }
 
-  const visibleNavLinks = navLinks.filter((item) => {
-    if (showAllLinks) return true
-    if (item.href === '/') return true
-    if (item.href === '/request') return can('can_submit_request')
-    if (item.href === '/governance') return can('can_approve') || can('can_reject')
-    if (item.href === '/database') return can('can_view_database')
-    if (item.href === '/admin-pdm') return can('can_view_pdm')
-    return true
-  })
+  const visibleNavLinks = navLinks.filter((item) => canSeeMainNav(item.href, access))
 
   // Auto-expand Configurações when any child route is active
   const isInsideConfig =
@@ -126,7 +123,7 @@ export function AppSidebar() {
           <Database className="size-4" />
         </div>
         <span className="text-sm font-bold" style={{ color: 'var(--sidebar-text)' }}>
-          MDM Platform
+          PRO-MAT
         </span>
       </div>
 
@@ -162,10 +159,7 @@ export function AppSidebar() {
             <div className="mt-1 flex flex-col gap-0.5 pl-4">
 
               {/* ── Meu Perfil (always) + Workflows (by permission) ── */}
-              {CONFIG_BASE.filter((item) =>
-                item.href === '/settings/profile' ||
-                (item.href === '/settings/workflow' && (can('can_view_workflows') || showAllLinks))
-              ).map((item) => {
+              {CONFIG_BASE.filter((item) => canSeeSettingsHref(item.href, access)).map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(item.href)
                 return (
                   <Link
@@ -189,17 +183,8 @@ export function AppSidebar() {
 
               {/* ── ADMIN items (driven by granular permissions) ── */}
               {(() => {
-                const showAllAdmin = user?.is_master || isAdmin
                 const adminItems = [
-                  ...CONFIG_ADMIN.filter((item) => {
-                    if (showAllAdmin) return true
-                    if (item.href === '/admin/users') return can('can_manage_users')
-                    if (item.href === '/admin/roles') return can('can_manage_roles')
-                    if (item.href === '/admin/fields') return can('can_manage_fields')
-                    if (item.href === '/admin/value-dictionary') return can('can_manage_value_dictionary')
-                    if (item.href === '/admin/logs') return can('can_view_logs')
-                    return false
-                  }),
+                  ...CONFIG_ADMIN.filter((item) => canSeeAdminHref(item.href, access)),
                   ...(user?.is_master ? [{ href: '/admin/tenants', label: 'Tenants', icon: Building2 }] as const : []),
                 ]
                 if (adminItems.length === 0) return null

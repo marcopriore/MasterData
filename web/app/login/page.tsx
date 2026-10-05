@@ -74,7 +74,7 @@ export default function LoginPage() {
                   PRO-MAT
                 </h1>
                 <p className="mt-1 text-sm text-slate-500">
-                  Master Data Management
+                  Cadastro de materiais
                 </p>
               </div>
             </div>

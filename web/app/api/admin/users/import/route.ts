@@ -1,5 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { callerCanManageUsers } from '@/lib/user-access'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
@@ -20,15 +21,13 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await supabase.from('users').select('tenant_id, roles(name)').eq('id', user.id).single()
-  const roleName = (profile?.roles as { name?: string })?.name?.toUpperCase() ?? ''
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const canManage = roleName === 'ADMIN' || roleName === 'MASTER' || isMaster
-  if (!canManage) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
+  const access = await callerCanManageUsers(supabase, user.id, isMaster)
+  if (!access.allowed) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
 
   const effectiveTenantId = isMaster
-    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
-    : profile?.tenant_id
+    ? ((user.app_metadata?.tenant_id as number) ?? access.tenantId)
+    : access.tenantId
   if (!effectiveTenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
 
   const url = new URL(request.url)
@@ -165,6 +164,10 @@ export async function POST(request: Request) {
               await supabaseAdmin.auth.admin.deleteUser(authUser.user.id)
               errors.push(profileError.message)
             } else {
+              await supabaseAdmin.from('user_role_groups').upsert({
+                user_id: authUser.user.id,
+                role_id: roleId,
+              })
               created++
               emailToUserId[email] = authUser.user.id
             }
@@ -181,7 +184,12 @@ export async function POST(request: Request) {
             .update(updatePayload)
             .eq('id', userId)
           if (updateError) errors.push(updateError.message)
-          else updated++
+          else {
+            await supabaseAdmin.from('user_role_groups').delete().eq('user_id', userId)
+            await supabaseAdmin.from('user_role_groups').insert({ user_id: userId, role_id: roleId })
+            await supabaseAdmin.from('user_permission_grants').delete().eq('user_id', userId)
+            updated++
+          }
         }
       } catch (err) {
         errors.push((err as Error).message)

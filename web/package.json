@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "create-demo-users": "node ../supabase/create-demo-users.js"
   },
   "dependencies": {
@@ -39,6 +41,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.7.0",
+    "resend": "^6.32.0",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.5.0",
     "xlsx": "^0.18.5"
@@ -51,6 +54,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

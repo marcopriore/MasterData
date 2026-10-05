@@ -1,5 +1,5 @@
 -- Migration 001: Tabelas base do sistema
--- MDM PRO-MAT — Supabase: tenants, roles, users (profile vinculado a auth.users), measurement_units
+-- PRO-MAT — Supabase: tenants, roles, users (profile vinculado a auth.users), measurement_units
 
 -- ─── Tenants ─────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.tenants (

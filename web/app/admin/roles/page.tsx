@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, FormEvent } from 'react'
 import { usePathname } from 'next/navigation'
 import { getRoles, createRole, updateRole, logAction } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
+import { emptyPermissions, isSystemRoleName, PERMISSION_GROUPS, type RolePermissions } from '@/lib/permissions'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,35 +22,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Permissions = {
-  // Solicitações
-  can_approve: boolean
-  can_reject: boolean
-  can_submit_request: boolean
-
-  // PDM
-  can_view_pdm: boolean
-  can_edit_pdm: boolean
-
-  // Workflows
-  can_view_workflows: boolean
-  can_edit_workflows: boolean
-
-  // Administração
-  can_manage_users: boolean
-  can_view_logs: boolean
-  can_manage_fields: boolean
-  can_view_database: boolean
-  can_manage_roles: boolean
-  can_manage_value_dictionary: boolean
-
-  // Operações
-  can_standardize: boolean
-  can_bulk_import: boolean
-
-  // Atendimento (Governança)
-  can_attend: boolean
-}
+type Permissions = RolePermissions
 
 type Role = {
   id: number
@@ -58,55 +31,6 @@ type Role = {
   permissions: Permissions
   user_count: number
 }
-
-const PERMISSION_GROUPS: {
-  title: string
-  items: { key: keyof Permissions; label: string; description: string }[]
-}[] = [
-  {
-    title: 'Solicitações',
-    items: [
-      { key: 'can_submit_request', label: 'Criar Solicitações',  description: 'Abrir novas solicitações de cadastro' },
-      { key: 'can_approve',        label: 'Aprovar Solicitações', description: 'Aprovar solicitações de cadastro' },
-      { key: 'can_reject',         label: 'Rejeitar Solicitações', description: 'Rejeitar solicitações de cadastro' },
-      { key: 'can_attend',         label: 'Pode Atender Solicitações', description: 'Iniciar atendimento de solicitações no Kanban (Admin e operadores de fase)' },
-    ],
-  },
-  {
-    title: 'Gestão PDM',
-    items: [
-      { key: 'can_view_pdm', label: 'Visualizar PDM', description: 'Visualizar dados e modelos de PDM' },
-      { key: 'can_edit_pdm', label: 'Editar PDM',     description: 'Criar e editar modelos de PDM' },
-    ],
-  },
-  {
-    title: 'Workflow',
-    items: [
-      { key: 'can_view_workflows', label: 'Visualizar Workflows', description: 'Ver configuração dos fluxos de aprovação' },
-      { key: 'can_edit_workflows', label: 'Editar Workflows',     description: 'Configurar fluxos de aprovação' },
-    ],
-  },
-  {
-    title: 'Administração',
-    items: [
-      { key: 'can_manage_users',  label: 'Gestão de Usuários',   description: 'Criar, editar e desativar usuários' },
-      { key: 'can_view_logs',     label: 'Gestão de Logs',       description: 'Visualizar log de auditoria do sistema' },
-      { key: 'can_manage_fields', label: 'Dicionário de Dados',  description: 'Gerir dicionário de campos e metadados' },
-      { key: 'can_view_database', label: 'Base de Dados',        description: 'Visualizar base de dados de materiais' },
-      { key: 'can_manage_roles',  label: 'Perfil de Acesso',     description: 'Gerir perfis e permissões de acesso' },
-      { key: 'can_manage_value_dictionary', label: 'Dicionário de Valores', description: 'Centralizar e unificar valores de atributos tipo lista' },
-    ],
-  },
-  {
-    title: 'Operações',
-    items: [
-      { key: 'can_standardize',   label: 'Padronização de Materiais', description: 'Padronizar materiais e integrar com ERP' },
-      { key: 'can_bulk_import',   label: 'Importação em Massa',       description: 'Importação em massa de materiais' },
-    ],
-  },
-]
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function roleAccentColor(name: string) {
   switch (name) {
@@ -117,27 +41,6 @@ function roleAccentColor(name: string) {
     case 'MASTER':      return { bg: '#FEF3C7', text: '#B45309', border: '#FDE68A', dot: '#F59E0B' }
     case 'MRP':         return { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0', dot: '#10B981' }
     default:            return { bg: '#F8FAFC', text: '#475569', border: '#E2E8F0', dot: '#94A3B8' }
-  }
-}
-
-function emptyPermissions(): Permissions {
-  return {
-    can_approve: false,
-    can_reject: false,
-    can_submit_request: false,
-    can_view_pdm: false,
-    can_edit_pdm: false,
-    can_view_workflows: false,
-    can_edit_workflows: false,
-    can_manage_users: false,
-    can_view_logs: false,
-    can_manage_fields: false,
-    can_view_database: true,
-    can_manage_roles: false,
-    can_manage_value_dictionary: false,
-    can_standardize: false,
-    can_bulk_import: false,
-    can_attend: false,
   }
 }
 
@@ -183,6 +86,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
     initial?.permissions ?? emptyPermissions()
   )
   const [saving, setSaving] = useState(false)
+  const systemGroup = mode === 'edit' && isSystemRoleName(initial?.name)
 
   function togglePerm(key: keyof Permissions) {
     setPerms((p) => ({ ...p, [key]: !p[key] }))
@@ -190,7 +94,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!name.trim()) { toast.error('Informe o nome do perfil.'); return }
+    if (!name.trim()) { toast.error('Informe o nome do grupo.'); return }
 
     setSaving(true)
     try {
@@ -202,7 +106,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
           action: 'role_created',
           description: `Perfil "${name.trim()}" criado`,
         })
-        toast.success('Perfil criado com sucesso.')
+        toast.success('Grupo criado com sucesso.')
       } else {
         saved = (await updateRole(initial!.id, {
           name: name.trim(),
@@ -214,7 +118,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
           action: 'role_updated',
           description: `Perfil "${name.trim()}" atualizado`,
         })
-        toast.success('Perfil atualizado.')
+        toast.success('Grupo atualizado.')
       }
       onSaved(saved)
     } catch (err) {
@@ -232,7 +136,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
           <div className="flex items-center gap-2">
             <ShieldHalf className="size-4 text-[#0F1C38]" />
             <h2 className="text-base font-semibold text-[#0F1C38]">
-              {mode === 'create' ? 'Novo Perfil' : 'Editar Perfil'}
+              {mode === 'create' ? 'Novo grupo' : 'Editar grupo'}
             </h2>
           </div>
           <button
@@ -246,14 +150,18 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
         {/* Body */}
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
           <div className="space-y-1.5">
-            <Label htmlFor="r-name" className="text-sm font-medium">Nome do perfil</Label>
+            <Label htmlFor="r-name" className="text-sm font-medium">Nome do grupo</Label>
             <Input
               id="r-name"
               value={name}
               onChange={(e) => setName(e.target.value.toUpperCase())}
               placeholder="Ex: REVISOR"
+              disabled={systemGroup}
               className="h-10 uppercase font-mono"
             />
+            {systemGroup && (
+              <p className="text-xs text-muted-foreground">Grupo de sistema: o nome não pode ser alterado.</p>
+            )}
           </div>
 
           <Separator />
@@ -299,7 +207,7 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
               {saving ? (
                 <><Loader2 className="size-4 animate-spin mr-2" />Salvando…</>
               ) : (
-                <><Check className="size-4 mr-2" />{mode === 'create' ? 'Criar perfil' : 'Salvar'}</>
+                <><Check className="size-4 mr-2" />{mode === 'create' ? 'Criar grupo' : 'Salvar'}</>
               )}
             </Button>
           </div>
@@ -370,9 +278,9 @@ export default function RolesPage() {
             <ShieldHalf className="size-5 text-[#0F1C38]" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">Perfis de Acesso</h1>
+            <h1 className="text-xl font-bold text-foreground">Grupos de perfil</h1>
             <p className="text-sm text-muted-foreground">
-              Gerencie os perfis e suas permissões no sistema
+              Cada grupo reúne permissões de tela. O usuário pode ter vários grupos.
             </p>
           </div>
         </div>
@@ -382,7 +290,7 @@ export default function RolesPage() {
             className="bg-[#0F1C38] hover:bg-[#162444] text-white shrink-0"
           >
             <Plus className="size-4 mr-2" />
-            Novo Perfil
+            Novo grupo
           </Button>
         )}
       </div>
@@ -396,7 +304,7 @@ export default function RolesPage() {
       ) : roles.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-2">
           <ShieldHalf className="size-8 opacity-30" />
-          <p className="text-sm">Nenhum perfil cadastrado.</p>
+          <p className="text-sm">Nenhum grupo cadastrado.</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

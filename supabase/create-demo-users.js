@@ -194,6 +194,7 @@ async function main() {
         console.log(`Perfil criado para ${u.email}`)
       } else {
         await supabase.from('users').update({ role_id: roleId, tenant_id: tenantId }).eq('id', found.id)
+        await supabase.from('user_role_groups').upsert({ user_id: found.id, role_id: roleId })
         console.log(`Usuário ${u.email} já existe, perfil atualizado`)
       }
       continue
@@ -223,6 +224,8 @@ async function main() {
       await supabase.auth.admin.deleteUser(authUser.user.id)
       continue
     }
+
+    await supabase.from('user_role_groups').upsert({ user_id: authUser.user.id, role_id: roleId })
 
     const { data: prefs } = await supabase.from('user_notification_prefs').select('id').eq('user_id', authUser.user.id).single()
     if (!prefs) {

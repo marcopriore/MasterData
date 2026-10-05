@@ -17,28 +17,10 @@ import {
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { logAction } from '@/lib/supabase-api'
+import { emptyPermissions, mergeRolePermissions, type RolePermissions } from '@/lib/permissions'
 import type { Session } from '@supabase/supabase-js'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export type RolePermissions = {
-  can_approve: boolean
-  can_reject: boolean
-  can_submit_request: boolean
-  can_view_pdm: boolean
-  can_edit_pdm: boolean
-  can_view_workflows: boolean
-  can_edit_workflows: boolean
-  can_manage_users: boolean
-  can_view_logs: boolean
-  can_manage_fields: boolean
-  can_view_database: boolean
-  can_manage_roles: boolean
-  can_manage_value_dictionary: boolean
-  can_standardize: boolean
-  can_bulk_import: boolean
-  can_attend: boolean
-}
+export type { RolePermissions }
 
 export type UserPreferences = {
   theme: 'light' | 'dark'
@@ -59,6 +41,7 @@ export type CurrentUser = {
   tenant_id?: number
   tenant_name?: string
   is_master?: boolean
+  has_admin_group?: boolean
   max_description_length?: number
 }
 
@@ -82,24 +65,7 @@ type UserContextValue = {
 
 // ─── Default permissions ───────────────────────────────────────────────────────
 
-const EMPTY_PERMISSIONS: RolePermissions = {
-  can_approve: false,
-  can_reject: false,
-  can_submit_request: false,
-  can_view_pdm: false,
-  can_edit_pdm: false,
-  can_view_workflows: false,
-  can_edit_workflows: false,
-  can_manage_users: false,
-  can_view_logs: false,
-  can_manage_fields: false,
-  can_view_database: true,
-  can_manage_roles: false,
-  can_manage_value_dictionary: false,
-  can_standardize: false,
-  can_bulk_import: false,
-  can_attend: false,
-}
+const EMPTY_PERMISSIONS = emptyPermissions()
 
 // ─── Profile helpers ───────────────────────────────────────────────────────────
 
@@ -121,10 +87,13 @@ type ProfileOverrides = { tenant_id?: number; tenant_name?: string }
 function mapProfileToUser(
   profile: DbProfile,
   session: Session,
-  overrides?: ProfileOverrides
+  overrides?: ProfileOverrides,
+  effectivePermissions?: RolePermissions,
+  hasAdminGroup?: boolean
 ): CurrentUser {
   const prefs = profile.preferences as UserPreferences | null
-  const permissions = (profile.roles?.permissions ?? {}) as Partial<RolePermissions>
+  const permissions = effectivePermissions
+    ?? ({ ...EMPTY_PERMISSIONS, ...(profile.roles?.permissions ?? {}) })
 
   return {
     id: profile.id,
@@ -133,7 +102,7 @@ function mapProfileToUser(
     role_id: profile.role_id,
     role_name: profile.roles?.name ?? '',
     role_type: (profile.roles?.role_type as CurrentUser['role_type']) ?? 'sistema',
-    role_permissions: { ...EMPTY_PERMISSIONS, ...permissions },
+    role_permissions: permissions,
     is_active: profile.is_active,
     preferences: {
       theme: (prefs?.theme as 'light' | 'dark') ?? 'light',
@@ -143,6 +112,7 @@ function mapProfileToUser(
     tenant_id: overrides?.tenant_id ?? profile.tenant_id,
     tenant_name: overrides?.tenant_name ?? profile.tenants?.name ?? undefined,
     is_master: (session.user.app_metadata?.is_master as boolean) ?? false,
+    has_admin_group: hasAdminGroup ?? (profile.roles?.name ?? '').toUpperCase() === 'ADMIN',
     max_description_length: profile.max_description_length ?? 40,
   }
 }
@@ -192,7 +162,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
       const { data: profile, error } = await supabase
         .from('users')
-        .select('*, roles(name, role_type, permissions), tenants(name)')
+        .select('*, roles!users_role_id_fkey(name, role_type, permissions), tenants(name)')
         .eq('id', authUser.id)
         .single()
 
@@ -247,10 +217,35 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      const [{ data: memberships }, { data: grantRows }] = await Promise.all([
+        supabase
+          .from('user_role_groups')
+          .select('roles(name, permissions)')
+          .eq('user_id', authUser.id),
+        supabase
+          .from('user_permission_grants')
+          .select('permission_key')
+          .eq('user_id', authUser.id),
+      ])
+
+      const groupRoles = (memberships ?? []).map((row) => {
+        const role = Array.isArray(row.roles) ? row.roles[0] : row.roles
+        return {
+          name: (role as { name?: string } | null)?.name ?? '',
+          permissions: (role as { permissions?: Partial<RolePermissions> } | null)?.permissions ?? null,
+        }
+      })
+      const grantKeys = (grantRows ?? []).map((row) => row.permission_key as string)
+      const effectivePermissions = groupRoles.length
+        ? mergeRolePermissions(groupRoles, grantKeys)
+        : { ...EMPTY_PERMISSIONS, ...(p.roles?.permissions ?? {}) }
+      const hasAdminGroup = groupRoles.some((group) => group.name.toUpperCase() === 'ADMIN')
+        || (p.roles?.name ?? '').toUpperCase() === 'ADMIN'
+
       const mappedUser = mapProfileToUser(p, session, {
         tenant_id: effectiveTenantId,
         tenant_name: effectiveTenantName,
-      })
+      }, effectivePermissions, hasAdminGroup)
 
       setUserState(mappedUser)
       setAccessTokenState(session.access_token ?? null)
@@ -385,7 +380,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     window.location.href = '/login'
   }, [user?.email])
 
-  const isAdmin = user?.role_name === 'ADMIN'
+  const isAdmin = user?.has_admin_group === true || user?.role_name === 'ADMIN'
 
   const can = useCallback(
     (permission: keyof RolePermissions) => {

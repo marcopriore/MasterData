@@ -1,4 +1,4 @@
--- Seed Data — MDM PRO-MAT
+-- Seed Data — PRO-MAT
 -- Baseado em api/seed_data.py e api/constants.py
 -- Executado após migrations (supabase db reset)
 -- Idempotente: pode ser executado múltiplas vezes

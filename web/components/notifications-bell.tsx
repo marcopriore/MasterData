@@ -147,7 +147,7 @@ export function NotificationsBell() {
             )}
           </Button>
           <Link
-            href="/governance"
+            href="/activity"
             onClick={() => setOpen(false)}
             className="text-xs font-medium text-primary hover:underline"
           >

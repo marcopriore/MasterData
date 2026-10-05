@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { getDashboardStats } from '@/lib/supabase-api'
 import { RecentActivitiesList } from '@/components/recent-activities-list'
 import { useUser } from '@/contexts/user-context'
+import { mergeRolePermissions } from '@/lib/permissions'
+import { canSeeHomeShortcut } from '@/lib/nav-access'
 import {
   PieChart,
   Pie,
@@ -168,8 +170,11 @@ function NavCard({
 export default function DashboardPage() {
   const router = useRouter()
   const pathname = usePathname()
-  const { user, ready, isAdmin, can } = useUser()
-  const showAllAccess = user?.is_master === true
+  const { user, ready } = useUser()
+  const access = {
+    isMaster: user?.is_master === true,
+    permissions: user?.role_permissions ?? mergeRolePermissions([], []),
+  }
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -203,7 +208,7 @@ export default function DashboardPage() {
   const displayName = stats?.user_name?.split(' ')[0] || user?.name?.split(' ')[0] || 'Usuário'
   const greeting = (stats?.user_name ?? user?.name)
     ? `Olá, ${displayName}.`
-    : 'Bem-vindo ao MDM Platform.'
+    : 'Bem-vindo ao PRO-MAT.'
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 pb-10">
@@ -224,7 +229,7 @@ export default function DashboardPage() {
           Acesso Rápido
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {(showAllAccess || isAdmin || can('can_edit_pdm')) && (
+          {canSeeHomeShortcut('/admin-pdm', access) && (
             <NavCard
               href="/admin-pdm"
               icon={Database}
@@ -232,7 +237,7 @@ export default function DashboardPage() {
               description="Configure padrões de descrição"
             />
           )}
-          {(showAllAccess || isAdmin || can('can_approve')) && (
+          {canSeeHomeShortcut('/governance', access) && (
             <NavCard
               href="/governance"
               icon={ShieldCheck}
@@ -240,7 +245,7 @@ export default function DashboardPage() {
               description="Políticas e controle de qualidade"
             />
           )}
-          {(showAllAccess || isAdmin) && (
+          {canSeeHomeShortcut('/settings/workflow', access) && (
             <NavCard
               href="/settings/workflow"
               icon={GitBranch}
@@ -248,7 +253,7 @@ export default function DashboardPage() {
               description="Etapas de aprovação"
             />
           )}
-          {(showAllAccess || isAdmin || can('can_submit_request')) && (
+          {canSeeHomeShortcut('/request', access) && (
             <NavCard
               href="/request"
               icon={FilePlus}

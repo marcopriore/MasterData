@@ -21,8 +21,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MDM Platform",
-  description: "Master Data Management",
+  title: "PRO-MAT",
+  description: "PRO-MAT",
 };
 
 export default function RootLayout({

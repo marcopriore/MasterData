@@ -386,8 +386,8 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
 
 export default function FieldsPage() {
   const pathname = usePathname()
-  const { isAdmin, user } = useUser()
-  const canAccess = user?.is_master || isAdmin
+  const { user, can } = useUser()
+  const canAccess = user?.is_master || can('can_manage_fields')
   const [fields, setFields] = useState<FieldDictionary[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)

@@ -1,9 +1,10 @@
 /**
- * Supabase API — substitui FastAPI para MDM PRO-MAT.
+ * Supabase API — substitui FastAPI para o PRO-MAT.
  * Usa createClient() do browser. RLS filtra por tenant automaticamente.
  */
 
 import { createClient } from '@/lib/supabase/client'
+import { isSystemRoleName, seesCurrentPhaseFields } from '@/lib/permissions'
 
 // ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
 
@@ -106,7 +107,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { total_requests: 0, by_status: [], by_urgency: [], recent_activities: [], pdm_count: 0, user_count: 0 }
 
-  const { data: profile } = await supabase.from('users').select('tenant_id, name, roles(name, role_type)').eq('id', user.id).single()
+  const { data: profile } = await supabase.from('users').select('tenant_id, name, roles!users_role_id_fkey(name, role_type)').eq('id', user.id).single()
   const roleName = (profile?.roles as { name?: string })?.name?.toUpperCase() ?? ''
   const roleType = (profile?.roles as { role_type?: string })?.role_type ?? 'sistema'
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
@@ -534,8 +535,18 @@ export async function createRequest(body: {
     description: 'Solicitação criada',
     event_data: { request_id: data.id, pdm_id: body.pdm_id, requester: body.requester },
   })
+  queueRequestNotice(data.id)
 
   return { id: data.id }
+}
+
+function queueRequestNotice(requestId: number) {
+  if (typeof window === 'undefined') return
+  void fetch('/api/notifications/request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId }),
+  }).catch(() => {})
 }
 
 function normalizeAttrs(data: Record<string, unknown>): Record<string, string> {
@@ -681,6 +692,7 @@ export async function assignRequest(id: number): Promise<ApiRequest> {
     description: 'Atendimento iniciado',
     event_data: { request_id: id },
   })
+  queueRequestNotice(id)
   return data as ApiRequest
 }
 
@@ -694,6 +706,7 @@ export async function advanceWorkflow(id: number): Promise<ApiRequest> {
     description: 'Solicitação avançada no workflow',
     event_data: { request_id: id },
   })
+  queueRequestNotice(id)
   return data as ApiRequest
 }
 
@@ -707,6 +720,7 @@ export async function rejectRequest(id: number, reason?: string): Promise<ApiReq
     description: 'Solicitação rejeitada',
     event_data: { request_id: id, reason: reason ?? '' },
   })
+  queueRequestNotice(id)
   return data as ApiRequest
 }
 
@@ -1430,11 +1444,19 @@ export async function getMyFields(requestStatus?: string): Promise<MyField[]> {
   if (!user) return []
 
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const { data: profile } = await supabase.from('users').select('roles(name)').eq('id', user.id).single()
+  const { data: profile } = await supabase.from('users').select('roles!users_role_id_fkey(name)').eq('id', user.id).single()
   const roleName = ((profile?.roles as { name?: string })?.name ?? '').trim().toUpperCase()
+  const { data: memberships } = await supabase
+    .from('user_role_groups')
+    .select('roles(name)')
+    .eq('user_id', user.id)
+  const hasAdminGroup = (memberships ?? []).some((row) => {
+    const role = Array.isArray(row.roles) ? row.roles[0] : row.roles
+    return ((role as { name?: string } | null)?.name ?? '').toUpperCase() === 'ADMIN'
+  })
 
   let responsibleRole: string | null
-  if (isMaster || roleName === 'ADMIN') {
+  if (seesCurrentPhaseFields({ isMaster, roleName, hasAdminGroup })) {
     responsibleRole = statusToResponsibleRole(requestStatus ?? '')
     if (!responsibleRole) return []
   } else {
@@ -1506,7 +1528,7 @@ export async function getRoles(): Promise<Role[]> {
   const { data: roles, error } = await supabase.from('roles').select('id, name, role_type, permissions').order('id')
   if (error) handleError(error)
   const roleList = roles ?? []
-  const { data: counts } = await supabase.from('users').select('role_id')
+  const { data: counts } = await supabase.from('user_role_groups').select('role_id')
   const countMap: Record<number, number> = {}
   ;(counts ?? []).forEach((u) => {
     const rid = u.role_id as number
@@ -1535,6 +1557,10 @@ export async function updateRole(id: number, body: Partial<Role>): Promise<Role>
 
 export async function deleteRole(id: number): Promise<void> {
   const supabase = createClient()
+  const { data: role } = await supabase.from('roles').select('name').eq('id', id).single()
+  if (isSystemRoleName(role?.name)) {
+    throw new Error('Grupo de sistema não pode ser excluído.')
+  }
   const { error } = await supabase.from('roles').delete().eq('id', id)
   if (error) handleError(error)
 }
@@ -1795,13 +1821,15 @@ export async function createUserApi(body: {
   name: string
   tenant_id?: number
   role_id: number
+  group_ids?: number[]
+  permission_grants?: string[]
 }): Promise<{ id: string; name: string; email: string }> {
   return apiFetch('/api/admin/users', { method: 'POST', body: JSON.stringify(body) })
 }
 
 export async function updateUserApi(
   id: string,
-  body: { name?: string; role_id?: number; is_active?: boolean }
+  body: { name?: string; role_id?: number; is_active?: boolean; group_ids?: number[]; permission_grants?: string[] }
 ): Promise<{ id: string; name: string; email: string }> {
   return apiFetch(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(body) })
 }
@@ -1836,6 +1864,9 @@ export type UserWithRole = {
   is_active: boolean
   roles?: { id: number; name: string }
   tenants?: { id: number; name: string }
+  group_ids?: number[]
+  group_names?: string[]
+  permission_grants?: string[]
 }
 
 export async function getUsersApi(): Promise<UserWithRole[]> {
