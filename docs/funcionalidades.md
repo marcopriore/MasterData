@@ -15,6 +15,7 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/database` | Base de materiais: filtros, colunas, import/export, status ERP. |
 | `/database/[id]` | Detalhe do material, descrições curta e detalhada. |
 | `/admin-pdm` | Templates PDM, atributos, import/export. |
+| `/support` | Chamados AxisDesk da empresa: abrir, acompanhar, responder, aprovar, reprovar ou cancelar. |
 | `/settings/profile` | Perfil, senha própria e preferências de notificação. |
 | `/settings/workflow` | Fluxos e etapas (ordem com drag-and-drop). |
 | `/admin/users` | Usuários do tenant: criar, editar, ativar, import/export. |
@@ -97,6 +98,10 @@ Tabela `notifications`, sino no topo e preferências por evento (criada, atendim
 | `POST /api/admin/switch-tenant` e `.../back` | Master entra e sai de um tenant |
 | `PATCH /api/admin/tenants/[id]` | Dados do tenant |
 | `POST /api/notifications/request` | Sino e e-mail depois de uma ação recente na solicitação |
+| `GET/POST /api/support/tickets` | Listar e abrir chamados no AxisDesk |
+| `GET /api/support/tickets/[id]` e `POST .../acoes` | Detalhe e resposta do usuário |
+| `GET /api/support/categorias` | Categorias do formulário |
+| `POST /api/support/webhook` | AxisDesk avisa mudança de status ou comentário |
 
 ## Modelo de dados (principal)
 

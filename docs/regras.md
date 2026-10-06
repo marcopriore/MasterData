@@ -92,6 +92,13 @@ PNG, JPG, WEBP, GIF e PDF. O storage só deixa ler e gravar na pasta do tenant d
 - O e-mail sai pela rota `POST /api/notifications/request`, só se o histórico da ação for do usuário logado e tiver menos de cinco minutos. A mesma pessoa não recebe o mesmo evento de novo em dez minutos.
 - `RESEND_API_KEY` não vai para o browser.
 
+## Suporte
+
+- A tela `/support` lista e abre chamados da empresa que está na sessão. O Master usa o tenant para o qual trocou.
+- O browser chama só `/api/support/*`. `AXISDESK_API_KEY` fica no servidor, no header `x-api-key`.
+- O webhook `POST /api/support/webhook` exige `x-axisdesk-secret` igual a `AXISDESK_WEBHOOK_SECRET`. Status ou comentário gera aviso no sino do solicitante, e o clique abre o chamado.
+- Título até 200 caracteres, descrição e mensagem até 2000, no máximo 5 anexos de 4 MB.
+
 ## Tema
 
 Claro e escuro são da aplicação, não do sistema operacional. Componentes de urgência e status precisam de variante explícita para os dois modos. O `CONTEXT.md` antigo guardava a paleta de badges; ao mexer em urgência, conferir os estilos inline que usam `useTheme()`.

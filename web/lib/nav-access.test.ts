@@ -36,6 +36,7 @@ describe('simulador de menu', () => {
     expect(canSeeMainNav('/governance', none)).toBe(false)
     expect(canSeeMainNav('/database', none)).toBe(false)
     expect(canSeeMainNav('/admin-pdm', none)).toBe(false)
+    expect(canSeeMainNav('/support', none)).toBe(true)
     expect(canSeeSettingsHref('/settings/profile', none)).toBe(true)
     expect(canSeeSettingsHref('/settings/workflow', none)).toBe(false)
     for (const href of ADMIN) expect(canSeeAdminHref(href, none)).toBe(false)

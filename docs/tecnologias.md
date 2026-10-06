@@ -54,6 +54,7 @@ Variáveis em `web/.env.local`:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` (só no servidor: onboarding, admin de usuários, import, aviso por e-mail)
 - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (só no servidor). Sem a chave, o sino continua e o e-mail é ignorado.
+- `AXISDESK_API_KEY` (só no servidor). `AXISDESK_WEBHOOK_SECRET` valida o webhook. `AXISDESK_BASE_URL` é opcional; o padrão é `https://suporte.axisstrategy.com.br`.
 
 Tenant de demonstração:
 

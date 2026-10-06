@@ -6,7 +6,7 @@ import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
 import {
   ChevronDown, ChevronRight,
-  Home, FileText, ShieldCheck, Database, LayoutGrid,
+  Home, FileText, ShieldCheck, Database, LayoutGrid, Headphones,
   Settings, GitBranch, Sun, Moon,
   UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2,
 } from 'lucide-react'
@@ -29,6 +29,7 @@ const navLinks = [
   { href: '/governance', label: 'Governança', icon: ShieldCheck },
   { href: '/database', label: 'Base de Dados', icon: Database },
   { href: '/admin-pdm', label: 'Gestão PDM', icon: LayoutGrid },
+  { href: '/support', label: 'Suporte', icon: Headphones },
 ] as const
 
 // Items always visible inside Configurações

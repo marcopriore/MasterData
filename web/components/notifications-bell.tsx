@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Bell, FileText, Play, Check, XCircle, Flag, Loader2 } from 'lucide-react'
+import { Bell, FileText, Play, Check, XCircle, Flag, Loader2, Headphones } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useNotifications, type Notification } from '@/contexts/notifications-context'
+import { supportTicketIdFromEvent } from '@/lib/axisdesk/types'
 import { useUser } from '@/contexts/user-context'
 import { cn } from '@/lib/utils'
 
@@ -45,7 +46,10 @@ function NotificationItem({
   n: Notification
   onClick: () => void
 }) {
-  const { Icon, color } = EVENT_ICONS[n.event_type] ?? { Icon: FileText, color: 'text-gray-600' }
+  const supportId = supportTicketIdFromEvent(n.event_type)
+  const { Icon, color } = supportId
+    ? { Icon: Headphones, color: 'text-[#C69A46]' }
+    : EVENT_ICONS[n.event_type] ?? { Icon: FileText, color: 'text-gray-600' }
   const message = n.message.length > 60 ? `${n.message.slice(0, 60)}…` : n.message
 
   return (
@@ -79,6 +83,11 @@ export function NotificationsBell() {
   const handleItemClick = (n: Notification) => {
     if (!n.is_read) markAsRead(n.id)
     setOpen(false)
+    const supportId = supportTicketIdFromEvent(n.event_type)
+    if (supportId) {
+      router.push(`/support/${supportId}`)
+      return
+    }
     if (n.request_id != null) {
       router.push('/governance')
     }

@@ -10,6 +10,7 @@ export type NavAccess = {
 export function canSeeMainNav(href: string, access: NavAccess): boolean {
   if (access.isMaster) return true
   if (href === '/') return true
+  if (href === '/support') return true
   if (href === '/request') return access.permissions.can_submit_request
   if (href === '/governance') return access.permissions.can_approve || access.permissions.can_reject
   if (href === '/database') return access.permissions.can_view_database

@@ -6,6 +6,7 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 - **Reset de senha por administrador.** A rota de senha só aceita o próprio usuário, e exige a senha atual quando ela é enviada. Um admin não redefine a senha de outra conta pela aplicação. Hoje isso fica no painel do Supabase ou num script com service role.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
+- **Domínio público do PRO-MAT.** O sistema ainda roda só em `localhost`. Sem um endereço publicado, o AxisDesk não consegue chamar o webhook. Quando houver domínio, a URL em Configurações → Integrações → PRO-MAT fica `https://<domínio>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.
 - **Integração ERP.** Campos MM03, `id_erp`, `erp_status` e `erp_error_message` existem. O botão de integrar só simula o round-trip (`erpIntegrateMaterial`). Não há cliente SAP.
 - **Detalhe da governança.** Em `/governance/request/[id]`, iniciar, aprovar e rejeitar não chamam `assign_request`, `advance_workflow` nem `reject_request`. O kanban em `/governance` é quem persiste. A página de detalhe precisa usar as mesmas RPCs ou deixar de oferecer essas ações.
 - **`can_attend` no tenant novo.** O script da Empresa Demo e o onboarding não gravam essa flag. Quem não passou pela migration 008 não vê “Iniciar atendimento” como os papéis antigos.
