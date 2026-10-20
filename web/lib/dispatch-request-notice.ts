@@ -33,9 +33,10 @@ function reasonFromHistory(eventData: unknown): string {
   return typeof justification === 'string' ? justification : ''
 }
 
+/** actorId null = ação de integração (sem usuário logado). */
 export async function dispatchRequestNotice(input: {
   requestId: number
-  actorId: string
+  actorId: string | null
   appOrigin: string
 }): Promise<{ ok: true; notified: number; emailed: number } | { ok: false; status: number; error: string }> {
   const { data: request, error: requestError } = await supabaseAdmin
@@ -47,11 +48,13 @@ export async function dispatchRequestNotice(input: {
   if (requestError) return { ok: false, status: 400, error: requestError.message }
   if (!request) return { ok: false, status: 404, error: 'Solicitação não encontrada' }
 
-  const { data: history, error: historyError } = await supabaseAdmin
+  const historyQuery = supabaseAdmin
     .from('request_history')
     .select('event_type, stage, event_data, created_at')
     .eq('request_id', input.requestId)
-    .eq('user_id', input.actorId)
+  const { data: history, error: historyError } = await (
+    input.actorId ? historyQuery.eq('user_id', input.actorId) : historyQuery.is('user_id', null)
+  )
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

@@ -37,6 +37,7 @@ type FieldDictionary = {
   field_label: string
   erp_field: string | null
   erp_view: string
+  erp_block?: string | null
   field_type: string
   options: string[] | Record<string, unknown> | null
   responsible_role: string
@@ -66,6 +67,12 @@ const ERP_VIEW_COLORS: Record<string, { bg: string; text: string; border: string
   contabilidade: { bg: '#FFF7ED', text: '#C2410C', border: '#FED7AA' },
   vendas: { bg: '#FCE7F3', text: '#BE185D', border: '#FBCFE8' },
 }
+
+const ERP_BLOCKS = [
+  { value: '', label: 'Características (padrão)' },
+  { value: 'header', label: 'Cabeçalho' },
+  { value: 'site', label: 'Site / centro' },
+] as const
 
 const FIELD_TYPES = [
   { value: 'text', label: 'Texto', icon: Type },
@@ -141,6 +148,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
   const [fieldName, setFieldName] = useState(initial?.field_name ?? '')
   const [erpField, setErpField] = useState(initial?.erp_field ?? '')
   const [erpView, setErpView] = useState(initial?.erp_view ?? 'dados_basicos')
+  const [erpBlock, setErpBlock] = useState(initial?.erp_block ?? '')
   const [fieldType, setFieldType] = useState(initial?.field_type ?? 'text')
   const [responsibleRole, setResponsibleRole] = useState(initial?.responsible_role ?? '')
   const [isRequired, setIsRequired] = useState(initial?.is_required ?? false)
@@ -201,6 +209,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
         field_label: fieldLabel.trim(),
         erp_field: erpField.trim() || null,
         erp_view: erpView,
+        ...(erpBlock || initial?.erp_block !== undefined ? { erp_block: erpBlock || null } : {}),
         field_type: fieldType,
         options: fieldType === 'select'
           ? (parseOptionsJson(optionsJson) ?? []).map((v) => v.trim()).filter(Boolean)
@@ -297,6 +306,24 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <Label htmlFor="erp_block">Bloco no JSON do ERP</Label>
+            <select
+              id="erp_block"
+              value={erpBlock}
+              onChange={(e) => setErpBlock(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+            >
+              {ERP_BLOCKS.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              O valor sai com o nome do Campo ERP dentro deste bloco.
+            </p>
           </div>
           <div>
             <Label htmlFor="field_type">Tipo *</Label>

@@ -10,7 +10,7 @@ function access(partial: Partial<RolePermissions>, isMaster = false): NavAccess 
 }
 
 const MAIN = ['/', '/request', '/governance', '/database', '/admin-pdm']
-const ADMIN = ['/admin/users', '/admin/roles', '/admin/fields', '/admin/value-dictionary', '/admin/logs', '/admin/tenants']
+const ADMIN = ['/admin/users', '/admin/roles', '/admin/fields', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/tenants']
 
 describe('simulador de menu', () => {
   it('master vê menu, administração e atalhos', () => {
@@ -55,6 +55,7 @@ describe('simulador de menu', () => {
       [{ can_manage_fields: true }, '/admin/fields', 'admin'],
       [{ can_manage_value_dictionary: true }, '/admin/value-dictionary', 'admin'],
       [{ can_view_logs: true }, '/admin/logs', 'admin'],
+      [{ can_view_logs: true }, '/admin/integrations', 'admin'],
     ]
     for (const [partial, href, area] of cases) {
       const user = access(partial)

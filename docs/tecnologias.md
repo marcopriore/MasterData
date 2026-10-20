@@ -27,7 +27,7 @@ MasterData/
 ├── CONTEXT.md                 # resumo curto; aponta para docs/
 ├── docs/                      # este ecossistema
 ├── supabase/
-│   ├── migrations/            # 001–018, schema + RPCs + RLS
+│   ├── migrations/            # 001–022, schema + RPCs + RLS
 │   ├── config.toml
 │   ├── seed.sql / seed_demo.sql
 │   └── create-demo-users.js   # tenant Empresa Demo via Admin API
@@ -55,6 +55,7 @@ Variáveis em `web/.env.local`:
 - `SUPABASE_SERVICE_ROLE_KEY` (só no servidor: onboarding, admin de usuários, import, aviso por e-mail)
 - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (só no servidor). Sem a chave, o sino continua e o e-mail é ignorado.
 - `AXISDESK_API_KEY` (só no servidor). `AXISDESK_WEBHOOK_SECRET` valida o webhook. `AXISDESK_BASE_URL` é opcional; o padrão é `https://suporte.axisstrategy.com.br`.
+- `INTEGRATION_SECRET_KEY` (só no servidor): 32 bytes em base64. Cifra a chave, token, senha ou client secret do ERP de cada tenant. Produção precisa da mesma chave do ambiente onde o segredo foi salvo; se ela mudar, os segredos gravados precisam ser digitados de novo.
 
 Tenant de demonstração:
 
@@ -103,3 +104,7 @@ npm run test:e2e
 | 016 | dispensar par similar |
 | 017 | `detailed_description` na base de materiais |
 | 018 | grupos de perfil por usuário e permissões extras |
+| 019 | log das chamadas de integração (`integration_logs`) |
+| 020 | APIs de material: blocos do ERP no material, `erp_block` no dicionário, `api_clients`, origem da solicitação, `api_insert_material` |
+| 021 | configuração da saída para o ERP por tenant (`tenant_erp_settings`), substituída pela 022 |
+| 022 | várias integrações com o ERP por tenant (`tenant_erp_connections`); migra a 021 e remove a tabela antiga |

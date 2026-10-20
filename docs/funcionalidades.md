@@ -23,7 +23,9 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/admin/fields` | Dicionário de campos ERP (visão, tipo, máscara, obrigatoriedade). |
 | `/admin/value-dictionary` | Valores de lista, abreviação, similares, unificação e propagação. |
 | `/admin/logs` | Auditoria, com exportação. |
+| `/admin/integrations` | Monitor das chamadas das APIs de material da empresa. Quem tem `can_view_logs` vê. |
 | `/admin/tenants` | Só master: clientes, limite de descrição, onboarding e troca de tenant. |
+| `/admin/tenants/[id]` | Só master, botão **Configuração** na lista de tenants. Aba **Integrações com o ERP**: formulário no topo e grade das integrações (operação, tipo POST/PATCH/DELETE/GET, URL, tempo limite, autenticação), com Ativar/Desativar, Modificar e Excluir. Aba **Chaves de API**: gerar e revogar a chave de cada sistema externo. |
 
 Rotas fora do menu: `/products` (CRUD simples da tabela `products`) e `/teste` (página de diagnóstico). Não fazem parte do fluxo do PRO-MAT.
 
@@ -70,7 +72,7 @@ Template guarda atributos em JSON (`pdm_templates.attributes`): nome, tipo, obri
 
 A base é o cadastro mestre local, com código interno (`id_sistema`), código ERP (`id_erp`), NCM, grupo, unidade, status e mensagem de erro de integração (`erp_error_message`). O dicionário de campos inclui o conjunto MM03 do SAP S/4HANA como metadado. A permissão `can_standardize` libera a padronização na tela.
 
-A ação “integrar ERP” é simulada em `erpIntegrateMaterial`: o status vai de `pendente_erp` para `integrando`, espera cerca de 2 segundos e então cerca de 90% viram `integrado_erp` com um código `MAT-######`; o restante fica `erro_erp`. Não há cliente SAP.
+A ação “integrar ERP” é simulada em `erpIntegrateMaterial`: o status vai de `pendente_erp` para `integrando`, espera cerca de 2 segundos e então cerca de 90% viram `integrado_erp` com um código `MAT-######`; o restante fica `erro_erp`. Não há cliente SAP. Com a API real, solicitação interna e solicitação de origem externa disparam essa criação ao finalizar o workflow. Criação ou alteração vinda de sistema externo direto na base continua pendente até uma pessoa integrar.
 
 Duplicata de material (`getDuplicateMaterials`) compara descrição detalhada, ou descrição curta mais `pdm_code`. Não usa similaridade fuzzy. A busca por valores parecidos fica no dicionário de valores.
 
@@ -97,15 +99,34 @@ Tabela `notifications`, sino no topo e preferências por evento (criada, atendim
 | import/export de usuários, PDM, materiais e logs | Planilhas |
 | `POST /api/admin/switch-tenant` e `.../back` | Master entra e sai de um tenant |
 | `PATCH /api/admin/tenants/[id]` | Dados do tenant |
+| `GET /api/admin/tenants/[id]` | Nome e slug do tenant (master) |
+| `GET/POST /api/admin/tenants/[id]/erp-connections` | Listar e incluir integrações com o ERP. O segredo entra, mas nunca volta |
+| `PUT/PATCH/DELETE .../erp-connections/[connectionId]` | Modificar, ativar ou desativar, excluir |
+| `GET/POST /api/admin/tenants/[id]/api-clients` e `DELETE .../[clientId]` | Listar, gerar e revogar chaves de API do tenant |
 | `POST /api/notifications/request` | Sino e e-mail depois de uma ação recente na solicitação |
 | `GET/POST /api/support/tickets` | Listar e abrir chamados no AxisDesk |
 | `GET /api/support/tickets/[id]` e `POST .../acoes` | Detalhe e resposta do usuário |
 | `GET /api/support/categorias` | Categorias do formulário |
 | `POST /api/support/webhook` | AxisDesk avisa mudança de status ou comentário |
+| `GET /api/admin/integrations` | Lista as chamadas das APIs de material da empresa da sessão |
+### APIs de material (`/api/v1`)
+
+Chamadas por sistemas externos com o header `x-api-key`. A empresa sai da chave, não do corpo. Cada chamada grava uma linha no monitor.
+
+| Rota | Ação |
+|------|------|
+| `POST /api/v1/materials` | Cria o material direto na base, com `MDM-######` e **Pendente ERP** |
+| `GET /api/v1/materials` | Consulta com filtro: `q`, `status`, `erp_status`, `pdm_codigo`, `alterado_desde`, `pagina`, `limite` (até 100) |
+| `GET /api/v1/materials/[codigo]` | Consulta por `id_sistema` ou `id_erp` |
+| `PATCH /api/v1/materials/[codigo]` | Altera o que vier no corpo e devolve o material para **Pendente ERP** |
+| `POST /api/v1/requests` | Abre solicitação de origem externa no workflow ativo |
+| `GET /api/v1/requests/[id]` | Etapa da solicitação e, depois da última etapa, o material criado |
+
+O JSON de material usa chaves em português: `descricao`, `descricao_detalhada`, `status`, `pdm_codigo`, `unidade_medida`, `ncm`, `grupo_mercadoria`, `tipo_material`, `atributos`, e os blocos do ERP `eans`, `dimensoes`, `vendas`, `site`, `caracteristicas`, `campos_adicionais`. `id_sistema`, `id_erp` e `erp_status` são do PRO-MAT e não são aceitos na entrada. Validação em `web/lib/material-api/payload.ts`.
 
 ## Modelo de dados (principal)
 
-`tenants`, `roles`, `users`, `measurement_units`, `workflow_header`, `workflow_config`, `pdm_templates`, `material_requests`, `request_values`, `request_history`, `request_attachments`, `material_database`, `value_dictionary`, `value_dictionary_dismissed`, `field_dictionary`, `notifications`, `user_notification_prefs`, `system_logs`, `products`.
+`tenants`, `roles`, `users`, `measurement_units`, `workflow_header`, `workflow_config`, `pdm_templates`, `material_requests`, `request_values`, `request_history`, `request_attachments`, `material_database`, `value_dictionary`, `value_dictionary_dismissed`, `field_dictionary`, `notifications`, `user_notification_prefs`, `system_logs`, `products`, `integration_logs`, `api_clients`, `tenant_erp_connections`.
 
 ## Usuários da Empresa Demo
 

@@ -99,6 +99,17 @@ PNG, JPG, WEBP, GIF e PDF. O storage só deixa ler e gravar na pasta do tenant d
 - O webhook `POST /api/support/webhook` exige `x-axisdesk-secret` igual a `AXISDESK_WEBHOOK_SECRET`. Status ou comentário gera aviso no sino do solicitante, e o clique abre o chamado.
 - Título até 200 caracteres, descrição e mensagem até 2000, no máximo 5 anexos de 4 MB.
 
+## Integrações
+
+O selo **Pendente ERP** existe porque ainda não há API real. O botão **Integrar com ERP** simula a resposta. Quando a API existir, o mock sai e valem as portas abaixo. O monitor e a documentação registram essas chamadas de material, sem corpo da requisição. O AxisDesk não entra nessa tela.
+
+- **PRO-MAT para o ERP:** criação, alteração e eliminação. O ERP só devolve a resposta da chamada. Na criação, a resposta traz o código do material (`id_erp`).
+- **Solicitação, interna ou de origem externa:** ao concluir a última etapa, o material nasce na base e a criação no ERP dispara sozinha. A origem muda só quem abriu a solicitação. Se o ERP falhar, a solicitação permanece finalizada, o material fica pendente ou em erro, e a nova tentativa é o botão da base. Não nasce outro `MDM-######` nem outra criação no ERP para a mesma solicitação.
+- **Sistema externo na base:** criação e alteração gravam o material e deixam **Pendente ERP**. A consulta só lê. Uma pessoa integra, um a um ou em lote. Sem `id_erp`, a chamada é criação; com `id_erp`, é alteração. Eliminação não entra por essa porta.
+- **Chave de API:** uma por sistema externo e por tenant, gerada pelo Master em Tenants → Configuração → Chaves de API. A base guarda só o hash; o texto aparece uma vez. Chave revogada para na hora. Material em `integrando` não aceita alteração (409).
+- **Integrações com o ERP:** várias por tenant, só o Master edita, em Tenants → Configuração. Cada uma tem operação (criação, alteração ou eliminação de material), tipo (POST, PATCH, DELETE ou GET), URL, tempo limite e autenticação. Só uma fica ativa por operação; a nova nasce desativada se já houver outra ativa. A URL aceita `{id_erp}` e `{id_sistema}` e precisa ser `https` em produção. O segredo é cifrado no servidor com `INTEGRATION_SECRET_KEY` e nunca volta para o browser; em branco mantém o atual. Incluir, modificar, ativar, desativar e excluir gravam registro no log do sistema, sem o segredo. Integração ativa ainda não troca o mock pela chamada real.
+- **JSON do ERP:** o PRO-MAT monta o formato do ERP a partir do material. `eans`, `dimensions`, `sales` e `characteristics` são listas porque o mesmo nome pode repetir. Campo do cabeçalho sem coluna própria fica em `additional_fields`. Campo do dicionário vai para o bloco de `erp_block` com o nome de `erp_field`; sem bloco, vai para `characteristics`.
+
 ## Tema
 
 Claro e escuro são da aplicação, não do sistema operacional. Componentes de urgência e status precisam de variante explícita para os dois modos. O `CONTEXT.md` antigo guardava a paleta de badges; ao mexer em urgência, conferir os estilos inline que usam `useTheme()`.

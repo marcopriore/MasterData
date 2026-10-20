@@ -1,6 +1,13 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { requireMasterTenant } from '@/lib/master-access'
+
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const ctx = await requireMasterTenant((await params).id)
+  if ('error' in ctx) return ctx.error
+  return NextResponse.json({ tenant: ctx.tenant })
+}
 
 export async function PATCH(
   request: Request,

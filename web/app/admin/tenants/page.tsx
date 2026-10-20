@@ -17,6 +17,7 @@ import {
   X,
   Pencil,
   LogIn,
+  Settings,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -531,6 +532,15 @@ export default function TenantsPage() {
                         >
                           <Pencil className="size-3.5" />
                           Editar
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1"
+                          onClick={() => router.push(`/admin/tenants/${t.id}`)}
+                        >
+                          <Settings className="size-3.5" />
+                          Configuração
                         </Button>
                       </div>
                     </td>
