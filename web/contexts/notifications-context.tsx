@@ -47,7 +47,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     try {
       const data = await getNotifications(false)
       setUnreadCount(data.unread_count ?? 0)
-      setNotifications(data.notifications ?? [])
+      setNotifications((data.notifications ?? []).map((item) => ({ ...item, request_id: item.request_id ?? null })))
     } catch {
       // silent fail
     }

@@ -38,7 +38,7 @@ MasterData/
 │   ├── lib/supabase-api.ts    # acesso a dados
 │   ├── security/              # gate de segurança (testes) e exceções da auditoria
 │   ├── scripts/security-audit.mjs
-│   └── middleware.ts          # sessão Supabase em toda página e API
+│   └── proxy.ts               # sessão Supabase em toda página e API (antigo middleware.ts)
 └── tests/e2e/                 # Playwright
 ```
 
@@ -75,10 +75,10 @@ Regressão sem banco: união de grupos e extras, menu, quem pode gerir usuários
 ```powershell
 cd C:\Dev\MasterData\web
 npm test          # regressão + gate de segurança
-npm run check     # o mesmo + auditoria de dependências (o que o CI roda)
+npm run check     # o mesmo + auditoria de dependências + tipos
 ```
 
-`npm test` também roda o gate de segurança (`web/security`). O GitHub Actions roda testes e auditoria a cada push em `main` e em pull request.
+`npm test` também roda o gate de segurança (`web/security`). O GitHub Actions roda testes, auditoria, tipos e `next build` a cada push em `main` e em pull request; o build usa valores fictícios para o Supabase porque não conecta no banco.
 
 Os arquivos em `tests/e2e/suites` cobrem autenticação, solicitações, governança, PDM, base de dados, usuários, perfis e dicionário de valores. O helper ainda usa `TEST_API_URL` ou `http://localhost:8000`, resto da API FastAPI. Eles não exercitam o app Next.js atual até essa URL mudar.
 

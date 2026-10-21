@@ -59,7 +59,7 @@ describe('rotas de API', () => {
   })
 })
 
-describe('middleware', () => {
+describe('proxy (middleware)', () => {
   it('classifica cada caminho', () => {
     expect(classifyPath('/admin/users')).toBe('page')
     expect(classifyPath('/')).toBe('page')
@@ -74,7 +74,7 @@ describe('middleware', () => {
   })
 
   it('o matcher cobre /admin e /api e deixa só arquivos estáticos de fora', async () => {
-    const { config } = await import('@/middleware')
+    const { config } = await import('@/proxy')
     const matcher = new RegExp(`^${config.matcher[0]}$`)
     for (const covered of ['/', '/admin/users', '/admin/tenants/2', '/api/admin/users', '/api/v1/materials', '/database']) {
       expect(matcher.test(covered), covered).toBe(true)

@@ -588,7 +588,7 @@ export default function DatabaseDetailPage() {
         toast.success(`Material integrado com sucesso! Código ERP: ${res.erp_code ?? ''}`)
       } else {
         setMaterial((prev) => prev && res.material ? { ...prev, ...res.material } as MaterialDetail : prev)
-        toast.error(res.error ?? 'Não foi possível integrar o material.')
+        toast.error(('error' in res ? res.error : null) ?? 'Não foi possível integrar o material.')
       }
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Falha na integração')

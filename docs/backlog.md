@@ -15,7 +15,6 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 - **Detalhe da governança.** Em `/governance/request/[id]`, iniciar, aprovar e rejeitar não chamam `assign_request`, `advance_workflow` nem `reject_request`. O kanban em `/governance` é quem persiste. A página de detalhe precisa usar as mesmas RPCs ou deixar de oferecer essas ações.
 - **`can_attend` no tenant novo.** O script da Empresa Demo e o onboarding não gravam essa flag. Quem não passou pela migration 008 não vê “Iniciar atendimento” como os papéis antigos.
 - **Conector de notificação em tempo real.** A migration 006 habilita Realtime; o sino ainda consulta a API. Vale confirmar se o polling continua sendo o comportamento desejado.
-- **Build de produção bloqueado por tipos.** `next build` compila, mas para em 44 erros de TypeScript antigos: componentes de `components/ui` sem uso que importam pacotes não instalados (`cmdk`, `vaul`, `react-hook-form`, radix extras), `chart.tsx`, `notifications-context.tsx` e `tailwind.config.ts`. Precisa resolver antes de publicar; o CI ainda não roda o build por isso.
 - **Segurança, próximos degraus.** Content-Security-Policy (precisa de nonce por causa dos scripts do Next), limite de tentativas de login, limite por IP nas chamadas sem chave, e trocar `xlsx` pela versão do CDN da SheetJS ou por `exceljs` (exceção da auditoria vence em 31/01/2027).
 
 ## Resíduos

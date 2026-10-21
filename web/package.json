@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "security": "vitest run security && node scripts/security-audit.mjs",
-    "check": "vitest run && node scripts/security-audit.mjs",
+    "check": "vitest run && node scripts/security-audit.mjs && tsc --noEmit",
     "create-demo-users": "node ../supabase/create-demo-users.js"
   },
   "dependencies": {

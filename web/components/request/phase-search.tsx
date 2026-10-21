@@ -136,7 +136,7 @@ export function PhaseSearch({
         if (!found) return
         return getPdmById(found.id)
       })
-      .then((pdm) => setPdmTemplate(pdm ?? null))
+      .then((pdm) => setPdmTemplate(pdm ? { name: pdm.name, attributes: pdm.attributes as PdmAttribute[] } : null))
       .catch(() => setPdmTemplate(null))
   }, [detailMaterial?.pdm_code])
 

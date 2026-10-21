@@ -11,7 +11,7 @@
 ## Autenticação
 
 - Supabase Auth. O perfil em `public.users` usa o mesmo UUID de `auth.users`.
-- `web/middleware.ts` passa por toda página e rota de API, menos arquivos estáticos. A regra de cada caminho está em `web/lib/route-guard.ts`: página sem sessão vai para `/login`; `/api/*` sem sessão recebe 401; `/api/v1` (chave) e `/api/support/webhook` (segredo) se autenticam na própria rota. A permissão de cada tela continua sendo checada na tela e na rota.
+- `web/proxy.ts` (o antigo middleware; o Next 16 mudou o nome) passa por toda página e rota de API, menos arquivos estáticos. A regra de cada caminho está em `web/lib/route-guard.ts`: página sem sessão vai para `/login`; `/api/*` sem sessão recebe 401; `/api/v1` (chave) e `/api/support/webhook` (segredo) se autenticam na própria rota. A permissão de cada tela continua sendo checada na tela e na rota.
 - Depois do login, o retorno (`from`) só aceita página interna. Endereço de outro site volta para `/`.
 - Senha: cada usuário altera a própria (`user.id` tem de bater com o id da rota). Não existe reset administrativo da senha de outra pessoa.
 

@@ -1,5 +1,5 @@
 /**
- * Quem protege cada caminho. O middleware usa isto, e o gate de segurança testa.
+ * Quem protege cada caminho. O proxy (web/proxy.ts) usa isto, e o gate de segurança testa.
  * - page: exige sessão; sem ela, vai para /login
  * - login: público; com sessão, volta para o app
  * - api-session: exige sessão; sem ela, 401 em JSON

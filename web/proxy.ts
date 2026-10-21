@@ -8,7 +8,7 @@ import { classifyPath, safeRedirectTarget } from '@/lib/route-guard'
  * - Página sem sessão vai para /login; API sem sessão recebe 401
  * - /api/v1 e o webhook do suporte se autenticam na própria rota (chave ou segredo)
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const kind = classifyPath(pathname)
   if (kind === 'api-key' || kind === 'api-webhook') return NextResponse.next()

@@ -30,3 +30,13 @@ jobs:
 
       - name: Auditoria de dependências
         run: node scripts/security-audit.mjs
+
+      - name: Tipos
+        run: npx tsc --noEmit
+
+      - name: Build de produção
+        run: npx next build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder
