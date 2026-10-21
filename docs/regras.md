@@ -40,9 +40,11 @@ Papéis semeados no onboarding e na Empresa Demo: ADMIN e MASTER (quase tudo), S
 
 Cada um desses nomes é um grupo de perfil. O usuário pode ter vários grupos. A permissão de tela é a união dos grupos mais extras individuais (`user_permission_grants`). Extra que o grupo já cobre não é gravado de novo e aparece travado na tela. `users.role_id` continua sendo um único papel de etapa, e precisa ser um dos grupos marcados: é ele que define os campos da governança para quem não está no grupo ADMIN. Quem está no grupo ADMIN, ou é master, vê os campos da fase atual da solicitação.
 
+O master atua em qualquer etapa como o responsável dela, sem trocar de perfil: vê todas as colunas, tem **Iniciar atendimento** em qualquer solicitação livre e, depois de assumir, preenche os campos da etapa atual (o título mostra a área da etapa) e tem Salvar, Salvar e Aprovar e Rejeitar. O histórico registra o master como quem agiu. Solicitação já assumida por outra pessoa continua com ela.
+
 Grupos de sistema (ADMIN, SOLICITANTE, CADASTRO, COMPRAS, MRP, FISCAL, CONTABILIDADE, MASTER) não são apagados e o nome não muda. Grupos criados pelo admin podem.
 
-`can_attend` não está no JSON do seed nem do script da Empresa Demo. A migration 008 liga a flag em ADMIN, CADASTRO, COMPRAS, MRP, FISCAL e CONTABILIDADE, e desliga em MASTER e SOLICITANTE — só nos papéis que já existiam quando ela rodou. Tenant criado depois, pelo script, nasce sem essa chave até alguém reaplicar o update.
+`can_attend` não está no JSON do seed nem do script da Empresa Demo. A migration 008 liga a flag em ADMIN, CADASTRO, COMPRAS, MRP, FISCAL e CONTABILIDADE, e desliga em MASTER e SOLICITANTE — só nos papéis que já existiam quando ela rodou. Para o usuário master a flag não importa: `can()` é sempre verdadeiro para ele. Tenant criado depois, pelo script, nasce sem essa chave até alguém reaplicar o update.
 
 Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/permissions.ts` e no filtro do `app-sidebar.tsx`. O menu usa só `can()`. Master continua vendo o menu inteiro.
 

@@ -290,8 +290,8 @@ export default function GovernancePage() {
     }
   }, [ready, selectedWorkflowId, fetchRequests, pathname])
 
-  const showActionButtons =
-    can('can_attend') && !user?.is_master
+  /** Master atua em qualquer etapa como o responsável dela; can() já é true para Master. */
+  const showActionButtons = can('can_attend')
 
   const materialRequests = useMemo(
     () => requests.map(mapToMaterialRequest),
@@ -921,7 +921,7 @@ export default function GovernancePage() {
               {isAssignedToMe && myFields.length > 0 && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
-                    CAMPOS DE RESPONSABILIDADE: {user?.role_name ?? '—'}
+                    CAMPOS DE RESPONSABILIDADE: {myFields[0]?.responsible_role ?? user?.role_name ?? '—'}
                   </p>
                   <div className="space-y-3">
                     {myFields
