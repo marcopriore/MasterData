@@ -423,7 +423,11 @@ export default function DatabasePage() {
       setShowErpModal(false)
       setSelectedIds([])
       fetchMaterials()
-      toast.success(`${res.integrated?.length ?? res.total ?? selectedIds.length} materiais integrados com sucesso!`)
+      if (res.integrated.length) toast.success(`${res.integrated.length} materiais integrados com sucesso!`)
+      if (res.failed.length) {
+        toast.error(`${res.failed.length} com erro do ERP. Veja a mensagem no detalhe de cada material.`)
+      }
+      if (res.skipped.length) toast.message(`${res.skipped.length} não foram enviados (status não permite).`)
     } catch (err) {
       setErpModalError((err as Error)?.message ?? 'Falha ao integrar materiais')
     } finally {

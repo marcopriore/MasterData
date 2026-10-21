@@ -2,8 +2,30 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { recordIntegrationLog } from '@/lib/integration-logs'
 import { hashApiKey, looksLikeApiKey } from './api-key'
+import { MAX_BODY_BYTES, RATE_LIMIT_PER_KEY, RATE_LIMIT_UNAUTHENTICATED } from './limits'
 
-const MAX_BODY_BYTES = 1024 * 1024
+async function callsInLastMinute(clientId: number | null): Promise<number> {
+  const since = new Date(Date.now() - 60_000).toISOString()
+  let query = supabaseAdmin
+    .from('integration_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('direction', 'inbound')
+    .gte('created_at', since)
+  query = clientId == null ? query.is('api_client_id', null) : query.eq('api_client_id', clientId)
+  const { count, error } = await query
+  if (error) {
+    console.error('rate limit:', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+function tooMany(limit: number) {
+  return NextResponse.json(
+    { erro: `limite de ${limit} chamadas por minuto atingido; tente de novo em instantes` },
+    { status: 429, headers: { 'Retry-After': '60' } },
+  )
+}
 
 export type ApiClient = { id: number; tenantId: number; name: string }
 
@@ -70,9 +92,15 @@ export async function handleApiCall(
   const path = new URL(request.url).pathname
   const client = await authenticate(request)
 
+  if (!client && (await callsInLastMinute(null)) >= RATE_LIMIT_UNAUTHENTICATED) {
+    return tooMany(RATE_LIMIT_UNAUTHENTICATED)
+  }
+
   let outcome: ApiOutcome
   if (!client) {
     outcome = apiError(401, 'x-api-key ausente ou inválida')
+  } else if ((await callsInLastMinute(client.id)) >= RATE_LIMIT_PER_KEY) {
+    outcome = apiError(429, `limite de ${RATE_LIMIT_PER_KEY} chamadas por minuto atingido; tente de novo em instantes`)
   } else {
     try {
       outcome = await run(client)
@@ -97,7 +125,10 @@ export async function handleApiCall(
     detail: outcome.detail ?? null,
   })
 
-  return NextResponse.json(outcome.body, { status: outcome.status })
+  return NextResponse.json(outcome.body, {
+    status: outcome.status,
+    headers: outcome.status === 429 ? { 'Retry-After': '60' } : undefined,
+  })
 }
 
 /** Busca o material da empresa pelo código interno e, se não achar, pelo código ERP. */

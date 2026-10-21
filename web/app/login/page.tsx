@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useUser } from '@/contexts/user-context'
 import { Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { safeRedirectTarget } from '@/lib/route-guard'
 
 function translateAuthError(message: string): string {
   if (message.includes('Invalid login credentials')) return 'Credenciais inválidas.'
@@ -41,8 +42,7 @@ export default function LoginPage() {
       return
     }
 
-    const from = searchParams.get('from') ?? '/'
-    router.replace(from)
+    router.replace(safeRedirectTarget(searchParams.get('from')))
   }
 
   return (

@@ -1,13 +1,18 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { classifyPath, safeRedirectTarget } from '@/lib/route-guard'
 
 /**
- * Middleware de autenticação com Supabase.
- * - Faz refresh automático da sessão
- * - Redireciona para /login se não autenticado
- * - Redireciona para / se autenticado tentando acessar /login
+ * Porta de entrada de toda página e rota de API (regras em lib/route-guard.ts).
+ * - Faz refresh da sessão Supabase
+ * - Página sem sessão vai para /login; API sem sessão recebe 401
+ * - /api/v1 e o webhook do suporte se autenticam na própria rota (chave ou segredo)
  */
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+  const kind = classifyPath(pathname)
+  if (kind === 'api-key' || kind === 'api-webhook') return NextResponse.next()
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -32,19 +37,22 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Redirecionar para login se não autenticado
-  if (!user && !request.nextUrl.pathname.startsWith('/login')) {
+  if (!user && kind === 'api-session') {
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+  }
+
+  if (!user && kind === 'page') {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    url.searchParams.set('from', request.nextUrl.pathname)
+    url.search = ''
+    url.searchParams.set('from', pathname)
     return NextResponse.redirect(url)
   }
 
-  // Redirecionar para home se já autenticado e tentando acessar login
-  if (user && request.nextUrl.pathname.startsWith('/login')) {
+  if (user && kind === 'login') {
     const url = request.nextUrl.clone()
-    url.pathname = request.nextUrl.searchParams.get('from') || '/'
-    url.searchParams.delete('from')
+    url.pathname = safeRedirectTarget(request.nextUrl.searchParams.get('from'))
+    url.search = ''
     return NextResponse.redirect(url)
   }
 
@@ -61,6 +69,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|api/|admin/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }

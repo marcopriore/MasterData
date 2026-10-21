@@ -6,7 +6,7 @@ PRO-MAT é o sistema de cadastro padronizado de materiais (PDM), governança por
 
 | Camada | Tecnologia |
 |--------|------------|
-| Frontend | Next.js 16 (App Router) + React 19 + TypeScript |
+| Frontend | Next.js 16.4 (App Router) + React 19 + TypeScript |
 | UI | Tailwind CSS 4, shadcn/ui (Radix), Lucide, Sonner, Recharts, dnd-kit |
 | Tema | `next-themes` — modo claro/escuro próprio da aplicação |
 | Dados e auth | Supabase (PostgreSQL, Auth, Storage, Realtime, RLS) |
@@ -27,7 +27,7 @@ MasterData/
 ├── CONTEXT.md                 # resumo curto; aponta para docs/
 ├── docs/                      # este ecossistema
 ├── supabase/
-│   ├── migrations/            # 001–022, schema + RPCs + RLS
+│   ├── migrations/            # 001–024, schema + RPCs + RLS
 │   ├── config.toml
 │   ├── seed.sql / seed_demo.sql
 │   └── create-demo-users.js   # tenant Empresa Demo via Admin API
@@ -36,7 +36,9 @@ MasterData/
 │   ├── components/
 │   ├── contexts/              # usuário e notificações
 │   ├── lib/supabase-api.ts    # acesso a dados
-│   └── middleware.ts          # sessão Supabase
+│   ├── security/              # gate de segurança (testes) e exceções da auditoria
+│   ├── scripts/security-audit.mjs
+│   └── middleware.ts          # sessão Supabase em toda página e API
 └── tests/e2e/                 # Playwright
 ```
 
@@ -72,8 +74,11 @@ Regressão sem banco: união de grupos e extras, menu, quem pode gerir usuários
 
 ```powershell
 cd C:\Dev\MasterData\web
-npm test
+npm test          # regressão + gate de segurança
+npm run check     # o mesmo + auditoria de dependências (o que o CI roda)
 ```
+
+`npm test` também roda o gate de segurança (`web/security`). O GitHub Actions roda testes e auditoria a cada push em `main` e em pull request.
 
 Os arquivos em `tests/e2e/suites` cobrem autenticação, solicitações, governança, PDM, base de dados, usuários, perfis e dicionário de valores. O helper ainda usa `TEST_API_URL` ou `http://localhost:8000`, resto da API FastAPI. Eles não exercitam o app Next.js atual até essa URL mudar.
 
@@ -108,3 +113,5 @@ npm run test:e2e
 | 020 | APIs de material: blocos do ERP no material, `erp_block` no dicionário, `api_clients`, origem da solicitação, `api_insert_material` |
 | 021 | configuração da saída para o ERP por tenant (`tenant_erp_settings`), substituída pela 022 |
 | 022 | várias integrações com o ERP por tenant (`tenant_erp_connections`); migra a 021 e remove a tabela antiga |
+| 023 | campo do código do material na resposta do ERP (`response_code_field`) |
+| 024 | índices para o limite de chamadas das APIs de material |

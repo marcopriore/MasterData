@@ -11,7 +11,8 @@
 ## Autenticação
 
 - Supabase Auth. O perfil em `public.users` usa o mesmo UUID de `auth.users`.
-- `web/middleware.ts` exige sessão fora de `/login`. O matcher não cobre `/api` nem caminhos `/admin` — as telas `/admin/*` dependem do layout e das checagens de permissão no cliente e nas rotas de API.
+- `web/middleware.ts` passa por toda página e rota de API, menos arquivos estáticos. A regra de cada caminho está em `web/lib/route-guard.ts`: página sem sessão vai para `/login`; `/api/*` sem sessão recebe 401; `/api/v1` (chave) e `/api/support/webhook` (segredo) se autenticam na própria rota. A permissão de cada tela continua sendo checada na tela e na rota.
+- Depois do login, o retorno (`from`) só aceita página interna. Endereço de outro site volta para `/`.
 - Senha: cada usuário altera a própria (`user.id` tem de bater com o id da rota). Não existe reset administrativo da senha de outra pessoa.
 
 ## Permissões
@@ -101,14 +102,30 @@ PNG, JPG, WEBP, GIF e PDF. O storage só deixa ler e gravar na pasta do tenant d
 
 ## Integrações
 
-O selo **Pendente ERP** existe porque ainda não há API real. O botão **Integrar com ERP** simula a resposta. Quando a API existir, o mock sai e valem as portas abaixo. O monitor e a documentação registram essas chamadas de material, sem corpo da requisição. O AxisDesk não entra nessa tela.
+Com integração ativa para a operação, o PRO-MAT chama o ERP de verdade. Sem integração ativa, o botão **Integrar com ERP** continua na simulação (código `MAT-######` falso) e a última etapa não dispara nada. O monitor registra as chamadas de material, sem corpo da requisição. O AxisDesk não entra nessa tela.
 
 - **PRO-MAT para o ERP:** criação, alteração e eliminação. O ERP só devolve a resposta da chamada. Na criação, a resposta traz o código do material (`id_erp`).
 - **Solicitação, interna ou de origem externa:** ao concluir a última etapa, o material nasce na base e a criação no ERP dispara sozinha. A origem muda só quem abriu a solicitação. Se o ERP falhar, a solicitação permanece finalizada, o material fica pendente ou em erro, e a nova tentativa é o botão da base. Não nasce outro `MDM-######` nem outra criação no ERP para a mesma solicitação.
 - **Sistema externo na base:** criação e alteração gravam o material e deixam **Pendente ERP**. A consulta só lê. Uma pessoa integra, um a um ou em lote. Sem `id_erp`, a chamada é criação; com `id_erp`, é alteração. Eliminação não entra por essa porta.
 - **Chave de API:** uma por sistema externo e por tenant, gerada pelo Master em Tenants → Configuração → Chaves de API. A base guarda só o hash; o texto aparece uma vez. Chave revogada para na hora. Material em `integrando` não aceita alteração (409).
-- **Integrações com o ERP:** várias por tenant, só o Master edita, em Tenants → Configuração. Cada uma tem operação (criação, alteração ou eliminação de material), tipo (POST, PATCH, DELETE ou GET), URL, tempo limite e autenticação. Só uma fica ativa por operação; a nova nasce desativada se já houver outra ativa. A URL aceita `{id_erp}` e `{id_sistema}` e precisa ser `https` em produção. O segredo é cifrado no servidor com `INTEGRATION_SECRET_KEY` e nunca volta para o browser; em branco mantém o atual. Incluir, modificar, ativar, desativar e excluir gravam registro no log do sistema, sem o segredo. Integração ativa ainda não troca o mock pela chamada real.
-- **JSON do ERP:** o PRO-MAT monta o formato do ERP a partir do material. `eans`, `dimensions`, `sales` e `characteristics` são listas porque o mesmo nome pode repetir. Campo do cabeçalho sem coluna própria fica em `additional_fields`. Campo do dicionário vai para o bloco de `erp_block` com o nome de `erp_field`; sem bloco, vai para `characteristics`.
+- **Integrações com o ERP:** várias por tenant, só o Master edita, em Tenants → Configuração. Cada uma tem operação (criação, alteração ou eliminação de material), tipo (POST, PATCH, DELETE ou GET), URL, tempo limite e autenticação. Só uma fica ativa por operação; a nova nasce desativada se já houver outra ativa. A URL aceita `{id_erp}` e `{id_sistema}` e precisa ser `https` em produção. O segredo é cifrado no servidor com `INTEGRATION_SECRET_KEY` e nunca volta para o browser; em branco mantém o atual. Incluir, modificar, ativar, desativar e excluir gravam registro no log do sistema, sem o segredo.
+- **Chamada ao ERP:** o material vai para `integrando` antes da chamada; outra chamada ao mesmo material é recusada até voltar. Na criação, o código sai do campo da resposta configurado na integração (padrão `productId`); sem código, conta como erro. Sucesso deixa `integrado_erp` com `id_erp`; erro deixa `erro_erp` com a mensagem do ERP, e o botão tenta de novo. Alteração usa a integração de alteração e mantém o `id_erp`. Eliminação exige `id_erp` e integração de eliminação ativa, sem simulação; com sucesso, o material fica **Obsoleto** e a linha permanece. Integrar e eliminar pedem `can_standardize`; o disparo da última etapa pede `can_approve`. OAuth2 pede o token na URL configurada e reaproveita até expirar.
+- **Documentação:** a tela `/admin/integration-docs` e o OpenAPI saem de `web/lib/integration-docs/catalog.ts`. Os exemplos de entrada passam pela validação das rotas e o JSON do ERP de exemplo é montado por `buildErpPayload`, ambos checados em teste. Mudou campo, rota ou erro: atualizar o catálogo no mesmo trabalho. O OpenAPI é gerado na tela, sem rota pública.
+- **JSON do ERP:** o PRO-MAT monta o formato do ERP a partir do material (`web/lib/erp/payload.ts`). `contentID` é o `id_sistema` e `productId` é o `id_erp`. Do material saem `type`, `unitMeasure`, `ncmCode`, `internalGroup` (grupo de mercadoria) e `descriptions`. `eans`, `dimensions`, `sales` e `characteristics` são listas porque o mesmo nome pode repetir. Campo do cabeçalho sem coluna própria fica em `additional_fields`. Campo do dicionário vai para o bloco de `erp_block` com o nome de `erp_field`; sem bloco, vai para `characteristics`.
+
+## Segurança contínua
+
+O gate não promete segurança total. Ele impede que regras já conquistadas se percam sem ninguém ver. Roda com `npm test`, com `npm run check` e no GitHub Actions a cada push e pull request (`.github/workflows/ci.yml`).
+
+- **Rotas:** toda rota em `app/api` precisa da guarda do seu tipo (sessão, `handleApiCall` para `/api/v1`, `verifyWebhookSecret` para webhook). Rota nova sem guarda quebra o teste.
+- **Browser:** arquivo `'use client'` não importa módulo com chave de serviço ou segredo e só lê variáveis `NEXT_PUBLIC_`. `SUPABASE_SERVICE_ROLE_KEY` só aparece em `lib/supabase/admin.ts`.
+- **Banco:** toda tabela criada em migration tem RLS ligado. `api_clients` e `tenant_erp_connections` não abrem para `anon` nem `authenticated`.
+- **Repositório:** nenhum `.env` versionado e nenhuma chave real (PRO-MAT, JWT ou secret do Supabase, Resend) em arquivo versionado.
+- **Dependências:** `scripts/security-audit.mjs` falha com vulnerabilidade high ou critical em dependência de produção fora de `security/audit-allowlist.json`. Cada exceção tem motivo e data de revisão; vencida, volta a falhar.
+- **APIs de material:** até 120 chamadas por minuto por chave (429 com `Retry-After`). Sem chave válida, teto geral de 60 por minuto; acima disso nem grava no monitor.
+- **Headers:** `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` em toda resposta; HSTS em produção. Sem `X-Powered-By`.
+
+Exceção a qualquer regra entra no próprio teste (`web/security/gate.test.ts`) ou na allowlist, sempre com motivo.
 
 ## Tema
 

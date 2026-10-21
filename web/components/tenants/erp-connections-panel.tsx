@@ -33,6 +33,7 @@ type FormState = {
   auth_username: string
   auth_token_url: string
   auth_scope: string
+  response_code_field: string
   secret: string
 }
 
@@ -47,6 +48,7 @@ const EMPTY: FormState = {
   auth_username: '',
   auth_token_url: '',
   auth_scope: '',
+  response_code_field: 'productId',
   secret: '',
 }
 
@@ -64,6 +66,7 @@ function fromView(view: ErpConnectionView): FormState {
     auth_username: view.auth_username,
     auth_token_url: view.auth_token_url,
     auth_scope: view.auth_scope,
+    response_code_field: view.response_code_field || 'productId',
     secret: '',
   }
 }
@@ -139,6 +142,7 @@ export function ErpConnectionsPanel({ tenantId }: { tenantId: number }) {
           auth_username: form.auth_username,
           auth_token_url: form.auth_token_url,
           auth_scope: form.auth_scope,
+          response_code_field: form.response_code_field,
           secret: form.secret,
         }),
       })
@@ -274,6 +278,22 @@ export function ErpConnectionsPanel({ tenantId }: { tenantId: number }) {
                 Use {'{id_erp}'} ou {'{id_sistema}'} quando o ERP pedir o código do material no caminho.
               </p>
             </div>
+
+            {form.operation === 'criar_material' && (
+              <div>
+                <Label htmlFor="erp-code-field">Campo do código do material na resposta</Label>
+                <Input
+                  id="erp-code-field"
+                  value={form.response_code_field}
+                  onChange={(e) => set('response_code_field', e.target.value)}
+                  placeholder="productId"
+                  className="mt-1 font-mono text-sm sm:w-80"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Onde o ERP devolve o código criado. Use pontos para níveis: data.productId ou items.0.id.
+                </p>
+              </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>

@@ -24,6 +24,7 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/admin/value-dictionary` | Valores de lista, abreviação, similares, unificação e propagação. |
 | `/admin/logs` | Auditoria, com exportação. |
 | `/admin/integrations` | Monitor das chamadas das APIs de material da empresa. Quem tem `can_view_logs` vê. |
+| `/admin/integration-docs` | Documentação das integrações. Aba **APIs de entrada**: endereço, chave, rotas, campos, exemplos com curl, erros e download do OpenAPI. Aba **Saída para o ERP**: como o PRO-MAT chama, autenticação, JSON enviado por operação, resposta esperada e leitura da mensagem de erro. Quem tem `can_view_logs` vê. |
 | `/admin/tenants` | Só master: clientes, limite de descrição, onboarding e troca de tenant. |
 | `/admin/tenants/[id]` | Só master, botão **Configuração** na lista de tenants. Aba **Integrações com o ERP**: formulário no topo e grade das integrações (operação, tipo POST/PATCH/DELETE/GET, URL, tempo limite, autenticação), com Ativar/Desativar, Modificar e Excluir. Aba **Chaves de API**: gerar e revogar a chave de cada sistema externo. |
 
@@ -72,7 +73,7 @@ Template guarda atributos em JSON (`pdm_templates.attributes`): nome, tipo, obri
 
 A base é o cadastro mestre local, com código interno (`id_sistema`), código ERP (`id_erp`), NCM, grupo, unidade, status e mensagem de erro de integração (`erp_error_message`). O dicionário de campos inclui o conjunto MM03 do SAP S/4HANA como metadado. A permissão `can_standardize` libera a padronização na tela.
 
-A ação “integrar ERP” é simulada em `erpIntegrateMaterial`: o status vai de `pendente_erp` para `integrando`, espera cerca de 2 segundos e então cerca de 90% viram `integrado_erp` com um código `MAT-######`; o restante fica `erro_erp`. Não há cliente SAP. Com a API real, solicitação interna e solicitação de origem externa disparam essa criação ao finalizar o workflow. Criação ou alteração vinda de sistema externo direto na base continua pendente até uma pessoa integrar.
+**Integrar com ERP**, no detalhe ou em lote, chama `POST /api/database/materials/erp`. Com integração ativa no tenant, o servidor monta o JSON do ERP e chama a URL da operação: criação sem `id_erp`, alteração com `id_erp`. Sem integração ativa, a tela segue a simulação antiga (`pendente_erp` → `integrando` → cerca de 90% `integrado_erp` com `MAT-######`, o resto `erro_erp`). No detalhe, **Eliminar no ERP** aparece para material com `id_erp` e o deixa Obsoleto quando o ERP confirma. Ao concluir a última etapa, a solicitação (interna ou de origem externa) chama `POST /api/requests/[id]/erp` e a criação no ERP dispara sozinha. Criação ou alteração vinda de sistema externo direto na base continua pendente até uma pessoa integrar.
 
 Duplicata de material (`getDuplicateMaterials`) compara descrição detalhada, ou descrição curta mais `pdm_code`. Não usa similaridade fuzzy. A busca por valores parecidos fica no dicionário de valores.
 
@@ -102,6 +103,8 @@ Tabela `notifications`, sino no topo e preferências por evento (criada, atendim
 | `GET /api/admin/tenants/[id]` | Nome e slug do tenant (master) |
 | `GET/POST /api/admin/tenants/[id]/erp-connections` | Listar e incluir integrações com o ERP. O segredo entra, mas nunca volta |
 | `PUT/PATCH/DELETE .../erp-connections/[connectionId]` | Modificar, ativar ou desativar, excluir |
+| `POST /api/database/materials/erp` | Integrar ou eliminar no ERP até 100 materiais (`can_standardize`) |
+| `POST /api/requests/[id]/erp` | Criação no ERP do material de uma solicitação finalizada (`can_approve`) |
 | `GET/POST /api/admin/tenants/[id]/api-clients` e `DELETE .../[clientId]` | Listar, gerar e revogar chaves de API do tenant |
 | `POST /api/notifications/request` | Sino e e-mail depois de uma ação recente na solicitação |
 | `GET/POST /api/support/tickets` | Listar e abrir chamados no AxisDesk |

@@ -3,7 +3,7 @@ import { ERP_OPERATION_LABEL, type ErpConnectionChanges, type ErpConnectionView 
 import { sealSecret, secretBoxReady } from '@/lib/secret-box'
 
 export const CONNECTION_COLUMNS =
-  'id, name, operation, http_method, endpoint_url, timeout_ms, auth_type, auth_header_name, auth_username, auth_token_url, auth_scope, is_active, secret_ciphertext, secret_updated_at, updated_at'
+  'id, name, operation, http_method, endpoint_url, timeout_ms, auth_type, auth_header_name, auth_username, auth_token_url, auth_scope, response_code_field, is_active, secret_ciphertext, secret_updated_at, updated_at'
 
 export function toConnectionView(row: Record<string, unknown>): ErpConnectionView {
   return {
@@ -18,6 +18,7 @@ export function toConnectionView(row: Record<string, unknown>): ErpConnectionVie
     auth_username: (row.auth_username as string | null) ?? '',
     auth_token_url: (row.auth_token_url as string | null) ?? '',
     auth_scope: (row.auth_scope as string | null) ?? '',
+    response_code_field: (row.response_code_field as string | null) ?? 'productId',
     is_active: row.is_active === true,
     has_secret: typeof row.secret_ciphertext === 'string' && row.secret_ciphertext.length > 0,
     secret_updated_at: (row.secret_updated_at as string | null) ?? null,

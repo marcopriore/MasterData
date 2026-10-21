@@ -52,6 +52,7 @@ export type ErpConnectionView = {
   auth_username: string
   auth_token_url: string
   auth_scope: string
+  response_code_field: string
   is_active: boolean
   has_secret: boolean
   secret_updated_at: string | null
@@ -69,6 +70,7 @@ export type ErpConnectionInput = {
   auth_username?: unknown
   auth_token_url?: unknown
   auth_scope?: unknown
+  response_code_field?: unknown
   /** Vazio mantém o segredo atual. */
   secret?: unknown
 }
@@ -84,6 +86,7 @@ export type ErpConnectionChanges = {
   auth_username: string | null
   auth_token_url: string | null
   auth_scope: string | null
+  response_code_field: string
   secret: { action: 'keep' } | { action: 'clear' } | { action: 'set'; value: string }
 }
 
@@ -159,6 +162,11 @@ export function parseErpConnection(
   if (username.length > 200) errors.push('usuário / client ID passa de 200 caracteres')
   if (scope.length > 500) errors.push('scope passa de 500 caracteres')
 
+  const responseCodeField = str(body.response_code_field) || 'productId'
+  if (!/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/.test(responseCodeField) || responseCodeField.length > 200) {
+    errors.push('campo do código na resposta inválido (ex.: productId ou data.productId)')
+  }
+
   const newSecret = typeof body.secret === 'string' ? body.secret.trim() : ''
   if (newSecret.length > 4000) errors.push('segredo passa de 4000 caracteres')
   const secret: ErpConnectionChanges['secret'] = type === 'none'
@@ -182,6 +190,7 @@ export function parseErpConnection(
       auth_username: type === 'basic' || type === 'oauth2_client_credentials' ? username : null,
       auth_token_url: type === 'oauth2_client_credentials' ? tokenUrl : null,
       auth_scope: type === 'oauth2_client_credentials' ? scope || null : null,
+      response_code_field: responseCodeField,
       secret,
     },
   }

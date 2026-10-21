@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight,
   Home, FileText, ShieldCheck, Database, LayoutGrid, Headphones,
   Settings, GitBranch, Sun, Moon,
-  UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2, Plug,
+  UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2, Plug, FileCode2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,7 @@ const CONFIG_ADMIN = [
   { href: '/admin/value-dictionary', label: 'Dicionário de Valores', icon: BookMarked },
   { href: '/admin/logs',   label: 'Log do Sistema',         icon: ScrollText },
   { href: '/admin/integrations', label: 'Monitor de integrações', icon: Plug },
+  { href: '/admin/integration-docs', label: 'Documentação de integrações', icon: FileCode2 },
 ] as const
 
 function NavLink({

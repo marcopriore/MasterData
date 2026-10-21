@@ -549,6 +549,15 @@ function queueRequestNotice(requestId: number) {
   }).catch(() => {})
 }
 
+const FINAL_REQUEST_STATUSES = ['finalizado', 'completed', 'concluído', 'concluido']
+
+/** Última etapa concluída: o servidor cria o material no ERP se houver integração de criação ativa. */
+function queueRequestErp(requestId: number, status: unknown) {
+  if (typeof window === 'undefined') return
+  if (!FINAL_REQUEST_STATUSES.includes(String(status ?? '').toLowerCase())) return
+  void fetch(`/api/requests/${requestId}/erp`, { method: 'POST' }).catch(() => {})
+}
+
 function normalizeAttrs(data: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(data ?? {})) {
@@ -707,6 +716,7 @@ export async function advanceWorkflow(id: number): Promise<ApiRequest> {
     event_data: { request_id: id },
   })
   queueRequestNotice(id)
+  queueRequestErp(id, (data as { status?: unknown } | null)?.status)
   return data as ApiRequest
 }
 
@@ -1129,7 +1139,39 @@ export async function updateMaterialAttributes(id: number, body: Record<string, 
   return data
 }
 
-export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[]; total: number }> {
+type ErpActionResult = {
+  id: number
+  result: 'mock' | 'skipped' | 'integrated' | 'failed' | 'eliminated' | 'not_configured'
+  idErp?: string
+  message?: string
+  reason?: string
+}
+
+async function postErpAction(action: 'integrar' | 'eliminar', ids: number[]): Promise<ErpActionResult[]> {
+  const res = await fetch('/api/database/materials/erp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ids }),
+  })
+  const payload = await res.json().catch(() => ({})) as { results?: ErpActionResult[]; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Falha ao chamar o ERP')
+  return payload.results ?? []
+}
+
+/** Integração em lote. Com integração ativa, chama o ERP; sem ela, segue a simulação. */
+export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[]; failed: { id: number; message: string }[]; total: number }> {
+  const results = await postErpAction('integrar', materialIds)
+  const mockIds = results.filter((r) => r.result === 'mock').map((r) => r.id)
+  const simulated = mockIds.length ? await simulateErpIntegrateMaterials(mockIds) : { integrated: [], skipped: [] }
+  return {
+    integrated: [...results.filter((r) => r.result === 'integrated').map((r) => r.id), ...simulated.integrated],
+    skipped: [...results.filter((r) => r.result === 'skipped').map((r) => r.id), ...simulated.skipped],
+    failed: results.filter((r) => r.result === 'failed').map((r) => ({ id: r.id, message: r.message ?? '' })),
+    total: materialIds.length,
+  }
+}
+
+async function simulateErpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[] }> {
   const supabase = createClient()
   const integrated: number[] = []
   const skipped: number[] = []
@@ -1148,15 +1190,43 @@ export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ in
     if (data) integrated.push(mid)
     else skipped.push(mid)
   }
-  return { integrated, skipped, total: materialIds.length }
+  return { integrated, skipped }
 }
 
 export type ErpIntegrateResult =
   | { success: true; erp_code: string; material: Record<string, unknown> }
   | { success: false; error: string; material?: Record<string, unknown> }
 
-/** Integração ERP simulada: integrando → delay 2s → 90% sucesso com id_erp, 10% erro */
+/** Integra um material. Com integração ativa, chama o ERP; sem ela, segue a simulação. */
 export async function erpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
+  const [outcome] = await postErpAction('integrar', [materialId])
+  if (!outcome || outcome.result === 'mock') return simulateErpIntegrateMaterial(materialId)
+  const supabase = createClient()
+  const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
+  if (outcome.result === 'integrated') {
+    return { success: true, erp_code: outcome.idErp ?? '', material: material ?? {} }
+  }
+  return {
+    success: false,
+    error: outcome.message ?? outcome.reason ?? 'Não foi possível integrar o material.',
+    material: material ?? undefined,
+  }
+}
+
+/** Elimina no ERP. Exige integração de eliminação ativa; não há simulação. */
+export async function erpEliminateMaterial(materialId: number): Promise<ErpIntegrateResult> {
+  const [outcome] = await postErpAction('eliminar', [materialId])
+  const supabase = createClient()
+  const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
+  if (outcome?.result === 'eliminated') return { success: true, erp_code: material?.id_erp ?? '', material: material ?? {} }
+  const error = outcome?.result === 'not_configured'
+    ? 'Não há integração de eliminação ativa. Configure em Tenants → Configuração.'
+    : outcome?.message ?? outcome?.reason ?? 'Não foi possível eliminar no ERP.'
+  return { success: false, error, material: material ?? undefined }
+}
+
+/** Integração ERP simulada: integrando → delay 2s → 90% sucesso com id_erp, 10% erro */
+async function simulateErpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
   const supabase = createClient()
   const { data: row } = await supabase.from('material_database').select('*').eq('id', materialId).single()
   if (!row) return { success: false, error: 'Material não encontrado' }

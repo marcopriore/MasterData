@@ -1,0 +1,11 @@
+{
+  "_doc": "Vulnerabilidades high/critical aceitas de propósito. Cada uma com motivo e data de revisão; depois da data, o gate volta a falhar.",
+  "entries": [
+    {
+      "package": "xlsx",
+      "reason": "SheetJS saiu do npm; a versão corrigida só existe no CDN deles. Usado só no servidor para ler planilhas de importação enviadas por usuário logado com permissão de importação. Risco: prototype pollution e ReDoS com planilha montada por quem já tem acesso.",
+      "action": "Trocar por https://cdn.sheetjs.com (xlsx >= 0.20.2) ou por exceljs.",
+      "reviewBy": "2027-01-31"
+    }
+  ]
+}

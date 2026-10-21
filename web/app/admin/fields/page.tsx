@@ -287,9 +287,9 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
             <Input
               id="erp_field"
               value={erpField}
-              onChange={(e) => setErpField(e.target.value.toUpperCase())}
-              placeholder="Ex: MAKTX"
-              className="mt-1 font-mono text-sm uppercase"
+              onChange={(e) => setErpField(e.target.value.replace(/\s/g, ''))}
+              placeholder="Ex: MAKTX, Z_NECESSITA_LI ou formatTaxICMS"
+              className="mt-1 font-mono text-sm"
             />
           </div>
           <div>

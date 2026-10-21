@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: Context) {
     .eq('tenant_id', ctx.tenant.id)
     .order('operation', { ascending: true })
     .order('id', { ascending: true })
-  if (error) return missingTable(error.message, 'tenant_erp_connections', '022_tenant_erp_connections.sql')
+  if (error) return missingTable(error.message, 'tenant_erp_connections', '022 e 023')
   return NextResponse.json({
     tenant: ctx.tenant,
     connections: (data ?? []).map((row) => toConnectionView(row as Record<string, unknown>)),
@@ -43,7 +43,7 @@ export async function POST(request: Request, { params }: Context) {
     .eq('operation', parsed.value.operation)
     .eq('is_active', true)
     .limit(1)
-  if (readError) return missingTable(readError.message, 'tenant_erp_connections', '022_tenant_erp_connections.sql')
+  if (readError) return missingTable(readError.message, 'tenant_erp_connections', '022 e 023')
 
   const { data, error } = await supabaseAdmin
     .from('tenant_erp_connections')

@@ -10,6 +10,7 @@ import {
   updateMaterialAttributes,
   updateMaterialStandardize,
   erpIntegrateMaterial,
+  erpEliminateMaterial,
   getFieldDictionary,
   logAction,
 } from '@/lib/supabase-api'
@@ -264,6 +265,7 @@ export default function DatabaseDetailPage() {
   const isGeneratedDescOverLimit = generatedDesc.length > maxLength
   const [savingAttrs, setSavingAttrs] = useState(false)
   const [isIntegrating, setIsIntegrating] = useState(false)
+  const [isEliminating, setIsEliminating] = useState(false)
   const [fieldsByView, setFieldsByView] = useState<Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>>>({})
   const [fieldsByViewOptions, setFieldsByViewOptions] = useState<Record<string, string[]>>({})
   const measurementUnits = useMeasurementUnits()
@@ -595,6 +597,22 @@ export default function DatabaseDetailPage() {
     }
   }, [material])
 
+  const handleEliminate = useCallback(async () => {
+    if (!material?.id_erp) return
+    if (!window.confirm(`Eliminar o material ${material.id_erp} no ERP? Com a confirmação do ERP, ele fica Obsoleto aqui.`)) return
+    setIsEliminating(true)
+    try {
+      const res = await erpEliminateMaterial(material.id)
+      if (res.material) setMaterial(res.material as MaterialDetail)
+      if (res.success) toast.success('Material eliminado no ERP e marcado como Obsoleto.')
+      else toast.error('error' in res ? res.error : 'Não foi possível eliminar no ERP.')
+    } catch (err) {
+      toast.error((err as Error)?.message ?? 'Falha ao eliminar no ERP')
+    } finally {
+      setIsEliminating(false)
+    }
+  }, [material])
+
   if (loading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center gap-2 text-muted-foreground">
@@ -712,6 +730,23 @@ export default function DatabaseDetailPage() {
                   </div>
                 )}
               </div>
+            )}
+            {material.id_erp && material.status !== 'Obsoleto' && material.erp_status !== 'integrando' && (
+              <button
+                type="button"
+                disabled={isEliminating}
+                onClick={handleEliminate}
+                className="px-4 py-2 text-sm rounded-lg border border-red-300 text-red-700 font-medium hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+              >
+                {isEliminating ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin inline mr-2" />
+                    Eliminando...
+                  </>
+                ) : (
+                  'Eliminar no ERP'
+                )}
+              </button>
             )}
               {!editMode ? (
               <button

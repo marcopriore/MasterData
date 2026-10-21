@@ -22,7 +22,7 @@ export async function requireMasterTenant(rawId: string): Promise<MasterTenant |
 
 export function missingTable(message: string, table: string, migration: string) {
   return message.includes(table)
-    ? NextResponse.json({ error: `Aplique a migration ${migration} no Supabase.` }, { status: 503 })
+    ? NextResponse.json({ error: `Aplique a(s) migration(s) ${migration} no Supabase.` }, { status: 503 })
     : NextResponse.json({ error: message }, { status: 400 })
 }
 

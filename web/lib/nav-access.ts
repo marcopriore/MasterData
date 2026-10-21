@@ -35,6 +35,7 @@ export function canSeeAdminHref(href: string, access: NavAccess): boolean {
   if (href === '/admin/value-dictionary') return access.permissions.can_manage_value_dictionary
   if (href === '/admin/logs') return access.permissions.can_view_logs
   if (href === '/admin/integrations') return access.permissions.can_view_logs
+  if (href === '/admin/integration-docs') return access.permissions.can_view_logs
   return false
 }
 
