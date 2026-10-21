@@ -14,7 +14,8 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/governance/request/[id]` | Detalhe da solicitação. Os botões de atendimento só mudam estado local e não gravam no banco. |
 | `/database` | Base de materiais: filtros, colunas, import/export, status ERP. |
 | `/database/[id]` | Detalhe do material, descrições curta e detalhada. |
-| `/admin-pdm` | Templates PDM, atributos, import/export. |
+| `/admin-pdm` | Lista de todos os PDMs, 25 por página: busca por nome ou código, filtro de situação (ativo/inativo) e de uso (com/sem materiais), colunas Código, Nome, Materiais e Situação, ordenáveis. Filtros e página ficam na URL. Exportar, importação em massa e Novo PDM no cabeçalho. |
+| `/admin-pdm/[id]` e `/admin-pdm/novo` | Detalhe do PDM: dados, atributos, dicionário de valores, editar, salvar e clonar. Voltar retorna à lista com a mesma busca e página. |
 | `/support` | Chamados AxisDesk da empresa: abrir, acompanhar, responder, aprovar, reprovar ou cancelar. |
 | `/settings/profile` | Perfil, senha própria e preferências de notificação. |
 | `/settings/workflow` | Fluxos e etapas (ordem com drag-and-drop). |

@@ -237,6 +237,17 @@ export async function getPdms(): Promise<PDMTemplate[]> {
   }))
 }
 
+export async function getPdmMaterialsCount(internalCode: string): Promise<number> {
+  if (!internalCode) return 0
+  const supabase = createClient()
+  const { count, error } = await supabase
+    .from('material_database')
+    .select('id', { count: 'exact', head: true })
+    .eq('pdm_code', internalCode)
+  if (error) return 0
+  return count ?? 0
+}
+
 export async function getPdmById(id: number): Promise<PDMTemplate & { attributes: unknown[] }> {
   const supabase = createClient()
   const { data, error } = await supabase.from('pdm_templates').select('*').eq('id', id).single()
