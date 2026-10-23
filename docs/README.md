@@ -8,5 +8,6 @@
 | [funcionalidades.md](./funcionalidades.md) | Telas, APIs, modelo de dados e o que cada módulo faz |
 | [regras.md](./regras.md) | Permissões, workflow, descrição PDM, multi-tenant e auditoria |
 | [backlog.md](./backlog.md) | O que ainda não está fechado ou ficou como resíduo |
+| [deploy-producao.md](./deploy-producao.md) | Roteiro de produção: GitHub, Supabase, Vercel, registro.br, e-mail e conferência |
 
 Última revisão a partir do código: outubro de 2026.

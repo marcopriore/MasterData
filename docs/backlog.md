@@ -6,7 +6,8 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 - **Reset de senha por administrador.** A rota de senha só aceita o próprio usuário, e exige a senha atual quando ela é enviada. Um admin não redefine a senha de outra conta pela aplicação. Hoje isso fica no painel do Supabase ou num script com service role.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
-- **Domínio público do PRO-MAT.** O sistema ainda roda só em `localhost`. Sem um endereço publicado, o AxisDesk não consegue chamar o webhook. Quando houver domínio, a URL em Configurações → Integrações → PRO-MAT fica `https://<domínio>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.
+- **Domínio público do PRO-MAT.** Roteiro em [deploy-producao.md](./deploy-producao.md) (Vercel + subdomínio no registro.br). Depois do go-live, a URL do webhook no AxisDesk fica `https://<app>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.
+- **Banco único.** Produção e desenvolvimento usam o mesmo projeto Supabase. `npm run dev` e os scripts de seed gravam em produção até existir um projeto de desenvolvimento (passo descrito no fim de `deploy-producao.md`).
 - **Integração ERP contra um ERP real.** A chamada existe e foi testada contra um servidor falso. Falta validar com o endpoint do cliente: nomes do cabeçalho (`internalGroup` para grupo de mercadoria é suposição), formato da resposta e mensagens de erro. A simulação continua enquanto o tenant não tiver integração ativa.
 - **Arrastar para Finalizado no kanban.** `moveRequestToStatus` não cria o material nem dispara o ERP. Só a aprovação pela RPC faz isso.
 - **Lote só com Pendente ERP.** A seleção em lote na base ignora material em `erro_erp`; a nova tentativa é pelo detalhe.

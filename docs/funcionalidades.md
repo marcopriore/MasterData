@@ -12,7 +12,7 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/request` | Nova solicitação em 5 passos. |
 | `/governance` | Kanban e lista. É aqui que assumir, aprovar e rejeitar chamam as RPCs. |
 | `/governance/request/[id]` | Detalhe da solicitação. Os botões de atendimento só mudam estado local e não gravam no banco. |
-| `/database` | Base de materiais: filtros, colunas, import/export, status ERP. |
+| `/database` | Base de materiais: filtros, colunas, import/export, alteração de status em lote, status ERP. |
 | `/database/[id]` | Detalhe do material, descrições curta e detalhada. |
 | `/admin-pdm` | Lista de todos os PDMs, 25 por página: busca por nome ou código, filtro de situação (ativo/inativo) e de uso (com/sem materiais), colunas Código, Nome, Materiais e Situação, ordenáveis. Filtros e página ficam na URL. Exportar, importação em massa e Novo PDM no cabeçalho. |
 | `/admin-pdm/[id]` e `/admin-pdm/novo` | Detalhe do PDM: dados, atributos, dicionário de valores, editar, salvar e clonar. Voltar retorna à lista com a mesma busca e página. |
@@ -72,9 +72,11 @@ Template guarda atributos em JSON (`pdm_templates.attributes`): nome, tipo, obri
 
 ## Base de dados e ERP
 
-A base é o cadastro mestre local, com código interno (`id_sistema`), código ERP (`id_erp`), NCM, grupo, unidade, status e mensagem de erro de integração (`erp_error_message`). O dicionário de campos inclui o conjunto MM03 do SAP S/4HANA como metadado. A permissão `can_standardize` libera a padronização na tela.
+A base é o cadastro mestre local, com código interno (`id_sistema`), código ERP (`id_erp`), NCM, grupo, unidade, status e mensagem de erro de integração (`erp_error_message`). O dicionário de campos inclui o conjunto MM03 do SAP S/4HANA como metadado. A permissão `can_standardize` libera a padronização na tela, a sincronização ERP e a alteração de status em lote (**Alterar Status**: Ativo, Bloqueado ou Obsoleto). Material em `integrando` não entra na seleção.
 
-**Integrar com ERP**, no detalhe ou em lote, chama `POST /api/database/materials/erp`. Com integração ativa no tenant, o servidor monta o JSON do ERP e chama a URL da operação: criação sem `id_erp`, alteração com `id_erp`. Sem integração ativa, a tela segue a simulação antiga (`pendente_erp` → `integrando` → cerca de 90% `integrado_erp` com `MAT-######`, o resto `erro_erp`). No detalhe, **Eliminar no ERP** aparece para material com `id_erp` e o deixa Obsoleto quando o ERP confirma. Ao concluir a última etapa, a solicitação (interna ou de origem externa) chama `POST /api/requests/[id]/erp` e a criação no ERP dispara sozinha. Criação ou alteração vinda de sistema externo direto na base continua pendente até uma pessoa integrar.
+**Status e ERP:** Bloqueado é só local. Obsoleto com `id_erp` marca `pendente_erp` para a próxima sincronização eliminar no ERP (DELETE). Obsoleto sem `id_erp` fica só local.
+
+**Sincronizar com ERP**, no detalhe ou em lote (`action: sincronizar`), roteia: Ativo sem `id_erp` → criar; Ativo com `id_erp` → alterar; Obsoleto com `id_erp` → eliminar. O modal do lote resume criação/alteração/eliminação e pede confirmação forte quando há DELETE. Sem integração ativa, a tela simula create/update e a eliminação local. No detalhe, **Eliminar no ERP** continua disponível para material Ativo/Bloqueado com `id_erp`. Ao concluir a última etapa, a solicitação chama `POST /api/requests/[id]/erp` e a criação no ERP dispara sozinha. Criação ou alteração por API externa na base continua pendente até sincronizar.
 
 Duplicata de material (`getDuplicateMaterials`) compara descrição detalhada, ou descrição curta mais `pdm_code`. Não usa similaridade fuzzy. A busca por valores parecidos fica no dicionário de valores.
 
@@ -104,7 +106,8 @@ Tabela `notifications`, sino no topo e preferências por evento (criada, atendim
 | `GET /api/admin/tenants/[id]` | Nome e slug do tenant (master) |
 | `GET/POST /api/admin/tenants/[id]/erp-connections` | Listar e incluir integrações com o ERP. O segredo entra, mas nunca volta |
 | `PUT/PATCH/DELETE .../erp-connections/[connectionId]` | Modificar, ativar ou desativar, excluir |
-| `POST /api/database/materials/erp` | Integrar ou eliminar no ERP até 100 materiais (`can_standardize`) |
+| `POST /api/database/materials/erp` | `sincronizar` (roteia create/update/delete), `integrar` ou `eliminar` — até 100 (`can_standardize`) |
+| `POST /api/database/materials/status` | Altera status; Obsoleto+`id_erp` → `pendente_erp` (`can_standardize`) |
 | `POST /api/requests/[id]/erp` | Criação no ERP do material de uma solicitação finalizada (`can_approve`) |
 | `GET/POST /api/admin/tenants/[id]/api-clients` e `DELETE .../[clientId]` | Listar, gerar e revogar chaves de API do tenant |
 | `POST /api/notifications/request` | Sino e e-mail depois de uma ação recente na solicitação |

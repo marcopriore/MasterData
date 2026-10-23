@@ -6,10 +6,12 @@ import {
   getMaterials,
   getDuplicateMaterials,
   getPdms,
-  erpIntegrateMaterials,
+  erpSyncMaterials,
+  updateMaterialsStatus,
   downloadFile,
   uploadMaterialsImport,
 } from '@/lib/supabase-api'
+import { classifyErpSyncAction, summarizeErpSyncPlans } from '@/lib/erp/sync-action'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +34,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useTheme } from 'next-themes'
@@ -111,6 +114,9 @@ const STATUS_OPTIONS = [
   { value: 'Obsoleto', label: 'Obsoleto' },
 ] as const
 
+const STATUS_CHANGE_OPTIONS = ['Ativo', 'Bloqueado', 'Obsoleto'] as const
+type MaterialStatusValue = (typeof STATUS_CHANGE_OPTIONS)[number]
+
 const ERP_STATUS_OPTIONS = [
   { value: '', label: 'Status ERP: Todos' },
   { value: 'pendente_erp', label: 'Pendente ERP' },
@@ -158,6 +164,10 @@ export default function DatabasePage() {
   const [showErpModal, setShowErpModal] = useState(false)
   const [integrating, setIntegrating] = useState(false)
   const [erpModalError, setErpModalError] = useState<string | null>(null)
+  const [showStatusModal, setShowStatusModal] = useState(false)
+  const [statusTarget, setStatusTarget] = useState<MaterialStatusValue>('Ativo')
+  const [statusSaving, setStatusSaving] = useState(false)
+  const [statusModalError, setStatusModalError] = useState<string | null>(null)
 
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(VISIBLE_BY_DEFAULT))
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
@@ -354,16 +364,38 @@ export default function DatabasePage() {
     setPage(1)
   }
 
-  const pendenteIdsOnPage = items.filter((r) => r.erp_status === 'pendente_erp').map((r) => r.id)
-  const allPendenteSelected = pendenteIdsOnPage.length > 0 && pendenteIdsOnPage.every((id) => selectedIds.includes(id))
+  /** Selecionável para ações em lote (status e ERP). Em integração fica travado. */
+  const selectableIdsOnPage = items.filter((r) => r.erp_status !== 'integrando').map((r) => r.id)
+  const allSelectableSelected =
+    selectableIdsOnPage.length > 0 && selectableIdsOnPage.every((id) => selectedIds.includes(id))
+  const isSyncEligible = (row: MaterialItem) => {
+    const plan = classifyErpSyncAction(row)
+    if (plan.action === 'skip') return false
+    if (plan.action === 'eliminar') return row.erp_status === 'pendente_erp' || row.erp_status === 'erro_erp'
+    return (
+      (row.erp_status === 'pendente_erp' || row.erp_status === 'erro_erp') &&
+      (row.description?.length ?? 0) <= maxLength
+    )
+  }
+
+  const selectedSyncIds = selectedIds.filter((id) => {
+    const row = items.find((r) => r.id === id)
+    return row ? isSyncEligible(row) : false
+  })
+
+  const selectedSyncPlans = selectedSyncIds.map((id) => {
+    const row = items.find((r) => r.id === id)!
+    return classifyErpSyncAction(row)
+  })
+  const syncSummary = summarizeErpSyncPlans(selectedSyncPlans)
 
   const toggleSelectAll = () => {
-    if (allPendenteSelected) {
-      setSelectedIds((prev) => prev.filter((id) => !pendenteIdsOnPage.includes(id)))
+    if (allSelectableSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !selectableIdsOnPage.includes(id)))
     } else {
       setSelectedIds((prev) => {
         const next = new Set(prev)
-        pendenteIdsOnPage.forEach((id) => next.add(id))
+        selectableIdsOnPage.forEach((id) => next.add(id))
         return Array.from(next)
       })
     }
@@ -372,31 +404,71 @@ export default function DatabasePage() {
   const toggleSelect = (id: number, e: React.MouseEvent) => {
     e.stopPropagation()
     const row = items.find((r) => r.id === id)
-    if (row?.erp_status !== 'pendente_erp') return
-    if ((row?.description?.length ?? 0) > maxLength) return
+    if (row?.erp_status === 'integrando') return
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     )
   }
 
-  const handleOpenIntegrateModal = () => {
-    const overLimit = selectedIds.filter((id) => {
-      const m = items.find((r) => r.id === id)
-      return (m?.description?.length ?? 0) > maxLength
-    })
-    if (overLimit.length > 0) {
-      if (overLimit.length === selectedIds.length) {
-        toast.error(
-          `Todos os itens selecionados possuem descrição acima do limite de ${maxLength} caracteres. Corrija antes de integrar.`
-        )
-        return
+  const handleOpenStatusModal = () => {
+    if (selectedIds.length === 0) return
+    setStatusModalError(null)
+    const first = items.find((r) => r.id === selectedIds[0])
+    const current = first?.status
+    setStatusTarget(
+      current === 'Bloqueado' || current === 'Obsoleto' || current === 'Ativo' ? current : 'Ativo'
+    )
+    setShowStatusModal(true)
+  }
+
+  const handleConfirmStatusChange = async () => {
+    if (selectedIds.length === 0) return
+    setStatusSaving(true)
+    setStatusModalError(null)
+    try {
+      const res = await updateMaterialsStatus(selectedIds, statusTarget)
+      setShowStatusModal(false)
+      setSelectedIds([])
+      fetchMaterials()
+      if (res.updated.length) {
+        toast.success(`${res.updated.length} material(is) alterado(s) para ${statusTarget}.`)
       }
-      const validIds = selectedIds.filter((id) => !overLimit.includes(id))
-      setSelectedIds(validIds)
-      toast.error(
-        `${overLimit.length} item(s) removido(s) da seleção por possuir descrição acima do limite de ${maxLength} caracteres.`
-      )
+      if (res.pending_elimination.length) {
+        toast.message(
+          `${res.pending_elimination.length} com código ERP ficaram Pendente ERP — use Sincronizar para eliminar no ERP.`
+        )
+      } else if (statusTarget === 'Bloqueado' && res.updated.length) {
+        toast.message('Bloqueado é só local; não há sincronização com o ERP.')
+      }
+      if (res.skipped.length && res.updated.length === 0) {
+        toast.message(`Nenhum material alterado (${res.skipped.length} ignorado(s)).`)
+      } else if (res.skipped.length) {
+        toast.message(`${res.skipped.length} ignorado(s) (já no status, em integração ou inválido).`)
+      }
+    } catch (err) {
+      setStatusModalError((err as Error)?.message ?? 'Falha ao alterar status')
+    } finally {
+      setStatusSaving(false)
     }
+  }
+
+  const handleOpenIntegrateModal = () => {
+    const eligible = selectedIds.filter((id) => {
+      const m = items.find((r) => r.id === id)
+      return m ? isSyncEligible(m) : false
+    })
+    const removed = selectedIds.length - eligible.length
+    if (eligible.length === 0) {
+      toast.error(
+        'Nenhum item elegível: precisa estar Pendente/Erro ERP. Bloqueado não sincroniza; Obsoleto sem código ERP é só local; criação/alteração exige descrição no limite.'
+      )
+      return
+    }
+    if (removed > 0) {
+      setSelectedIds(eligible)
+      toast.message(`${removed} item(s) fora da sincronização. Mantidos ${eligible.length}.`)
+    }
+    setErpModalError(null)
     setShowErpModal(true)
   }
 
@@ -406,30 +478,37 @@ export default function DatabasePage() {
 
   const handleConfirmErpIntegrate = async () => {
     if (selectedIds.length === 0) return
-    const overLimit = selectedIds.filter((id) => {
+    const overLimitCreateUpdate = selectedIds.filter((id) => {
       const m = items.find((r) => r.id === id)
-      return (m?.description?.length ?? 0) > maxLength
+      if (!m) return false
+      const plan = classifyErpSyncAction(m)
+      if (plan.action === 'eliminar' || plan.action === 'skip') return false
+      return (m.description?.length ?? 0) > maxLength
     })
-    if (overLimit.length > 0) {
+    if (overLimitCreateUpdate.length > 0) {
       toast.error(
-        `${overLimit.length} item(s) com descrição acima do limite. Corrija antes de integrar.`
+        `${overLimitCreateUpdate.length} item(s) de criação/alteração com descrição acima do limite. Corrija antes de sincronizar.`
       )
       return
     }
     setIntegrating(true)
     setErpModalError(null)
     try {
-      const res = await erpIntegrateMaterials(selectedIds)
+      const res = await erpSyncMaterials(selectedIds)
       setShowErpModal(false)
       setSelectedIds([])
       fetchMaterials()
-      if (res.integrated.length) toast.success(`${res.integrated.length} materiais integrados com sucesso!`)
+      const parts: string[] = []
+      if (res.created.length) parts.push(`${res.created.length} criados`)
+      if (res.updated.length) parts.push(`${res.updated.length} alterados`)
+      if (res.eliminated.length) parts.push(`${res.eliminated.length} eliminados no ERP`)
+      if (parts.length) toast.success(parts.join(' · '))
       if (res.failed.length) {
         toast.error(`${res.failed.length} com erro do ERP. Veja a mensagem no detalhe de cada material.`)
       }
-      if (res.skipped.length) toast.message(`${res.skipped.length} não foram enviados (status não permite).`)
+      if (res.skipped.length) toast.message(`${res.skipped.length} não sincronizados.`)
     } catch (err) {
-      setErpModalError((err as Error)?.message ?? 'Falha ao integrar materiais')
+      setErpModalError((err as Error)?.message ?? 'Falha ao sincronizar materiais')
     } finally {
       setIntegrating(false)
     }
@@ -484,14 +563,30 @@ export default function DatabasePage() {
             </Button>
           )}
           {showStandardizeActions && selectedIds.length > 0 && (
-            <Button
-              size="sm"
-              onClick={handleOpenIntegrateModal}
-              className="gap-2 bg-violet-600 hover:bg-violet-700 text-white"
-            >
-              <Upload className="size-4" />
-              Integrar com ERP ({selectedIds.length})
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenStatusModal}
+                className="gap-2"
+              >
+                <RefreshCw className="size-4" />
+                Alterar Status ({selectedIds.length})
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleOpenIntegrateModal}
+                className="gap-2 bg-violet-600 hover:bg-violet-700 text-white"
+                title={
+                  selectedSyncIds.length === 0
+                    ? 'Nenhum selecionado elegível para sincronizar com o ERP'
+                    : undefined
+                }
+              >
+                <Upload className="size-4" />
+                Sincronizar com ERP ({selectedSyncIds.length || selectedIds.length})
+              </Button>
+            </>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -649,8 +744,9 @@ export default function DatabasePage() {
                     <th className="w-10 px-2 py-3">
                       <input
                         type="checkbox"
-                        checked={allPendenteSelected}
+                        checked={allSelectableSelected}
                         onChange={toggleSelectAll}
+                        disabled={selectableIdsOnPage.length === 0}
                         className="size-4 rounded border-zinc-300 dark:border-zinc-600 text-violet-600 focus:ring-violet-500"
                       />
                     </th>
@@ -683,25 +779,18 @@ export default function DatabasePage() {
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(row.id)}
-                          disabled={
-                            row.erp_status !== 'pendente_erp' ||
-                            (row.description?.length ?? 0) > maxLength
-                          }
+                          disabled={row.erp_status === 'integrando'}
                           title={
-                            (row.description?.length ?? 0) > maxLength
-                              ? `Descrição acima do limite (${row.description?.length ?? 0}/${maxLength})`
-                              : undefined
+                            row.erp_status === 'integrando'
+                              ? 'Material em integração com o ERP'
+                              : (row.description?.length ?? 0) > maxLength
+                                ? `Descrição acima do limite (${row.description?.length ?? 0}/${maxLength}) — integração ERP bloqueada`
+                                : undefined
                           }
                           readOnly
-                          tabIndex={
-                            row.erp_status === 'pendente_erp' &&
-                            (row.description?.length ?? 0) <= maxLength
-                              ? 0
-                              : -1
-                          }
+                          tabIndex={row.erp_status === 'integrando' ? -1 : 0}
                           className={`size-4 rounded border-zinc-300 dark:border-zinc-600 text-violet-600 focus:ring-violet-500 ${
-                            row.erp_status !== 'pendente_erp' ||
-                            (row.description?.length ?? 0) > maxLength
+                            row.erp_status === 'integrando'
                               ? 'opacity-50 cursor-default'
                               : 'cursor-pointer'
                           }`}
@@ -830,22 +919,108 @@ export default function DatabasePage() {
         )}
       </div>
 
-      {/* Modal de confirmação de integração ERP */}
+      {/* Modal Alterar Status */}
+      {showStatusModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="flex items-start justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                  Alterar Status
+                </h2>
+                <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+                  Aplica o status a {selectedIds.length}{' '}
+                  {selectedIds.length === 1 ? 'material selecionado' : 'materiais selecionados'}.
+                </p>
+              </div>
+              {!statusSaving && (
+                <button
+                  type="button"
+                  onClick={() => setShowStatusModal(false)}
+                  className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300 transition-colors"
+                >
+                  <X className="size-5" />
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-4 px-6 py-4">
+              {statusModalError && (
+                <p className="text-sm text-red-600 dark:text-red-400">{statusModalError}</p>
+              )}
+              <div className="flex flex-col gap-2">
+                <label htmlFor="bulk-status" className="text-xs font-medium text-muted-foreground">
+                  Novo status
+                </label>
+                <select
+                  id="bulk-status"
+                  value={statusTarget}
+                  onChange={(e) => setStatusTarget(e.target.value as MaterialStatusValue)}
+                  disabled={statusSaving}
+                  className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+                >
+                  {STATUS_CHANGE_OPTIONS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              {statusTarget === 'Obsoleto' && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                  Itens com código ERP ficam Pendente ERP. Em seguida use <strong>Sincronizar com ERP</strong> para disparar a eliminação (DELETE). Sem código ERP, Obsoleto fica só local.
+                </p>
+              )}
+              {statusTarget === 'Bloqueado' && (
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                  Bloqueado é apenas local — não cria, altera nem elimina no ERP.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowStatusModal(false)}
+                disabled={statusSaving}
+              >
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleConfirmStatusChange}
+                disabled={statusSaving || selectedIds.length === 0}
+                className="gap-2"
+              >
+                {statusSaving ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Aplicando...
+                  </>
+                ) : (
+                  'Aplicar'
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Sincronizar com ERP */}
       {showErpModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 dark:bg-black/60 p-4">
           <div className="w-full max-w-lg rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-            {/* Header */}
             <div className="flex items-start justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100">
               <div>
                 <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                  Integrar Materiais com ERP
+                  Sincronizar com ERP
                 </h2>
                 <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-                  Revise os itens selecionados antes de confirmar a integração.
+                  Ativo cria/altera; Obsoleto com código ERP elimina (DELETE).
                 </p>
               </div>
               {!integrating && (
                 <button
+                  type="button"
                   onClick={() => setShowErpModal(false)}
                   className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300 transition-colors"
                 >
@@ -854,17 +1029,45 @@ export default function DatabasePage() {
               )}
             </div>
 
-            {/* Body — lista de materiais selecionados */}
-            <div className="max-h-64 overflow-y-auto px-6 py-4">
+            <div className="max-h-72 overflow-y-auto px-6 py-4 space-y-4">
               {erpModalError && (
-                <p className="mb-4 text-sm text-red-600 dark:text-red-400">
-                  {erpModalError}
+                <p className="text-sm text-red-600 dark:text-red-400">{erpModalError}</p>
+              )}
+              <div className="flex flex-wrap gap-2 text-xs">
+                {syncSummary.criar > 0 && (
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+                    {syncSummary.criar} criação
+                  </span>
+                )}
+                {syncSummary.alterar > 0 && (
+                  <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 font-medium text-violet-800 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300">
+                    {syncSummary.alterar} alteração
+                  </span>
+                )}
+                {syncSummary.eliminar > 0 && (
+                  <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 font-medium text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                    {syncSummary.eliminar} eliminação
+                  </span>
+                )}
+              </div>
+              {syncSummary.eliminar > 0 && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                  Atenção: {syncSummary.eliminar} material(is) serão eliminados no ERP (DELETE), não atualizados.
                 </p>
               )}
               <ul className="space-y-2">
                 {selectedIds.map((id) => {
                   const m = items.find((r) => r.id === id)
                   if (!m) return null
+                  const plan = classifyErpSyncAction(m)
+                  const planLabel =
+                    plan.action === 'criar'
+                      ? 'Criar'
+                      : plan.action === 'alterar'
+                        ? 'Alterar'
+                        : plan.action === 'eliminar'
+                          ? 'Eliminar'
+                          : 'Ignorar'
                   return (
                     <li
                       key={id}
@@ -875,13 +1078,13 @@ export default function DatabasePage() {
                           {m.id_sistema ?? m.id_erp ?? '—'} — {m.description}
                         </p>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                          Última padronização: {m.standardized_at
-                            ? new Date(m.standardized_at).toLocaleDateString('pt-BR')
-                            : '—'}
+                          {m.status} · {planLabel}
+                          {plan.action === 'skip' ? ` (${plan.reason})` : ''}
                         </p>
                       </div>
                       {!integrating && (
                         <button
+                          type="button"
                           onClick={() => {
                             removeFromSelection(id)
                             if (selectedIds.length <= 1) setShowErpModal(false)
@@ -897,10 +1100,9 @@ export default function DatabasePage() {
               </ul>
             </div>
 
-            {/* Footer */}
             <div className="flex items-center justify-between border-t border-zinc-200 px-6 py-4 dark:border-zinc-700">
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                {selectedIds.length} {selectedIds.length === 1 ? 'material será integrado' : 'materiais serão integrados'}
+                {selectedIds.length} selecionado(s)
               </p>
               <div className="flex gap-2">
                 <Button
@@ -908,7 +1110,6 @@ export default function DatabasePage() {
                   size="sm"
                   onClick={() => setShowErpModal(false)}
                   disabled={integrating}
-                  className="border border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                 >
                   Cancelar
                 </Button>
@@ -916,15 +1117,21 @@ export default function DatabasePage() {
                   size="sm"
                   onClick={handleConfirmErpIntegrate}
                   disabled={integrating || selectedIds.length === 0}
-                  className="bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
+                  className={
+                    syncSummary.eliminar > 0
+                      ? 'bg-red-600 hover:bg-red-700 text-white disabled:opacity-50'
+                      : 'bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50'
+                  }
                 >
                   {integrating ? (
                     <>
                       <Loader2 className="size-4 animate-spin mr-2" />
-                      Integrando...
+                      Sincronizando...
                     </>
+                  ) : syncSummary.eliminar > 0 ? (
+                    'Confirmar (inclui eliminações)'
                   ) : (
-                    'Confirmar Integração'
+                    'Confirmar sincronização'
                   )}
                 </Button>
               </div>

@@ -9,7 +9,7 @@ import {
   getPdmById,
   updateMaterialAttributes,
   updateMaterialStandardize,
-  erpIntegrateMaterial,
+  erpSyncMaterial,
   erpEliminateMaterial,
   getFieldDictionary,
   logAction,
@@ -579,19 +579,35 @@ export default function DatabaseDetailPage() {
 
   const handleIntegrate = useCallback(async () => {
     if (!material) return
+    if (material.status === 'Bloqueado') {
+      toast.message('Bloqueado é só local; não sincroniza com o ERP.')
+      return
+    }
+    if (material.status === 'Obsoleto' && material.id_erp) {
+      if (!window.confirm(`Este material está Obsoleto. Sincronizar vai eliminar ${material.id_erp} no ERP. Continuar?`)) {
+        return
+      }
+    }
     setIsIntegrating(true)
-    setMaterial((prev) => prev ? { ...prev, erp_status: 'integrando' } : null)
+    // create/update usa lock integrando no servidor; eliminação Obsoleto não — não otimizar o badge
+    if (material.status !== 'Obsoleto') {
+      setMaterial((prev) => (prev ? { ...prev, erp_status: 'integrando' } : null))
+    }
     try {
-      const res = await erpIntegrateMaterial(material.id)
+      const res = await erpSyncMaterial(material.id)
       if (res.success && res.material) {
         setMaterial(res.material as MaterialDetail)
-        toast.success(`Material integrado com sucesso! Código ERP: ${res.erp_code ?? ''}`)
+        if (res.plan === 'eliminar') {
+          toast.success('Material eliminado no ERP e mantido Obsoleto aqui.')
+        } else {
+          toast.success(`Material sincronizado com sucesso! Código ERP: ${res.erp_code ?? ''}`)
+        }
       } else {
         setMaterial((prev) => prev && res.material ? { ...prev, ...res.material } as MaterialDetail : prev)
-        toast.error(('error' in res ? res.error : null) ?? 'Não foi possível integrar o material.')
+        toast.error(('error' in res ? res.error : null) ?? 'Não foi possível sincronizar o material.')
       }
     } catch (err) {
-      toast.error((err as Error)?.message ?? 'Falha na integração')
+      toast.error((err as Error)?.message ?? 'Falha na sincronização')
     } finally {
       setIsIntegrating(false)
     }
@@ -710,22 +726,29 @@ export default function DatabaseDetailPage() {
               <div className="relative group inline-block">
                 <button
                   type="button"
-                  disabled={isDescriptionOverLimit || isIntegrating || material.erp_status === 'integrando'}
+                  disabled={
+                    (material.status !== 'Obsoleto' && isDescriptionOverLimit) ||
+                    isIntegrating ||
+                    material.erp_status === 'integrando' ||
+                    material.status === 'Bloqueado'
+                  }
                   onClick={handleIntegrate}
                   className="px-4 py-2 text-sm rounded-lg bg-[#0F1C38] dark:bg-[#C69A46] text-white font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
                 >
                   {isIntegrating ? (
                     <>
                       <Loader2 className="size-4 animate-spin inline mr-2" />
-                      Integrando...
+                      Sincronizando...
                     </>
+                  ) : material.status === 'Obsoleto' ? (
+                    'Sincronizar (eliminar no ERP)'
                   ) : (
-                    'Integrar com ERP'
+                    'Sincronizar com ERP'
                   )}
                 </button>
-                {isDescriptionOverLimit && (
+                {isDescriptionOverLimit && material.status !== 'Obsoleto' && (
                   <div className="absolute right-0 bottom-full mb-1.5 hidden group-hover:flex bg-slate-800 dark:bg-slate-700 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-50 shadow-lg">
-                    Corrija a Descrição Curta antes de integrar ({material?.description?.length ?? 0}/{maxLength} caracteres)
+                    Corrija a Descrição Curta antes de sincronizar ({material?.description?.length ?? 0}/{maxLength} caracteres)
                     <div className="absolute right-4 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800 dark:border-t-slate-700" />
                   </div>
                 )}

@@ -70,7 +70,7 @@ function NavLink({
       onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
     >
       <span style={{ color: 'var(--sidebar-icon)' }}><Icon className="size-4 shrink-0" /></span>
-      {label}
+      <span className="truncate">{label}</span>
     </Link>
   )
 }
@@ -117,7 +117,7 @@ export function AppSidebar() {
 
   return (
     <aside
-      className="fixed left-0 top-0 z-40 hidden h-screen w-[--nav-width] flex-col border-r md:flex"
+      className="fixed left-0 top-0 z-40 hidden h-screen w-[var(--nav-width)] flex-col overflow-hidden border-r md:flex"
       style={sidebarStyle}
     >
       {/* Logo */}
@@ -179,7 +179,7 @@ export function AppSidebar() {
                     onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
                   >
                     <item.icon className="size-4 shrink-0" style={{ color: 'var(--sidebar-icon)' }} />
-                    {item.label}
+                    <span className="truncate">{item.label}</span>
                   </Link>
                 )
               })}
@@ -222,7 +222,7 @@ export function AppSidebar() {
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
                       >
                         <span style={{ color: 'var(--sidebar-icon)' }}><Icon className="size-4 shrink-0" /></span>
-                        {item.label}
+                        <span className="truncate">{item.label}</span>
                       </Link>
                     )
                   })}

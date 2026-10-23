@@ -1,0 +1,324 @@
+pdm_code,nome,segmento,macro_categoria,quantidade_atributos
+IND_PARAFUSO,Parafuso,Industrial,Fixadores,9
+IND_PORCA,Porca,Industrial,Fixadores,9
+IND_ARRUELA,Arruela,Industrial,Fixadores,9
+IND_ANEL_DE_RETEN_O,Anel de retenção,Industrial,Fixadores,9
+IND_PINO,Pino,Industrial,Fixadores,9
+IND_REBITE,Rebite,Industrial,Fixadores,9
+IND_CHUMBADOR,Chumbador,Industrial,Fixadores,9
+IND_PRISIONEIRO,Prisioneiro,Industrial,Fixadores,9
+IND_ABRA_ADEIRA,Abraçadeira,Industrial,Fixadores,9
+IND_PRESILHA,Presilha,Industrial,Fixadores,9
+IND_GRAMPO,Grampo,Industrial,Fixadores,9
+IND_TERMINAL_DE_FIXA_O,Terminal de fixação,Industrial,Fixadores,9
+IND_BUCHA_DE_FIXA_O,Bucha de fixação,Industrial,Fixadores,9
+IND_EIXO,Eixo,Industrial,Componentes mecânicos,10
+IND_BUCHA_MEC_NICA,Bucha mecânica,Industrial,Componentes mecânicos,10
+IND_ROLAMENTO,Rolamento,Industrial,Componentes mecânicos,10
+IND_MANCAL,Mancal,Industrial,Componentes mecânicos,10
+IND_ENGRENAGEM,Engrenagem,Industrial,Componentes mecânicos,10
+IND_CREMALHEIRA,Cremalheira,Industrial,Componentes mecânicos,10
+IND_POLIA,Polia,Industrial,Componentes mecânicos,10
+IND_CORREIA,Correia,Industrial,Componentes mecânicos,10
+IND_CORRENTE,Corrente,Industrial,Componentes mecânicos,10
+IND_MOLA,Mola,Industrial,Componentes mecânicos,10
+IND_ACOPLAMENTO,Acoplamento,Industrial,Componentes mecânicos,10
+IND_VOLANTE,Volante,Industrial,Componentes mecânicos,10
+IND_RODA_INDUSTRIAL,Roda industrial,Industrial,Componentes mecânicos,10
+IND_ROLDANA,Roldana,Industrial,Componentes mecânicos,10
+IND_GUIA,Guia,Industrial,Componentes mecânicos,10
+IND_TRILHO,Trilho,Industrial,Componentes mecânicos,10
+IND_CAME,Came,Industrial,Componentes mecânicos,10
+IND_JUNTA_MEC_NICA,Junta mecânica,Industrial,Componentes mecânicos,10
+IND_FLANGE,Flange,Industrial,Componentes mecânicos,10
+IND_ACOPLAMENTO_R_GIDO,Acoplamento rígido,Industrial,Componentes mecânicos,10
+IND_CARDAN,Cardan,Industrial,Componentes mecânicos,10
+IND_EMBREAGEM_INDUSTRIAL,Embreagem industrial,Industrial,Componentes mecânicos,10
+IND_CHAPA_MET_LICA,Chapa metálica,Industrial,Matérias-primas metálicas,10
+IND_BOBINA_MET_LICA,Bobina metálica,Industrial,Matérias-primas metálicas,10
+IND_BARRA_REDONDA,Barra redonda,Industrial,Matérias-primas metálicas,10
+IND_BARRA_QUADRADA,Barra quadrada,Industrial,Matérias-primas metálicas,10
+IND_BARRA_SEXTAVADA,Barra sextavada,Industrial,Matérias-primas metálicas,10
+IND_PERFIL_MET_LICO,Perfil metálico,Industrial,Matérias-primas metálicas,10
+IND_TUBO_MET_LICO,Tubo metálico,Industrial,Matérias-primas metálicas,10
+IND_TARUGO_MET_LICO,Tarugo metálico,Industrial,Matérias-primas metálicas,10
+IND_FIO_MET_LICO,Fio metálico,Industrial,Matérias-primas metálicas,10
+IND_ARAME,Arame,Industrial,Matérias-primas metálicas,10
+IND_FITA_MET_LICA,Fita metálica,Industrial,Matérias-primas metálicas,10
+IND_FOLHA_MET_LICA,Folha metálica,Industrial,Matérias-primas metálicas,10
+IND_RESINA_POLIM_RICA,Resina polimérica,Industrial,Plásticos e polímeros,9
+IND_GRANULADO_PL_STICO,Granulado plástico,Industrial,Plásticos e polímeros,9
+IND_PLACA_PL_STICA,Placa plástica,Industrial,Plásticos e polímeros,9
+IND_TUBO_PL_STICO,Tubo plástico,Industrial,Plásticos e polímeros,9
+IND_PERFIL_PL_STICO,Perfil plástico,Industrial,Plásticos e polímeros,9
+IND_FILME_PL_STICO,Filme plástico,Industrial,Plásticos e polímeros,9
+IND_BORRACHA,Borracha,Industrial,Plásticos e polímeros,9
+IND_ELAST_MERO,Elastômero,Industrial,Plásticos e polímeros,9
+IND_COMPOSTO_PL_STICO,Composto plástico,Industrial,Plásticos e polímeros,9
+IND_CABO_EL_TRICO,Cabo elétrico,Industrial,Elétrica,9
+IND_FIO_EL_TRICO,Fio elétrico,Industrial,Elétrica,9
+IND_DISJUNTOR,Disjuntor,Industrial,Elétrica,9
+IND_CONTATOR,Contator,Industrial,Elétrica,9
+IND_REL_EL_TRICO,Relé elétrico,Industrial,Elétrica,9
+IND_FUS_VEL,Fusível,Industrial,Elétrica,9
+IND_SECCIONADOR,Seccionador,Industrial,Elétrica,9
+IND_TOMADA,Tomada,Industrial,Elétrica,9
+IND_PLUGUE,Plugue,Industrial,Elétrica,9
+IND_CONECTOR_EL_TRICO,Conector elétrico,Industrial,Elétrica,9
+IND_TERMINAL_EL_TRICO,Terminal elétrico,Industrial,Elétrica,9
+IND_BARRAMENTO,Barramento,Industrial,Elétrica,9
+IND_FONTE_DE_ALIMENTA_O,Fonte de alimentação,Industrial,Elétrica,9
+IND_TRANSFORMADOR,Transformador,Industrial,Elétrica,9
+IND_MOTOR_EL_TRICO,Motor elétrico,Industrial,Elétrica,9
+IND_INVERSOR_DE_FREQU_NCIA,Inversor de frequência,Industrial,Elétrica,9
+IND_SOFT_STARTER,Soft starter,Industrial,Elétrica,9
+IND_PAINEL_EL_TRICO,Painel elétrico,Industrial,Elétrica,9
+IND_SENSOR_EL_TRICO,Sensor elétrico,Industrial,Elétrica,9
+IND_L_MPADA_INDUSTRIAL,Lâmpada industrial,Industrial,Elétrica,9
+IND_SENSOR_DE_AUTOMA_O,Sensor de automação,Industrial,Automação,8
+IND_ENCODER,Encoder,Industrial,Automação,8
+IND_CLP,CLP,Industrial,Automação,8
+IND_IHM,IHM,Industrial,Automação,8
+IND_GATEWAY_INDUSTRIAL,Gateway industrial,Industrial,Automação,8
+IND_CONTROLADOR_INDUSTRIAL,Controlador industrial,Industrial,Automação,8
+IND_M_DULO_I_O,Módulo I/O,Industrial,Automação,8
+IND_CONVERSOR_INDUSTRIAL,Conversor industrial,Industrial,Automação,8
+IND_TRANSMISSOR,Transmissor,Industrial,Automação,8
+IND_ATUADOR_DE_AUTOMA_O,Atuador de automação,Industrial,Automação,8
+IND_SERVO_MOTOR,Servo motor,Industrial,Automação,8
+IND_SERVO_DRIVE,Servo drive,Industrial,Automação,8
+IND_INVERSOR_DE_FREQU_NCIA_INDUSTRIAL,Inversor de frequência industrial,Industrial,Automação,8
+IND_FONTE_INDUSTRIAL,Fonte industrial,Industrial,Automação,8
+IND_CHAVE_DE_SEGURAN_A,Chave de segurança,Industrial,Automação,8
+IND_BOMBA_HIDR_ULICA,Bomba hidráulica,Industrial,Hidráulica,9
+IND_V_LVULA_HIDR_ULICA,Válvula hidráulica,Industrial,Hidráulica,9
+IND_CILINDRO_HIDR_ULICO,Cilindro hidráulico,Industrial,Hidráulica,9
+IND_MANGUEIRA_HIDR_ULICA,Mangueira hidráulica,Industrial,Hidráulica,9
+IND_TUBO_HIDR_ULICO,Tubo hidráulico,Industrial,Hidráulica,9
+IND_CONEX_O_HIDR_ULICA,Conexão hidráulica,Industrial,Hidráulica,9
+IND_FILTRO_HIDR_ULICO,Filtro hidráulico,Industrial,Hidráulica,9
+IND_RESERVAT_RIO_HIDR_ULICO,Reservatório hidráulico,Industrial,Hidráulica,9
+IND_ACUMULADOR_HIDR_ULICO,Acumulador hidráulico,Industrial,Hidráulica,9
+IND_MAN_METRO,Manômetro,Industrial,Hidráulica,9
+IND_CILINDRO_PNEUM_TICO,Cilindro pneumático,Industrial,Pneumática,9
+IND_V_LVULA_PNEUM_TICA,Válvula pneumática,Industrial,Pneumática,9
+IND_CONEX_O_PNEUM_TICA,Conexão pneumática,Industrial,Pneumática,9
+IND_MANGUEIRA_PNEUM_TICA,Mangueira pneumática,Industrial,Pneumática,9
+IND_PREPARADOR_DE_AR,Preparador de ar,Industrial,Pneumática,9
+IND_FILTRO_PNEUM_TICO,Filtro pneumático,Industrial,Pneumática,9
+IND_REGULADOR_PNEUM_TICO,Regulador pneumático,Industrial,Pneumática,9
+IND_LUBRIFICADOR_PNEUM_TICO,Lubrificador pneumático,Industrial,Pneumática,9
+IND_ATUADOR_PNEUM_TICO,Atuador pneumático,Industrial,Pneumática,9
+IND_SILENCIADOR_PNEUM_TICO,Silenciador pneumático,Industrial,Pneumática,9
+IND_PUN_O_DE_FERRAMENTA,Punção de ferramenta,Industrial,Ferramentas,9
+IND_MATRIZ_DE_FERRAMENTA,Matriz de ferramenta,Industrial,Ferramentas,9
+IND_INSERTO_DE_CORTE,Inserto de corte,Industrial,Ferramentas,9
+IND_BROCA,Broca,Industrial,Ferramentas,9
+IND_FRESA,Fresa,Industrial,Ferramentas,9
+IND_MACHO_DE_ROSCAR,Macho de roscar,Industrial,Ferramentas,9
+IND_COSSINETE,Cossinete,Industrial,Ferramentas,9
+IND_ALARGADOR,Alargador,Industrial,Ferramentas,9
+IND_ESCAREADOR,Escareador,Industrial,Ferramentas,9
+IND_L_MINA_INDUSTRIAL,Lâmina industrial,Industrial,Ferramentas,9
+IND_DISCO_DE_CORTE,Disco de corte,Industrial,Ferramentas,9
+IND_DISCO_DE_DESBASTE,Disco de desbaste,Industrial,Ferramentas,9
+IND_SERRA,Serra,Industrial,Ferramentas,9
+IND_FERRAMENTA_DE_TORNEAMENTO,Ferramenta de torneamento,Industrial,Ferramentas,9
+IND_FERRAMENTA_DE_FRESAMENTO,Ferramenta de fresamento,Industrial,Ferramentas,9
+IND_FERRAMENTA_DE_MEDI_O,Ferramenta de medição,Industrial,Ferramentas,9
+IND_CHAVE_MANUAL,Chave manual,Industrial,Ferramentas,9
+IND_ALICATE,Alicate,Industrial,Ferramentas,9
+IND_TORQU_METRO,Torquímetro,Industrial,Ferramentas,9
+IND_REBOLO,Rebolo,Industrial,Ferramentas,9
+IND_MATRIZ_DE_ESTAMPO,Matriz de estampo,Industrial,Estamparia,9
+IND_PUN_O_DE_ESTAMPO,Punção de estampo,Industrial,Estamparia,9
+IND_POSTI_O_DE_ESTAMPO,Postiço de estampo,Industrial,Estamparia,9
+IND_GUIA_DE_ESTAMPO,Guia de estampo,Industrial,Estamparia,9
+IND_BUCHA_GUIA,Bucha guia,Industrial,Estamparia,9
+IND_COLUNA_GUIA,Coluna guia,Industrial,Estamparia,9
+IND_PLACA_DE_ESTAMPO,Placa de estampo,Industrial,Estamparia,9
+IND_BASE_DE_ESTAMPO,Base de estampo,Industrial,Estamparia,9
+IND_MOLDE_INDUSTRIAL,Molde industrial,Industrial,Estamparia,9
+IND_INSERTO_DE_MOLDE,Inserto de molde,Industrial,Estamparia,9
+IND_O_RING,O-ring,Industrial,Vedação,9
+IND_RETENTOR,Retentor,Industrial,Vedação,9
+IND_SELO_MEC_NICO,Selo mecânico,Industrial,Vedação,9
+IND_JUNTA_DE_VEDA_O,Junta de vedação,Industrial,Vedação,9
+IND_GAXETA,Gaxeta,Industrial,Vedação,9
+IND_VEDA_O_PLANA,Vedação plana,Industrial,Vedação,9
+IND_VEDA_O_MET_LICA,Vedação metálica,Industrial,Vedação,9
+IND_ANEL_DE_VEDA_O,Anel de vedação,Industrial,Vedação,9
+IND_DIAFRAGMA,Diafragma,Industrial,Vedação,9
+IND_FITA_DE_VEDA_O,Fita de vedação,Industrial,Vedação,9
+IND__LEO_LUBRIFICANTE,Óleo lubrificante,Industrial,Lubrificação,8
+IND_GRAXA_LUBRIFICANTE,Graxa lubrificante,Industrial,Lubrificação,8
+IND_FLUIDO_HIDR_ULICO,Fluido hidráulico,Industrial,Lubrificação,8
+IND_FLUIDO_DE_CORTE,Fluido de corte,Industrial,Lubrificação,8
+IND_LUBRIFICANTE_INDUSTRIAL,Lubrificante industrial,Industrial,Lubrificação,8
+IND_DESENGRAXANTE,Desengraxante,Industrial,Lubrificação,8
+IND_ADESIVO,Adesivo,Industrial,Químicos industriais,8
+IND_SELANTE,Selante,Industrial,Químicos industriais,8
+IND_SOLVENTE,Solvente,Industrial,Químicos industriais,8
+IND_TINTA_INDUSTRIAL,Tinta industrial,Industrial,Químicos industriais,8
+IND_VERNIZ,Verniz,Industrial,Químicos industriais,8
+IND_PRIMER,Primer,Industrial,Químicos industriais,8
+IND_RESINA_QU_MICA,Resina química,Industrial,Químicos industriais,8
+IND_CATALISADOR,Catalisador,Industrial,Químicos industriais,8
+IND_PRODUTO_QU_MICO_INDUSTRIAL,Produto químico industrial,Industrial,Químicos industriais,8
+IND_G_S_INDUSTRIAL,Gás industrial,Industrial,Químicos industriais,8
+IND_DECAPANTE,Decapante,Industrial,Químicos industriais,8
+IND_ANTICORROSIVO,Anticorrosivo,Industrial,Químicos industriais,8
+IND_CAIXA,Caixa,Industrial,Embalagens,8
+IND_PALLET,Pallet,Industrial,Embalagens,8
+IND_FILME_STRETCH,Filme stretch,Industrial,Embalagens,8
+IND_FILME_TERMOENCOLH_VEL,Filme termoencolhível,Industrial,Embalagens,8
+IND_SACO,Saco,Industrial,Embalagens,8
+IND_BOMBONA,Bombona,Industrial,Embalagens,8
+IND_TAMBOR,Tambor,Industrial,Embalagens,8
+IND_CONTAINER,Container,Industrial,Embalagens,8
+IND_ETIQUETA,Etiqueta,Industrial,Embalagens,8
+IND_FITA_DE_EMBALAGEM,Fita de embalagem,Industrial,Embalagens,8
+IND_EMBALAGEM_RETORN_VEL,Embalagem retornável,Industrial,Embalagens,8
+IND_BER_O_DE_EMBALAGEM,Berço de embalagem,Industrial,Embalagens,8
+IND_CAPACETE,Capacete,Industrial,EPI e segurança,6
+IND_LUVA_DE_SEGURAN_A,Luva de segurança,Industrial,EPI e segurança,6
+IND__CULOS_DE_SEGURAN_A,Óculos de segurança,Industrial,EPI e segurança,6
+IND_PROTETOR_AURICULAR,Protetor auricular,Industrial,EPI e segurança,6
+IND_M_SCARA_DE_SEGURAN_A,Máscara de segurança,Industrial,EPI e segurança,6
+IND_RESPIRADOR,Respirador,Industrial,EPI e segurança,6
+IND_CAL_ADO_DE_SEGURAN_A,Calçado de segurança,Industrial,EPI e segurança,6
+IND_AVENTAL,Avental,Industrial,EPI e segurança,6
+IND_CINTUR_O_DE_SEGURAN_A,Cinturão de segurança,Industrial,EPI e segurança,6
+IND_PROTETOR_FACIAL,Protetor facial,Industrial,EPI e segurança,6
+IND_KIT_DE_MANUTEN_O,Kit de manutenção,Industrial,Manutenção,10
+IND_PE_A_DE_REPOSI_O_MEC_NICA,Peça de reposição mecânica,Industrial,Manutenção,10
+IND_PE_A_DE_REPOSI_O_EL_TRICA,Peça de reposição elétrica,Industrial,Manutenção,10
+IND_ESCOVA_DE_MOTOR,Escova de motor,Industrial,Manutenção,10
+IND_VENTILADOR_INDUSTRIAL,Ventilador industrial,Industrial,Manutenção,10
+IND_V_LVULA_DE_REPOSI_O,Válvula de reposição,Industrial,Manutenção,10
+IND_M_QUINA_INDUSTRIAL,Máquina industrial,Industrial,Máquinas e equipamentos,11
+IND_EQUIPAMENTO_INDUSTRIAL,Equipamento industrial,Industrial,Máquinas e equipamentos,11
+IND_COMPRESSOR,Compressor,Industrial,Máquinas e equipamentos,11
+IND_GERADOR,Gerador,Industrial,Máquinas e equipamentos,11
+IND_EMPILHADEIRA,Empilhadeira,Industrial,Máquinas e equipamentos,11
+IND_TALHA,Talha,Industrial,Máquinas e equipamentos,11
+IND_PONTE_ROLANTE,Ponte rolante,Industrial,Máquinas e equipamentos,11
+IND_FORNO_INDUSTRIAL,Forno industrial,Industrial,Máquinas e equipamentos,11
+IND_PRENSA,Prensa,Industrial,Máquinas e equipamentos,11
+IND_TORNO,Torno,Industrial,Máquinas e equipamentos,11
+IND_FRESADORA,Fresadora,Industrial,Máquinas e equipamentos,11
+IND_CENTRO_DE_USINAGEM,Centro de usinagem,Industrial,Máquinas e equipamentos,11
+IND_BOMBA_INDUSTRIAL,Bomba industrial,Industrial,Máquinas e equipamentos,11
+IND_VENTILADOR_INDUSTRIAL,Ventilador industrial,Industrial,Máquinas e equipamentos,11
+IND_EXAUSTOR_INDUSTRIAL,Exaustor industrial,Industrial,Máquinas e equipamentos,11
+IND_TRANSPORTADOR_INDUSTRIAL,Transportador industrial,Industrial,Máquinas e equipamentos,11
+IND_SERVI_O_DE_MANUTEN_O,Serviço de manutenção,Industrial,Serviços,6
+IND_SERVI_O_DE_CALIBRA_O,Serviço de calibração,Industrial,Serviços,6
+IND_SERVI_O_DE_INSPE_O,Serviço de inspeção,Industrial,Serviços,6
+IND_SERVI_O_DE_INSTALA_O,Serviço de instalação,Industrial,Serviços,6
+IND_SERVI_O_DE_TRANSPORTE,Serviço de transporte,Industrial,Serviços,6
+IND_SERVI_O_DE_USINAGEM,Serviço de usinagem,Industrial,Serviços,6
+IND_SERVI_O_DE_TRATAMENTO_T_RMICO,Serviço de tratamento térmico,Industrial,Serviços,6
+IND_SERVI_O_DE_PINTURA,Serviço de pintura,Industrial,Serviços,6
+IND_SERVI_O_DE_ENGENHARIA,Serviço de engenharia,Industrial,Serviços,6
+IND_SERVI_O_DE_CONSULTORIA,Serviço de consultoria,Industrial,Serviços,6
+AUT_MOTOR,Motor,Automotivo,Powertrain,14
+AUT_CABE_OTE,Cabeçote,Automotivo,Powertrain,14
+AUT_BLOCO_DO_MOTOR,Bloco do motor,Automotivo,Powertrain,14
+AUT_PIST_O,Pistão,Automotivo,Powertrain,14
+AUT_ANEL_DE_PIST_O,Anel de pistão,Automotivo,Powertrain,14
+AUT_BIELA,Biela,Automotivo,Powertrain,14
+AUT_VIRABREQUIM,Virabrequim,Automotivo,Powertrain,14
+AUT_COMANDO_DE_V_LVULAS,Comando de válvulas,Automotivo,Powertrain,14
+AUT_V_LVULA_DE_MOTOR,Válvula de motor,Automotivo,Powertrain,14
+AUT_MOLA_DE_V_LVULA,Mola de válvula,Automotivo,Powertrain,14
+AUT_TUCHO,Tucho,Automotivo,Powertrain,14
+AUT_CORREIA_DENTADA,Correia dentada,Automotivo,Powertrain,14
+AUT_CORRENTE_DE_COMANDO,Corrente de comando,Automotivo,Powertrain,14
+AUT_ENGRENAGEM_AUTOMOTIVA,Engrenagem automotiva,Automotivo,Powertrain,14
+AUT_BOMBA_DE_LEO,Bomba de óleo,Automotivo,Powertrain,14
+AUT_C_RTER,Cárter,Automotivo,Powertrain,14
+AUT_TAMPA_DE_V_LVULAS,Tampa de válvulas,Automotivo,Powertrain,14
+AUT_COLETOR_DE_ADMISS_O,Coletor de admissão,Automotivo,Powertrain,14
+AUT_COLETOR_DE_ESCAPE,Coletor de escape,Automotivo,Powertrain,14
+AUT_TURBOCOMPRESSOR,Turbocompressor,Automotivo,Powertrain,14
+AUT_BOMBA_D_GUA,Bomba d água,Automotivo,Arrefecimento e fluidos,14
+AUT_RADIADOR,Radiador,Automotivo,Arrefecimento e fluidos,14
+AUT_MANGUEIRA_AUTOMOTIVA,Mangueira automotiva,Automotivo,Arrefecimento e fluidos,14
+AUT_TERMOSTATO,Termostato,Automotivo,Arrefecimento e fluidos,14
+AUT_RESERVAT_RIO_DE_EXPANS_O,Reservatório de expansão,Automotivo,Arrefecimento e fluidos,14
+AUT_VENTOINHA,Ventoinha,Automotivo,Arrefecimento e fluidos,14
+AUT_INTERCOOLER,Intercooler,Automotivo,Arrefecimento e fluidos,14
+AUT_FILTRO_AUTOMOTIVO,Filtro automotivo,Automotivo,Arrefecimento e fluidos,14
+AUT_BICO_INJETOR,Bico injetor,Automotivo,Arrefecimento e fluidos,14
+AUT_BOMBA_DE_COMBUST_VEL,Bomba de combustível,Automotivo,Arrefecimento e fluidos,14
+AUT_EMBREAGEM,Embreagem,Automotivo,Transmissão e freio,14
+AUT_VOLANTE_DO_MOTOR,Volante do motor,Automotivo,Transmissão e freio,14
+AUT_DISCO_DE_EMBREAGEM,Disco de embreagem,Automotivo,Transmissão e freio,14
+AUT_PLAT_DE_EMBREAGEM,Platô de embreagem,Automotivo,Transmissão e freio,14
+AUT_CAIXA_DE_C_MBIO,Caixa de câmbio,Automotivo,Transmissão e freio,14
+AUT_SEMIEIXO,Semieixo,Automotivo,Transmissão e freio,14
+AUT_JUNTA_HOMOCIN_TICA,Junta homocinética,Automotivo,Transmissão e freio,14
+AUT_DISCO_DE_FREIO,Disco de freio,Automotivo,Transmissão e freio,14
+AUT_PASTILHA_DE_FREIO,Pastilha de freio,Automotivo,Transmissão e freio,14
+AUT_PIN_A_DE_FREIO,Pinça de freio,Automotivo,Transmissão e freio,14
+AUT_CILINDRO_MESTRE,Cilindro mestre,Automotivo,Transmissão e freio,14
+AUT_CUBO_DE_RODA,Cubo de roda,Automotivo,Transmissão e freio,14
+AUT_ROLAMENTO_DE_RODA,Rolamento de roda,Automotivo,Transmissão e freio,14
+AUT_TAMBOR_DE_FREIO,Tambor de freio,Automotivo,Transmissão e freio,14
+AUT_SAPATAS_DE_FREIO,Sapatas de freio,Automotivo,Transmissão e freio,14
+AUT_AMORTECEDOR,Amortecedor,Automotivo,Suspensão e direção,14
+AUT_MOLA_AUTOMOTIVA,Mola automotiva,Automotivo,Suspensão e direção,14
+AUT_BRA_O_DE_SUSPENS_O,Braço de suspensão,Automotivo,Suspensão e direção,14
+AUT_BUCHA_AUTOMOTIVA,Bucha automotiva,Automotivo,Suspensão e direção,14
+AUT_TERMINAL_DE_DIRE_O,Terminal de direção,Automotivo,Suspensão e direção,14
+AUT_BARRA_ESTABILIZADORA,Barra estabilizadora,Automotivo,Suspensão e direção,14
+AUT_CAIXA_DE_DIRE_O,Caixa de direção,Automotivo,Suspensão e direção,14
+AUT_COLUNA_DE_DIRE_O,Coluna de direção,Automotivo,Suspensão e direção,14
+AUT_PIV_DE_SUSPENS_O,Pivô de suspensão,Automotivo,Suspensão e direção,14
+AUT_BIELETA,Bieleta,Automotivo,Suspensão e direção,14
+AUT_BANDEJA_DE_SUSPENS_O,Bandeja de suspensão,Automotivo,Suspensão e direção,14
+AUT_MANGA_DE_EIXO,Manga de eixo,Automotivo,Suspensão e direção,14
+AUT_RODA_AUTOMOTIVA,Roda automotiva,Automotivo,Suspensão e direção,14
+AUT_PNEU,Pneu,Automotivo,Suspensão e direção,14
+AUT_BATERIA_AUTOMOTIVA,Bateria automotiva,Automotivo,Elétrica e eletrônica,14
+AUT_ALTERNADOR,Alternador,Automotivo,Elétrica e eletrônica,14
+AUT_MOTOR_DE_PARTIDA,Motor de partida,Automotivo,Elétrica e eletrônica,14
+AUT_SENSOR_AUTOMOTIVO,Sensor automotivo,Automotivo,Elétrica e eletrônica,14
+AUT_CHICOTE_EL_TRICO,Chicote elétrico,Automotivo,Elétrica e eletrônica,14
+AUT_CONECTOR_AUTOMOTIVO,Conector automotivo,Automotivo,Elétrica e eletrônica,14
+AUT_L_MPADA_AUTOMOTIVA,Lâmpada automotiva,Automotivo,Elétrica e eletrônica,14
+AUT_M_DULO_ELETR_NICO,Módulo eletrônico,Automotivo,Elétrica e eletrônica,14
+AUT_ECU,ECU,Automotivo,Elétrica e eletrônica,14
+AUT_REL_AUTOMOTIVO,Relé automotivo,Automotivo,Elétrica e eletrônica,14
+AUT_FUS_VEL_AUTOMOTIVO,Fusível automotivo,Automotivo,Elétrica e eletrônica,14
+AUT_INTERRUPTOR_AUTOMOTIVO,Interruptor automotivo,Automotivo,Elétrica e eletrônica,14
+AUT_ATUADOR_ELETR_NICO,Atuador eletrônico,Automotivo,Elétrica e eletrônica,14
+AUT_C_MERA_AUTOMOTIVA,Câmera automotiva,Automotivo,Elétrica e eletrônica,14
+AUT_ANTENA_AUTOMOTIVA,Antena automotiva,Automotivo,Elétrica e eletrônica,14
+AUT_PARAFUSO_AUTOMOTIVO,Parafuso automotivo,Automotivo,Fixação e carroceria,14
+AUT_PORCA_AUTOMOTIVA,Porca automotiva,Automotivo,Fixação e carroceria,14
+AUT_ARRUELA_AUTOMOTIVA,Arruela automotiva,Automotivo,Fixação e carroceria,14
+AUT_PRESILHA_AUTOMOTIVA,Presilha automotiva,Automotivo,Fixação e carroceria,14
+AUT_GRAMPO_AUTOMOTIVO,Grampo automotivo,Automotivo,Fixação e carroceria,14
+AUT_PE_A_ESTAMPADA,Peça estampada,Automotivo,Fixação e carroceria,14
+AUT_PE_A_USINADA,Peça usinada,Automotivo,Fixação e carroceria,14
+AUT_PE_A_INJETADA,Peça injetada,Automotivo,Fixação e carroceria,14
+AUT_PE_A_FUNDIDA,Peça fundida,Automotivo,Fixação e carroceria,14
+AUT_PE_A_FORJADA,Peça forjada,Automotivo,Fixação e carroceria,14
+AUT_PAINEL_DE_CARROCERIA,Painel de carroceria,Automotivo,Fixação e carroceria,14
+AUT_PARA_CHOQUE,Para-choque,Automotivo,Fixação e carroceria,14
+AUT_GRADE_FRONTAL,Grade frontal,Automotivo,Fixação e carroceria,14
+AUT_RETROVISOR,Retrovisor,Automotivo,Fixação e carroceria,14
+AUT_MA_ANETA,Maçaneta,Automotivo,Fixação e carroceria,14
+AUT_VIDRO_AUTOMOTIVO,Vidro automotivo,Automotivo,Fixação e carroceria,14
+AUT_BANCO_AUTOMOTIVO,Banco automotivo,Automotivo,Interior e escape,14
+AUT_CINTO_DE_SEGURAN_A,Cinto de segurança,Automotivo,Interior e escape,14
+AUT_AIRBAG,Airbag,Automotivo,Interior e escape,14
+AUT_PAINEL_DE_INSTRUMENTOS,Painel de instrumentos,Automotivo,Interior e escape,14
+AUT_VOLANTE_DE_DIRE_O,Volante de direção,Automotivo,Interior e escape,14
+AUT_TAPETE_AUTOMOTIVO,Tapete automotivo,Automotivo,Interior e escape,14
+AUT_ISOLANTE_AC_STICO,Isolante acústico,Automotivo,Interior e escape,14
+AUT_CATALISADOR_AUTOMOTIVO,Catalisador automotivo,Automotivo,Interior e escape,14
+AUT_SILENCIOSO,Silencioso,Automotivo,Interior e escape,14
+AUT_TUBO_DE_ESCAPE,Tubo de escape,Automotivo,Interior e escape,14

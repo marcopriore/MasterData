@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { buildErpDeletePayload, buildErpPayload, type DictionaryField } from './payload'
 import { callErp } from './client'
+import { classifyErpSyncAction } from './sync-action'
 
 export type IntegrateOutcome =
   | { result: 'mock' }
@@ -13,6 +14,14 @@ export type EliminateOutcome =
   | { result: 'skipped'; reason: string }
   | { result: 'eliminated' }
   | { result: 'failed'; message: string }
+
+export type SyncOutcome =
+  | { result: 'mock'; plan: 'criar' | 'alterar' | 'eliminar' }
+  | { result: 'skipped'; reason: string; plan: 'skip' | 'criar' | 'alterar' | 'eliminar' }
+  | { result: 'integrated'; idErp: string; plan: 'criar' | 'alterar' }
+  | { result: 'eliminated'; plan: 'eliminar' }
+  | { result: 'failed'; message: string; plan: 'criar' | 'alterar' | 'eliminar' }
+  | { result: 'not_configured'; plan: 'eliminar' }
 
 const RETRYABLE = ['pendente_erp', 'erro_erp']
 
@@ -48,6 +57,7 @@ async function audit(tenantId: number, userId: string | null, action: string, de
  * Cria ou altera o material no ERP pela integração ativa do tenant.
  * Sem id_erp é criação; com id_erp é alteração. Sem integração ativa devolve 'mock'.
  * O status vai para 'integrando' antes da chamada, então duas chamadas ao mesmo material não saem juntas.
+ * Obsoleto e Bloqueado não passam por aqui — use syncMaterial.
  */
 export async function integrateMaterial(tenantId: number, materialId: number, userId: string | null): Promise<IntegrateOutcome> {
   const { data: material } = await supabaseAdmin
@@ -57,6 +67,12 @@ export async function integrateMaterial(tenantId: number, materialId: number, us
     .eq('tenant_id', tenantId)
     .maybeSingle()
   if (!material) return { result: 'skipped', reason: 'material não encontrado' }
+  if (material.status === 'Bloqueado') {
+    return { result: 'skipped', reason: 'Bloqueado é só local; não sincroniza com o ERP' }
+  }
+  if (material.status === 'Obsoleto') {
+    return { result: 'skipped', reason: 'Obsoleto sincroniza por eliminação; use Sincronizar com ERP' }
+  }
   if (!RETRYABLE.includes(material.erp_status)) {
     return { result: 'skipped', reason: `status atual não permite integração: ${material.erp_status ?? 'sem status'}` }
   }
@@ -147,10 +163,46 @@ export async function eliminateMaterial(tenantId: number, materialId: number, us
 
   await supabaseAdmin
     .from('material_database')
-    .update({ status: 'Obsoleto', erp_error_message: null, updated_at: new Date().toISOString() })
+    .update({
+      status: 'Obsoleto',
+      erp_status: 'integrado_erp',
+      erp_error_message: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', materialId)
   await audit(tenantId, userId, 'erp_eliminated', 'Material eliminado no ERP', { material_id: materialId, erp_code: material.id_erp })
   return { result: 'eliminated' }
+}
+
+/**
+ * Sincroniza um material com o ERP conforme o status de negócio:
+ * Ativo → criar/alterar; Obsoleto+id_erp → eliminar; Bloqueado → skip.
+ */
+export async function syncMaterial(tenantId: number, materialId: number, userId: string | null): Promise<SyncOutcome> {
+  const { data: material } = await supabaseAdmin
+    .from('material_database')
+    .select('id, status, id_erp, erp_status')
+    .eq('id', materialId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (!material) return { result: 'skipped', reason: 'material não encontrado', plan: 'skip' }
+
+  const plan = classifyErpSyncAction(material)
+  if (plan.action === 'skip') return { result: 'skipped', reason: plan.reason, plan: 'skip' }
+
+  if (plan.action === 'eliminar') {
+    const out = await eliminateMaterial(tenantId, materialId, userId)
+    if (out.result === 'eliminated') return { result: 'eliminated', plan: 'eliminar' }
+    if (out.result === 'not_configured') return { result: 'not_configured', plan: 'eliminar' }
+    if (out.result === 'skipped') return { result: 'skipped', reason: out.reason, plan: 'eliminar' }
+    return { result: 'failed', message: out.message, plan: 'eliminar' }
+  }
+
+  const out = await integrateMaterial(tenantId, materialId, userId)
+  if (out.result === 'integrated') return { result: 'integrated', idErp: out.idErp, plan: plan.action }
+  if (out.result === 'mock') return { result: 'mock', plan: plan.action }
+  if (out.result === 'skipped') return { result: 'skipped', reason: out.reason, plan: plan.action }
+  return { result: 'failed', message: out.message, plan: plan.action }
 }
 
 /** Disparo da última etapa: cria no ERP o material nascido da solicitação, se houver integração ativa. */

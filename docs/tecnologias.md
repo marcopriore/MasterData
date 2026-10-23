@@ -50,13 +50,14 @@ npm install
 npm run dev
 ```
 
-Variáveis em `web/.env.local`:
+Variáveis em `web/.env.local` (modelo comentado em `web/.env.example`; produção em [deploy-producao.md](./deploy-producao.md)):
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` (só no servidor: onboarding, admin de usuários, import, aviso por e-mail)
 - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (só no servidor). Sem a chave, o sino continua e o e-mail é ignorado.
 - `AXISDESK_API_KEY` (só no servidor). `AXISDESK_WEBHOOK_SECRET` valida o webhook. `AXISDESK_BASE_URL` é opcional; o padrão é `https://suporte.axisstrategy.com.br`.
+- `NEXT_PUBLIC_APP_URL`: endereço público, sem barra final. Vai nos links de e-mail e das solicitações criadas por API. Em produção é obrigatório.
 - `INTEGRATION_SECRET_KEY` (só no servidor): 32 bytes em base64. Cifra a chave, token, senha ou client secret do ERP de cada tenant. Produção precisa da mesma chave do ambiente onde o segredo foi salvo; se ela mudar, os segredos gravados precisam ser digitados de novo.
 
 Tenant de demonstração:
@@ -67,6 +68,27 @@ npm run create-demo-users
 ```
 
 Depois, executar `supabase/seed_demo.sql` no SQL Editor. A senha compartilhada dos usuários demo está em `supabase/create-demo-users.js`.
+
+Base de materiais em massa (usa os PDMs já ativos do tenant):
+
+```powershell
+cd C:\Dev\MasterData\web
+node ../supabase/seed-materials-mass.js
+node ../supabase/seed-materials-mass.js --dry-run
+node ../supabase/seed-materials-mass.js --tenant=empresa-demo --per-pdm=40
+node ../supabase/seed-materials-mass.js --replace
+# ou: npm run seed-materials-mass -- --per-pdm=40
+```
+
+O script `supabase/seed-materials-mass.js` combina LOVs do PDM, varia numéricos/texto, monta descrição curta (limite de `tenants.max_description_length`, padrão 40) e detalhada, e grava em `material_database` com `source=seed_mass`. `--replace` apaga só essa origem antes de recriar. Preferir `node ...` direto: em alguns npm as flags `--per-pdm` são engolidas.
+
+Produção:
+
+```powershell
+npm run secrets                     # gera INTEGRATION_SECRET_KEY e segredo do webhook
+npm run prd:check                   # confere .env.production.local e o Supabase
+npm run prd:check -- --live         # também o site publicado
+```
 
 ## Testes
 

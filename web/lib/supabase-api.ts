@@ -1156,9 +1156,13 @@ type ErpActionResult = {
   idErp?: string
   message?: string
   reason?: string
+  plan?: 'criar' | 'alterar' | 'eliminar' | 'skip'
 }
 
-async function postErpAction(action: 'integrar' | 'eliminar', ids: number[]): Promise<ErpActionResult[]> {
+async function postErpAction(
+  action: 'integrar' | 'eliminar' | 'sincronizar',
+  ids: number[]
+): Promise<ErpActionResult[]> {
   const res = await fetch('/api/database/materials/erp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1169,7 +1173,41 @@ async function postErpAction(action: 'integrar' | 'eliminar', ids: number[]): Pr
   return payload.results ?? []
 }
 
-/** Integração em lote. Com integração ativa, chama o ERP; sem ela, segue a simulação. */
+/** Altera o status de negócio em lote. Obsoleto com id_erp marca pendente_erp para eliminação. */
+export async function updateMaterialsStatus(
+  materialIds: number[],
+  status: 'Ativo' | 'Bloqueado' | 'Obsoleto'
+): Promise<{
+  updated: number[]
+  pending_elimination: number[]
+  skipped: { id: number; reason: string }[]
+  total: number
+  status: string
+}> {
+  const res = await fetch('/api/database/materials/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: materialIds, status }),
+  })
+  const payload = await res.json().catch(() => ({})) as {
+    updated?: number[]
+    pending_elimination?: number[]
+    skipped?: { id: number; reason: string }[]
+    total?: number
+    status?: string
+    error?: string
+  }
+  if (!res.ok) throw new Error(payload.error ?? 'Falha ao alterar status')
+  return {
+    updated: payload.updated ?? [],
+    pending_elimination: payload.pending_elimination ?? [],
+    skipped: payload.skipped ?? [],
+    total: payload.total ?? materialIds.length,
+    status: payload.status ?? status,
+  }
+}
+
+/** Integração em lote (criação/alteração). Preferir erpSyncMaterials na Base de Dados. */
 export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[]; failed: { id: number; message: string }[]; total: number }> {
   const results = await postErpAction('integrar', materialIds)
   const mockIds = results.filter((r) => r.result === 'mock').map((r) => r.id)
@@ -1180,6 +1218,90 @@ export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ in
     failed: results.filter((r) => r.result === 'failed').map((r) => ({ id: r.id, message: r.message ?? '' })),
     total: materialIds.length,
   }
+}
+
+export type ErpSyncBatchResult = {
+  created: number[]
+  updated: number[]
+  eliminated: number[]
+  skipped: { id: number; reason: string }[]
+  failed: { id: number; message: string; plan?: string }[]
+  total: number
+}
+
+/**
+ * Sincronização em lote: Ativo→criar/alterar, Obsoleto+id_erp→eliminar, Bloqueado→skip.
+ * Sem integração ativa, simula create/update e, para eliminar, marca Obsoleto+integrado_erp.
+ */
+export async function erpSyncMaterials(materialIds: number[]): Promise<ErpSyncBatchResult> {
+  const results = await postErpAction('sincronizar', materialIds)
+  const created: number[] = []
+  const updated: number[] = []
+  const eliminated: number[] = []
+  const skipped: { id: number; reason: string }[] = []
+  const failed: { id: number; message: string; plan?: string }[] = []
+
+  const mockCreateUpdate = results.filter((r) => r.result === 'mock' && (r.plan === 'criar' || r.plan === 'alterar'))
+  const mockEliminate = results.filter((r) => r.result === 'not_configured' || (r.result === 'mock' && r.plan === 'eliminar'))
+
+  if (mockCreateUpdate.length) {
+    const simulated = await simulateErpIntegrateMaterials(mockCreateUpdate.map((r) => r.id))
+    for (const id of simulated.integrated) {
+      const plan = mockCreateUpdate.find((r) => r.id === id)?.plan
+      if (plan === 'alterar') updated.push(id)
+      else created.push(id)
+    }
+    for (const id of simulated.skipped) skipped.push({ id, reason: 'simulação ignorou o item' })
+  }
+
+  if (mockEliminate.length) {
+    const simulated = await simulateErpEliminateMaterials(mockEliminate.map((r) => r.id))
+    eliminated.push(...simulated.eliminated)
+    for (const id of simulated.skipped) skipped.push({ id, reason: 'simulação não eliminou o item' })
+  }
+
+  for (const r of results) {
+    if (r.result === 'mock' || r.result === 'not_configured') continue
+    if (r.result === 'integrated') {
+      if (r.plan === 'alterar') updated.push(r.id)
+      else created.push(r.id)
+    } else if (r.result === 'eliminated') {
+      eliminated.push(r.id)
+    } else if (r.result === 'skipped') {
+      skipped.push({ id: r.id, reason: r.reason ?? 'ignorado' })
+    } else if (r.result === 'failed') {
+      failed.push({ id: r.id, message: r.message ?? 'falha', plan: r.plan })
+    }
+  }
+
+  return { created, updated, eliminated, skipped, failed, total: materialIds.length }
+}
+
+async function simulateErpEliminateMaterials(materialIds: number[]): Promise<{ eliminated: number[]; skipped: number[] }> {
+  const supabase = createClient()
+  const eliminated: number[] = []
+  const skipped: number[] = []
+  const now = new Date().toISOString()
+  for (const mid of materialIds) {
+    const { data: row } = await supabase
+      .from('material_database')
+      .select('id, id_erp, status, erp_status')
+      .eq('id', mid)
+      .single()
+    if (!row?.id_erp || row.erp_status === 'integrando') {
+      skipped.push(mid)
+      continue
+    }
+    const { data } = await supabase
+      .from('material_database')
+      .update({ status: 'Obsoleto', erp_status: 'integrado_erp', erp_error_message: null, updated_at: now })
+      .eq('id', mid)
+      .select('id')
+      .single()
+    if (data) eliminated.push(mid)
+    else skipped.push(mid)
+  }
+  return { eliminated, skipped }
 }
 
 async function simulateErpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[] }> {
@@ -1208,7 +1330,7 @@ export type ErpIntegrateResult =
   | { success: true; erp_code: string; material: Record<string, unknown> }
   | { success: false; error: string; material?: Record<string, unknown> }
 
-/** Integra um material. Com integração ativa, chama o ERP; sem ela, segue a simulação. */
+/** Integra um material (criar/alterar). Preferir erpSyncMaterial no detalhe quando o status pode ser Obsoleto. */
 export async function erpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
   const [outcome] = await postErpAction('integrar', [materialId])
   if (!outcome || outcome.result === 'mock') return simulateErpIntegrateMaterial(materialId)
@@ -1221,6 +1343,42 @@ export async function erpIntegrateMaterial(materialId: number): Promise<ErpInteg
     success: false,
     error: outcome.message ?? outcome.reason ?? 'Não foi possível integrar o material.',
     material: material ?? undefined,
+  }
+}
+
+/** Sincroniza um material (criar/alterar/eliminar conforme status). */
+export async function erpSyncMaterial(materialId: number): Promise<ErpIntegrateResult & { plan?: string }> {
+  const [outcome] = await postErpAction('sincronizar', [materialId])
+  const supabase = createClient()
+
+  if (outcome?.result === 'not_configured' || (outcome?.result === 'mock' && outcome.plan === 'eliminar')) {
+    const simulated = await simulateErpEliminateMaterials([materialId])
+    const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
+    if (simulated.eliminated.includes(materialId)) {
+      return { success: true, erp_code: material?.id_erp ?? '', material: material ?? {}, plan: 'eliminar' }
+    }
+    return { success: false, error: 'Não foi possível eliminar (simulação).', material: material ?? undefined, plan: 'eliminar' }
+  }
+
+  if (!outcome || outcome.result === 'mock') {
+    const simulated = await simulateErpIntegrateMaterial(materialId)
+    return { ...simulated, plan: outcome?.plan }
+  }
+
+  const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
+  if (outcome.result === 'integrated' || outcome.result === 'eliminated') {
+    return {
+      success: true,
+      erp_code: outcome.idErp ?? material?.id_erp ?? '',
+      material: material ?? {},
+      plan: outcome.plan,
+    }
+  }
+  return {
+    success: false,
+    error: outcome.message ?? outcome.reason ?? 'Não foi possível sincronizar o material.',
+    material: material ?? undefined,
+    plan: outcome.plan,
   }
 }
 

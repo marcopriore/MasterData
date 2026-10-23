@@ -11,7 +11,10 @@
     "test:watch": "vitest",
     "security": "vitest run security && node scripts/security-audit.mjs",
     "check": "vitest run && node scripts/security-audit.mjs && tsc --noEmit",
-    "create-demo-users": "node ../supabase/create-demo-users.js"
+    "create-demo-users": "node ../supabase/create-demo-users.js",
+    "seed-materials-mass": "node ../supabase/seed-materials-mass.js --",
+    "secrets": "node scripts/generate-secrets.mjs",
+    "prd:check": "node scripts/prd-check.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
