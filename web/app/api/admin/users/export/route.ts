@@ -1,28 +1,21 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { requirePermission } from '@/lib/server-access'
+import { authEmailsById } from '@/lib/auth-emails'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
 export async function GET() {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+  const ctx = await requirePermission('can_manage_users')
+  if ('error' in ctx) return ctx.error
 
-  const { data: profile } = await supabase.from('users').select('tenant_id, roles!users_role_id_fkey(name)').eq('id', user.id).single()
-  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const effectiveTenantId = isMaster
-    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
-    : profile?.tenant_id
-  let q = supabaseAdmin.from('users').select('id, name, tenant_id, role_id, is_active, roles!users_role_id_fkey(name), tenants(name, slug)').order('created_at', { ascending: false })
-  if (effectiveTenantId) q = q.eq('tenant_id', effectiveTenantId)
-  const { data: users, error } = await q
+  const { data: users, error } = await supabaseAdmin
+    .from('users')
+    .select('id, name, tenant_id, role_id, is_active, roles!users_role_id_fkey(name), tenants(name, slug)')
+    .eq('tenant_id', ctx.tenantId)
+    .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers()
-  const emailMap: Record<string, string> = {}
-  for (const au of authUsers?.users ?? []) {
-    if (au.email) emailMap[au.id] = au.email
-  }
+  const emailMap = await authEmailsById((users ?? []).map((u) => u.id))
 
   const rows = (users ?? []).map((u) => {
     const role = Array.isArray(u.roles) ? u.roles[0] : u.roles

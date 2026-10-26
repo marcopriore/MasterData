@@ -30,7 +30,7 @@ function routePath(file: string) {
   return '/' + rel(file).replace(/^app\//, '').replace(/\/route\.ts$/, '')
 }
 
-const SESSION_GUARDS = /auth\.getUser\(|getCallerAccess\(|requireMasterTenant\(|getSupportContext\(/
+const SESSION_GUARDS = /auth\.getUser\(|getCallerAccess\(|requirePermission\(|requireMasterTenant\(|getSupportContext\(/
 
 describe('rotas de API', () => {
   const routes = walk(path.join(WEB, 'app', 'api'), (file) => file.endsWith(`${path.sep}route.ts`))

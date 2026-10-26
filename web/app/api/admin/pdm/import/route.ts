@@ -1,4 +1,4 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { requirePermission } from '@/lib/server-access'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
@@ -238,16 +238,9 @@ function parseAttrSheet(
 }
 
 export async function POST(request: Request) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
-
-  const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const effectiveTenantId = isMaster
-    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
-    : profile?.tenant_id
-  if (!effectiveTenantId) return NextResponse.json({ error: 'Perfil sem tenant' }, { status: 400 })
+  const ctx = await requirePermission('can_bulk_import')
+  if ('error' in ctx) return ctx.error
+  const effectiveTenantId = ctx.tenantId
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null

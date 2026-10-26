@@ -1,4 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { requirePermission } from '@/lib/server-access'
+import { safeSearchTerm } from '@/lib/search-term'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
@@ -11,9 +13,9 @@ const TEMPLATE_HEADERS = [
 ]
 
 export async function GET(request: Request) {
+  const ctx = await requirePermission('can_view_database')
+  if ('error' in ctx) return ctx.error
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
   const q = searchParams.get('q') ?? ''
@@ -23,7 +25,7 @@ export async function GET(request: Request) {
   const date_from = searchParams.get('date_from') ?? ''
   const date_to = searchParams.get('date_to') ?? ''
 
-  let query = supabase.from('material_database').select('*').order('created_at', { ascending: false })
+  let query = supabase.from('material_database').select('*').eq('tenant_id', ctx.tenantId).order('created_at', { ascending: false })
   if (q) query = query.or(`id_sistema.ilike.%${q}%,description.ilike.%${q}%,id_erp.ilike.%${q}%`)
   if (status) query = query.eq('status', status)
   if (pdm_code) query = query.eq('pdm_code', pdm_code)

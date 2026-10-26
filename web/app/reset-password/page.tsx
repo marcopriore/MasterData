@@ -125,7 +125,7 @@ export default function ResetPasswordPage() {
 
             {(stage === 'ready' || stage === 'saving') && (
               <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                <p className="text-sm text-slate-600">Crie a nova senha, com pelo menos {MIN_PASSWORD_LENGTH} caracteres.</p>
+                <p className="text-sm text-slate-600">Crie a nova senha, com pelo menos {MIN_PASSWORD_LENGTH} caracteres, letras e números.</p>
                 <div className="space-y-1.5">
                   <label htmlFor="new-password" className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
                     Nova senha

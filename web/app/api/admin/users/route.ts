@@ -1,6 +1,8 @@
-import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { callerCanManageUsers, syncUserAccess } from '@/lib/user-access'
+import { requirePermission } from '@/lib/server-access'
+import { authEmailsById } from '@/lib/auth-emails'
+import { passwordProblem } from '@/lib/password-policy'
+import { syncUserAccess } from '@/lib/user-access'
 import { NextResponse } from 'next/server'
 
 async function insertLog(params: {
@@ -27,18 +29,10 @@ async function insertLog(params: {
 }
 
 export async function GET() {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+  const ctx = await requirePermission('can_manage_users')
+  if ('error' in ctx) return ctx.error
 
-  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const access = await callerCanManageUsers(supabase, user.id, isMaster)
-  if (!access.allowed) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
-
-  const effectiveTenantId = isMaster
-    ? ((user.app_metadata?.tenant_id as number) ?? access.tenantId)
-    : access.tenantId
-  let q = supabaseAdmin.from('users').select(`
+  const { data: users, error: usersError } = await supabaseAdmin.from('users').select(`
     id,
     name,
     tenant_id,
@@ -46,19 +40,11 @@ export async function GET() {
     is_active,
     roles!users_role_id_fkey(id, name),
     tenants(id, name)
-  `).order('created_at', { ascending: false })
-
-  if (effectiveTenantId) q = q.eq('tenant_id', effectiveTenantId)
-  const { data: users, error: usersError } = await q
+  `).eq('tenant_id', ctx.tenantId).order('created_at', { ascending: false })
   if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 })
 
-  const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers()
-  const emailMap: Record<string, string> = {}
-  for (const au of authUsers?.users ?? []) {
-    if (au.email) emailMap[au.id] = au.email
-  }
-
   const userIds = (users ?? []).map((u) => u.id)
+  const emailMap = await authEmailsById(userIds)
   const groupMap: Record<string, { id: number; name: string }[]> = {}
   const grantMap: Record<string, string[]> = {}
   if (userIds.length > 0) {
@@ -99,30 +85,23 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
-
-  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const access = await callerCanManageUsers(supabase, user.id, isMaster)
-  if (!access.allowed) return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
-
-  const effectiveTenantId = isMaster
-    ? ((user.app_metadata?.tenant_id as number) ?? access.tenantId)
-    : access.tenantId
+  const ctx = await requirePermission('can_manage_users')
+  if ('error' in ctx) return ctx.error
+  const user = { id: ctx.userId }
 
   const body = await request.json()
-  const { email, password, name, tenant_id, role_id } = body
+  const { email, password, name, role_id } = body
   if (!email || !password || !name || !role_id) {
     return NextResponse.json({ error: 'Campos obrigatórios: email, password, name, role_id' }, { status: 400 })
   }
+  const weak = passwordProblem(String(password))
+  if (weak) return NextResponse.json({ error: weak }, { status: 400 })
 
-  const tenantId = tenant_id != null ? Number(tenant_id) : effectiveTenantId
+  // Sempre no tenant em uso; o Master troca de tenant para cadastrar em outro.
+  const tenantId = ctx.tenantId
   const roleId = Number(role_id)
-  if (!tenantId) return NextResponse.json({ error: 'tenant_id é obrigatório' }, { status: 400 })
-  if (!isMaster && access.tenantId !== tenantId) {
-    return NextResponse.json({ error: 'Sem permissão para criar usuário em outro tenant' }, { status: 403 })
-  }
+  const { data: role } = await supabaseAdmin.from('roles').select('id').eq('id', roleId).eq('tenant_id', tenantId).maybeSingle()
+  if (!role) return NextResponse.json({ error: 'Perfil não pertence a esta empresa' }, { status: 400 })
 
   const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: String(email).trim().toLowerCase(),

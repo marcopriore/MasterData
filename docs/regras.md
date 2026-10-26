@@ -3,10 +3,44 @@
 ## Multi-tenant
 
 - Quase toda tabela de negócio tem `tenant_id`.
-- RLS usa `get_user_tenant_id()`. Nas policies, essa função, `is_master_user()` e `auth.uid()` ficam dentro de `(SELECT …)` (migration 027): assim o Postgres calcula uma vez por consulta, não uma vez por linha. Policy nova deve seguir o mesmo formato. Para usuário comum, o tenant vem do perfil. Para master, vem de `app_metadata.tenant_id` (troca de cliente).
-- `is_master_user()` libera visão cruzada onde a policy permite. No dashboard, a aplicação ainda filtra pelo tenant efetivo, porque a policy do master devolve todas as linhas.
+- **Tenant em uso:** `get_user_tenant_id()`. Para usuário comum vem do perfil; para o Master vem de `app_metadata.tenant_id` do token (troca de cliente). No navegador, `getCurrentUserTenantId()` segue a mesma regra, lendo o token (`getClaims`). No servidor, `getCallerAccess()` / `requirePermission()` em `lib/server-access.ts`.
+- **RLS estrita (migration 031):** toda tabela de negócio só mostra e só aceita linhas do tenant em uso, inclusive para o Master. A visão de todos os tenants existe só na lista de tenants (`tenants`) e em `tenant_overview()` (totais da tela de tenants). Para ver outro cliente, o Master troca de tenant.
+- **Exceções da regra:**
+  - `users`: lê o tenant em uso e o próprio perfil. O perfil do Master fica no tenant de origem. Gravação só pelo servidor.
+  - `roles`: gravação exige `can_manage_roles` (`user_has_permission`).
+  - `request_history`: insere só em solicitação do tenant e em nome do próprio usuário. Não se altera nem se apaga.
+  - `notifications`: cada um vê e marca as próprias.
+  - `user_notification_prefs`: cada um as próprias.
+- **Funções do banco:** quem não fez login não executa nenhuma função do schema `public` (031, inclusive as criadas depois). As ações por id de solicitação (`assign_request`, `advance_workflow`, `reject_request`, `move_request_stage`, `resubmit_request`) só acham solicitação do tenant em uso.
+- **Policies:** `get_user_tenant_id()`, `is_master_user()` e `auth.uid()` ficam dentro de `(SELECT …)` (027), para o Postgres calcular uma vez por consulta, não uma vez por linha. Policy nova segue o mesmo formato e vai `TO authenticated`.
+- **Permissão no banco (migration 032):** a escrita direta pela chave pública exige a mesma permissão da tela.
+
+  | Tabela ou ação | Permissão exigida |
+  |---|---|
+  | PDM | `can_edit_pdm` |
+  | Campos | `can_manage_fields` |
+  | Workflow | `can_edit_workflows` |
+  | Dicionário e funções do dicionário | `can_manage_value_dictionary` |
+  | Abrir solicitação | `can_submit_request` |
+  | Alterar solicitação | `can_attend` (ou `can_edit_workflows` para migrar de workflow) |
+  | Alterar material | `can_standardize` ou `can_edit_pdm` |
+  | Ler log | `can_view_logs` |
+  | `assign_request` e `move_request_stage` | `can_attend` |
+  | `advance_workflow` | `can_approve` |
+  | `reject_request` | `can_reject` |
+
+  Material não se cria nem se apaga pelo navegador.
+- **Colunas travadas (gatilhos `guard_*`):** pela chave pública não se mudam:
+  - **solicitação:** etapa, atendente, autor, tenant e PDM. Solicitação nova começa na primeira etapa ativa.
+  - **material:** status de negócio, código e situação no ERP (só volta para `pendente_erp` ao editar), origem e tenant.
+  
+  Essas mudanças são das funções do banco e do servidor (`/api/database/materials/status` e `/erp`).
+- **Log e histórico:** só recebem registros novos, em nome do próprio usuário. Ninguém altera nem apaga.
+- **ERP simulado:** sem integração ativa, a simulação roda no servidor (`lib/erp/simulate.ts`), depois da permissão e da trava de duplicidade.
+- **Rotas com service role** (ignoram a RLS) filtram `tenant_id` pelo tenant em uso e conferem que o id recebido pertence a ele antes de alterar.
+- **Permissões do Master:** tem todas as permissões em qualquer tenant (`allPermissions`), porque o papel dele fica no tenant de origem.
+- **Troca de tenant:** exclusiva de quem tem `is_master` no metadata de auth. Se o servidor recusar, nada muda. Depois da troca a página recarrega, o que também limpa os caches do navegador.
 - Unidades de medida são globais.
-- Troca de tenant é exclusiva de quem tem `is_master` no metadata de auth.
 
 ## Autenticação
 
@@ -159,6 +193,24 @@ O gate não promete segurança total. Ele impede que regras já conquistadas se 
 - **Dependências:** `scripts/security-audit.mjs` falha com vulnerabilidade high ou critical em dependência de produção fora de `security/audit-allowlist.json`. Cada exceção tem motivo e data de revisão; vencida, volta a falhar.
 - **APIs de material:** até 120 chamadas por minuto por chave (429 com `Retry-After`). Sem chave válida, teto geral de 60 por minuto; acima disso nem grava no monitor.
 - **Headers:** `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` em toda resposta; HSTS em produção. Sem `X-Powered-By`.
+- **CSP:** `proxy.ts` gera um nonce por requisição e manda `Content-Security-Policy` (`lib/csp.ts`):
+  - script só do próprio site com o nonce (`strict-dynamic`);
+  - conexão só com o próprio site e o Supabase;
+  - `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`.
+  
+  O script de tema recebe o nonce no `layout.tsx`. Script inline novo precisa do nonce.
+- **CSRF:** alteração (POST, PUT, PATCH, DELETE) em `/api` com sessão, vinda de outro site, recebe 403 (`isCrossSiteWrite`, com `Sec-Fetch-Site` ou `Origin`).
+- **Busca:** texto digitado passa por `safeSearchTerm` antes de entrar num filtro `.or()` do PostgREST.
+- **Senha:** mínimo de 8 caracteres, com letras e números (`lib/password-policy.ts`), no perfil, na redefinição, na criação de usuário e no onboarding. Trocar a própria senha exige a atual. Conta criada por importação ou onboarding sem senha nasce com senha aleatória e o usuário cria a dele pelo e-mail. A mesma regra precisa estar no Supabase Auth, que é quem trava de fato.
+- **Sonda:** `npm run security:probe` cria dois tenants temporários e tenta, pela chave pública:
+  - acesso sem login;
+  - leitura e alteração entre tenants;
+  - autopromoção;
+  - pular etapa;
+  - forjar ERP;
+  - apagar log.
+  
+  Confere no banco que nada mudou, confere que o uso legítimo continua funcionando e apaga tudo. Rodar depois de toda migration de policy ou função.
 
 Exceção a qualquer regra entra no próprio teste (`web/security/gate.test.ts`) ou na allowlist, sempre com motivo.
 

@@ -142,6 +142,13 @@ export function emptyPermissions(): RolePermissions {
   }
 }
 
+/** Master: tudo liberado em qualquer tenant (o papel dele fica no tenant de origem). */
+export function allPermissions(): RolePermissions {
+  const result = emptyPermissions()
+  for (const key of PERMISSION_KEYS) result[key] = true
+  return result
+}
+
 export function isPermissionKey(value: string): value is PermissionKey {
   return (PERMISSION_KEYS as string[]).includes(value)
 }

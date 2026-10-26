@@ -161,6 +161,8 @@ async function checkSupabase(env) {
     ['028', 'resubmit_request', { p_request_id: -1, p_pdm_id: -1, p_technical_attributes: {}, p_generated_description: '' }],
     ['029', 'report_material_base', {}],
     ['030', 'erp_text', { p: 'teste' }],
+    ['031', 'tenant_overview', {}],
+    ['032', 'require_permission', { p_key: 'can_view_logs' }],
   ]
   for (const [migration, fn, params] of rpcs) {
     const { error: rpcErr } = await admin.rpc(fn, params)
@@ -171,6 +173,12 @@ async function checkSupabase(env) {
       ok(`migration ${migration}: ${fn}`)
     }
   }
+
+  // Sem login (só a chave pública do navegador) nenhuma função do banco pode rodar.
+  const anonClient = createClient(url, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } })
+  const { error: anonErr } = await anonClient.rpc('reject_request', { p_request_id: -1 })
+  if (anonErr && (anonErr.code === '42501' || /permission denied/i.test(anonErr.message))) ok('migration 031: funções fechadas para quem não fez login')
+  else fail(`migration 031: a chave pública executa reject_request (${anonErr?.message ?? 'sem erro'}) — rode supabase/migrations/031_tenant_isolation.sql`)
 
   const { data: pdmCodes, error: pdmCodesErr } = await admin.from('pdm_templates').select('internal_code')
   if (pdmCodesErr) fail(`não leu pdm_templates: ${pdmCodesErr.message}`)

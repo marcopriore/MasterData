@@ -15,7 +15,8 @@
     "create-demo-users": "node ../supabase/create-demo-users.js",
     "seed-materials-mass": "node ../supabase/seed-materials-mass.js --",
     "secrets": "node scripts/generate-secrets.mjs",
-    "prd:check": "node scripts/prd-check.mjs"
+    "prd:check": "node scripts/prd-check.mjs",
+    "security:probe": "node scripts/security-probe.mjs --env-file=.env.local"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -50,7 +51,7 @@
     "resend": "^6.32.0",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.5.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

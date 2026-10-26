@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 type Tenant = { id: number; name: string; slug: string; is_active: boolean }
 
@@ -46,6 +47,8 @@ export function Topbar() {
     }
     try {
       await switchTenant(t.id)
+    } catch (err) {
+      toast.error('Não foi possível trocar de empresa', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setOpen(false)
     }
@@ -95,6 +98,8 @@ export function Topbar() {
                 onClick={async () => {
                   try {
                     await switchTenantBack()
+                  } catch (err) {
+                    toast.error('Não foi possível voltar à sua empresa', { description: err instanceof Error ? err.message : undefined })
                   } finally {
                     setOpen(false)
                   }

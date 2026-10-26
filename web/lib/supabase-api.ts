@@ -15,6 +15,7 @@ import {
 } from '@/lib/material-duplicates'
 import type { RequestErpInfo } from '@/lib/request-erp-state'
 import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
+import { safeSearchTerm } from '@/lib/search-term'
 import { isRejectedStatus, type MyRequestRow } from '@/lib/my-requests'
 import {
   toNullableNumber,
@@ -55,29 +56,34 @@ function handleError(err: unknown): never {
   throw new Error(msg)
 }
 
+let tenantIdMemo: { key: string; promise: Promise<number> } | null = null
+
+/**
+ * Tenant em uso, pela mesma regra de get_user_tenant_id() no banco: Master usa o tenant_id do token,
+ * os demais o do perfil. Calculado uma vez por sessão/tenant (trocar de tenant recarrega a página).
+ */
 async function getCurrentUserTenantId(): Promise<number> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) handleError(new Error('Não autenticado'))
+  const { data } = await supabase.auth.getClaims()
+  const claims = data?.claims
+  if (!claims?.sub) handleError(new Error('Não autenticado'))
 
-  const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  let tenantId: number | null | undefined
+  const meta = (claims.app_metadata ?? {}) as { is_master?: boolean; tenant_id?: number | string }
+  const tokenTenant = meta.is_master === true && meta.tenant_id != null ? Number(meta.tenant_id) : null
+  const key = `${claims.sub}:${tokenTenant ?? ''}`
+  if (tenantIdMemo?.key === key) return tenantIdMemo.promise
 
-  if (isMaster) {
-    const metaTenant = user.app_metadata?.tenant_id as number | undefined
-    if (metaTenant != null) {
-      tenantId = metaTenant
-    } else {
-      const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-      tenantId = profile?.tenant_id
-    }
-  } else {
-    const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-    tenantId = profile?.tenant_id
-  }
-
-  if (tenantId == null) handleError(new Error('Perfil sem tenant'))
-  return tenantId
+  const promise = (async () => {
+    if (tokenTenant != null && Number.isFinite(tokenTenant)) return tokenTenant
+    const { data: profile } = await supabase.from('users').select('tenant_id').eq('id', claims.sub).single()
+    if (profile?.tenant_id == null) throw new Error('Perfil sem tenant')
+    return profile.tenant_id as number
+  })()
+  tenantIdMemo = { key, promise }
+  promise.catch(() => {
+    if (tenantIdMemo?.promise === promise) tenantIdMemo = null
+  })
+  return promise
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
@@ -699,7 +705,7 @@ export async function createRequest(body: {
   const wfId = body.workflow_id ?? wf?.id
   if (!wfId) handleError(new Error('Nenhum workflow ativo configurado'))
 
-  const { data: firstStep } = await supabase.from('workflow_config').select('status_key').eq('workflow_id', wfId).order('order').limit(1).single()
+  const { data: firstStep } = await supabase.from('workflow_config').select('status_key').eq('workflow_id', wfId).eq('is_active', true).order('order').limit(1).single()
   const initialStatus = firstStep?.status_key ?? 'cadastro'
 
   const row = {
@@ -1108,6 +1114,7 @@ export async function updateWorkflow(id: number, payload: Partial<WorkflowHeader
   const supabase = createClient()
   const { data, error } = await supabase.from('workflow_header').update(payload).eq('id', id).select().single()
   if (error) handleError(error)
+  invalidateApiCache()
   return data
 }
 
@@ -1133,6 +1140,7 @@ export async function bulkUpdateWorkflowConfig(payload: {
       await supabase.from('workflow_config').insert(row)
     }
   }
+  invalidateApiCache()
 }
 
 // ─── Materials ───────────────────────────────────────────────────────────────
@@ -1157,7 +1165,8 @@ export async function getMaterials(params: {
   const limit = params.limit ?? 50
   let q = supabase.from('material_database').select(MATERIALS_LIST_COLS, { count: 'exact' })
 
-  if (params.q) q = q.or(`id_sistema.ilike.%${params.q}%,description.ilike.%${params.q}%,id_erp.ilike.%${params.q}%`)
+  const term = safeSearchTerm(params.q)
+  if (term) q = q.or(`id_sistema.ilike.%${term}%,description.ilike.%${term}%,id_erp.ilike.%${term}%`)
   if (params.status) q = q.eq('status', params.status)
   if (params.pdm_code) q = q.eq('pdm_code', params.pdm_code)
   if (params.erp_status) q = q.eq('erp_status', params.erp_status)
@@ -1195,7 +1204,7 @@ export async function getMaterialById(id: number): Promise<MaterialDetail> {
 }
 
 export async function searchMaterials(query: string): Promise<MaterialDetail[]> {
-  const q = query?.trim()
+  const q = safeSearchTerm(query)
   if (!q) return []
 
   const supabase = createClient()
@@ -1378,11 +1387,9 @@ export async function updateMaterialsStatus(
 /** Integração em lote (criação/alteração). Preferir erpSyncMaterials na Base de Dados. */
 export async function erpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[]; failed: { id: number; message: string }[]; total: number }> {
   const results = await postErpAction('integrar', materialIds)
-  const mockIds = results.filter((r) => r.result === 'mock').map((r) => r.id)
-  const simulated = mockIds.length ? await simulateErpIntegrateMaterials(mockIds) : { integrated: [], skipped: [] }
   return {
-    integrated: [...results.filter((r) => r.result === 'integrated').map((r) => r.id), ...simulated.integrated],
-    skipped: [...results.filter((r) => r.result === 'skipped').map((r) => r.id), ...simulated.skipped],
+    integrated: results.filter((r) => r.result === 'integrated').map((r) => r.id),
+    skipped: results.filter((r) => r.result === 'skipped').map((r) => r.id),
     failed: results.filter((r) => r.result === 'failed').map((r) => ({ id: r.id, message: r.message ?? '' })),
     total: materialIds.length,
   }
@@ -1399,7 +1406,7 @@ export type ErpSyncBatchResult = {
 
 /**
  * Sincronização em lote: Ativo→criar/alterar, Obsoleto+id_erp→eliminar, Bloqueado→skip.
- * Sem integração ativa, simula create/update e, para eliminar, marca Obsoleto+integrado_erp.
+ * Sem integração ativa, o servidor simula (lib/erp/simulate.ts).
  */
 export async function erpSyncMaterials(materialIds: number[]): Promise<ErpSyncBatchResult> {
   const results = await postErpAction('sincronizar', materialIds)
@@ -1409,27 +1416,7 @@ export async function erpSyncMaterials(materialIds: number[]): Promise<ErpSyncBa
   const skipped: { id: number; reason: string; duplicateOf?: string[] }[] = []
   const failed: { id: number; message: string; plan?: string }[] = []
 
-  const mockCreateUpdate = results.filter((r) => r.result === 'mock' && (r.plan === 'criar' || r.plan === 'alterar'))
-  const mockEliminate = results.filter((r) => r.result === 'not_configured' || (r.result === 'mock' && r.plan === 'eliminar'))
-
-  if (mockCreateUpdate.length) {
-    const simulated = await simulateErpIntegrateMaterials(mockCreateUpdate.map((r) => r.id))
-    for (const id of simulated.integrated) {
-      const plan = mockCreateUpdate.find((r) => r.id === id)?.plan
-      if (plan === 'alterar') updated.push(id)
-      else created.push(id)
-    }
-    for (const id of simulated.skipped) skipped.push({ id, reason: 'simulação ignorou o item' })
-  }
-
-  if (mockEliminate.length) {
-    const simulated = await simulateErpEliminateMaterials(mockEliminate.map((r) => r.id))
-    eliminated.push(...simulated.eliminated)
-    for (const id of simulated.skipped) skipped.push({ id, reason: 'simulação não eliminou o item' })
-  }
-
   for (const r of results) {
-    if (r.result === 'mock' || r.result === 'not_configured') continue
     if (r.result === 'integrated') {
       if (r.plan === 'alterar') updated.push(r.id)
       else created.push(r.id)
@@ -1445,193 +1432,50 @@ export async function erpSyncMaterials(materialIds: number[]): Promise<ErpSyncBa
   return { created, updated, eliminated, skipped, failed, total: materialIds.length }
 }
 
-async function simulateErpEliminateMaterials(materialIds: number[]): Promise<{ eliminated: number[]; skipped: number[] }> {
-  const supabase = createClient()
-  const eliminated: number[] = []
-  const skipped: number[] = []
-  const now = new Date().toISOString()
-  for (const mid of materialIds) {
-    const { data: row } = await supabase
-      .from('material_database')
-      .select('id, id_erp, status, erp_status')
-      .eq('id', mid)
-      .single()
-    if (!row?.id_erp || row.erp_status === 'integrando') {
-      skipped.push(mid)
-      continue
-    }
-    const { data } = await supabase
-      .from('material_database')
-      .update({ status: 'Obsoleto', erp_status: 'integrado_erp', erp_error_message: null, updated_at: now })
-      .eq('id', mid)
-      .select('id')
-      .single()
-    if (data) eliminated.push(mid)
-    else skipped.push(mid)
-  }
-  return { eliminated, skipped }
-}
-
-async function simulateErpIntegrateMaterials(materialIds: number[]): Promise<{ integrated: number[]; skipped: number[] }> {
-  const supabase = createClient()
-  const integrated: number[] = []
-  const skipped: number[] = []
-  const now = new Date().toISOString()
-  for (const mid of materialIds) {
-    const { data: row } = await supabase.from('material_database').select('erp_status').eq('id', mid).single()
-    if (!row || row.erp_status === 'integrado' || row.erp_status === 'integrado_erp') {
-      skipped.push(mid)
-      continue
-    }
-    if (row.erp_status !== 'pendente_erp') {
-      skipped.push(mid)
-      continue
-    }
-    const { data } = await supabase.from('material_database').update({ erp_status: 'integrado', erp_integrated_at: now }).eq('id', mid).select().single()
-    if (data) integrated.push(mid)
-    else skipped.push(mid)
-  }
-  return { integrated, skipped }
-}
-
 export type ErpIntegrateResult =
   | { success: true; erp_code: string; material: Record<string, unknown> }
   | { success: false; error: string; material?: Record<string, unknown> }
 
-/** Integra um material (criar/alterar). Preferir erpSyncMaterial no detalhe quando o status pode ser Obsoleto. */
-export async function erpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
-  const [outcome] = await postErpAction('integrar', [materialId])
-  if (!outcome || outcome.result === 'mock') return simulateErpIntegrateMaterial(materialId)
+async function erpOutcomeResult(
+  materialId: number,
+  outcome: ErpActionResult | undefined,
+  fallbackError: string
+): Promise<ErpIntegrateResult> {
   const supabase = createClient()
   const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
-  if (outcome.result === 'integrated') {
-    return { success: true, erp_code: outcome.idErp ?? '', material: material ?? {} }
+  if (outcome?.result === 'integrated' || outcome?.result === 'eliminated') {
+    return { success: true, erp_code: outcome.idErp ?? material?.id_erp ?? '', material: material ?? {} }
   }
   return {
     success: false,
-    error: outcome.message ?? outcome.reason ?? 'Não foi possível integrar o material.',
+    error: outcome?.message ?? outcome?.reason ?? fallbackError,
     material: material ?? undefined,
   }
+}
+
+/** Integra um material (criar/alterar). Preferir erpSyncMaterial no detalhe quando o status pode ser Obsoleto. */
+export async function erpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
+  const [outcome] = await postErpAction('integrar', [materialId])
+  return erpOutcomeResult(materialId, outcome, 'Não foi possível integrar o material.')
 }
 
 /** Sincroniza um material (criar/alterar/eliminar conforme status). */
 export async function erpSyncMaterial(materialId: number): Promise<ErpIntegrateResult & { plan?: string }> {
   const [outcome] = await postErpAction('sincronizar', [materialId])
-  const supabase = createClient()
-
-  if (outcome?.result === 'not_configured' || (outcome?.result === 'mock' && outcome.plan === 'eliminar')) {
-    const simulated = await simulateErpEliminateMaterials([materialId])
-    const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
-    if (simulated.eliminated.includes(materialId)) {
-      return { success: true, erp_code: material?.id_erp ?? '', material: material ?? {}, plan: 'eliminar' }
-    }
-    return { success: false, error: 'Não foi possível eliminar (simulação).', material: material ?? undefined, plan: 'eliminar' }
-  }
-
-  if (!outcome || outcome.result === 'mock') {
-    const simulated = await simulateErpIntegrateMaterial(materialId)
-    return { ...simulated, plan: outcome?.plan }
-  }
-
-  const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
-  if (outcome.result === 'integrated' || outcome.result === 'eliminated') {
-    return {
-      success: true,
-      erp_code: outcome.idErp ?? material?.id_erp ?? '',
-      material: material ?? {},
-      plan: outcome.plan,
-    }
-  }
-  return {
-    success: false,
-    error: outcome.message ?? outcome.reason ?? 'Não foi possível sincronizar o material.',
-    material: material ?? undefined,
-    plan: outcome.plan,
-  }
+  const result = await erpOutcomeResult(materialId, outcome, 'Não foi possível sincronizar o material.')
+  return { ...result, plan: outcome?.plan }
 }
 
 /** Elimina no ERP. Exige integração de eliminação ativa; não há simulação. */
 export async function erpEliminateMaterial(materialId: number): Promise<ErpIntegrateResult> {
   const [outcome] = await postErpAction('eliminar', [materialId])
-  const supabase = createClient()
-  const { data: material } = await supabase.from('material_database').select('*').eq('id', materialId).single()
-  if (outcome?.result === 'eliminated') return { success: true, erp_code: material?.id_erp ?? '', material: material ?? {} }
-  const error = outcome?.result === 'not_configured'
-    ? 'Não há integração de eliminação ativa. Configure em Tenants → Configuração.'
-    : outcome?.message ?? outcome?.reason ?? 'Não foi possível eliminar no ERP.'
-  return { success: false, error, material: material ?? undefined }
+  if (outcome?.result === 'not_configured') {
+    const result = await erpOutcomeResult(materialId, undefined, '')
+    return { success: false, error: 'Não há integração de eliminação ativa. Configure em Tenants → Configuração.', material: result.material }
+  }
+  return erpOutcomeResult(materialId, outcome, 'Não foi possível eliminar no ERP.')
 }
 
-/** Integração ERP simulada: integrando → delay 2s → 90% sucesso com id_erp, 10% erro */
-async function simulateErpIntegrateMaterial(materialId: number): Promise<ErpIntegrateResult> {
-  const supabase = createClient()
-  const { data: row } = await supabase.from('material_database').select('*').eq('id', materialId).single()
-  if (!row) return { success: false, error: 'Material não encontrado' }
-  if (row.erp_status === 'integrado' || row.erp_status === 'integrado_erp') {
-    return { success: true, erp_code: row.id_erp ?? '', material: row }
-  }
-  if (row.erp_status !== 'pendente_erp') {
-    return { success: false, error: `Status atual não permite integração: ${row.erp_status}` }
-  }
-
-  await supabase.from('material_database').update({ erp_status: 'integrando' }).eq('id', materialId)
-  await new Promise((r) => setTimeout(r, 2000))
-
-  const success = Math.random() > 0.1
-  const now = new Date().toISOString()
-
-  if (success) {
-    const { count } = await supabase
-      .from('material_database')
-      .select('*', { count: 'exact', head: true })
-      .not('id_erp', 'is', null)
-    const erpCode = `MAT-${String((count ?? 0) + 1).padStart(6, '0')}`
-    const { data, error } = await supabase
-      .from('material_database')
-      .update({
-        erp_status: 'integrado_erp',
-        id_erp: erpCode,
-        erp_integrated_at: now,
-        erp_error_message: null,
-      })
-      .eq('id', materialId)
-      .select()
-      .single()
-    if (error) {
-      void logAction({
-        category: 'database',
-        action: 'erp_integration_failed',
-        description: 'Falha na integração ERP',
-        event_data: { material_id: materialId },
-      })
-      return { success: false, error: error.message }
-    }
-    void logAction({
-      category: 'database',
-      action: 'erp_integrated',
-      description: 'Material integrado ao ERP',
-      event_data: { material_id: materialId, erp_code: erpCode },
-    })
-    return { success: true, erp_code: erpCode, material: data }
-  } else {
-    const { data } = await supabase
-      .from('material_database')
-      .update({
-        erp_status: 'erro_erp',
-        erp_error_message: 'Erro simulado: Timeout na conexão com SAP',
-      })
-      .eq('id', materialId)
-      .select()
-      .single()
-    void logAction({
-      category: 'database',
-      action: 'erp_integration_failed',
-      description: 'Falha na integração ERP',
-      event_data: { material_id: materialId },
-    })
-    return { success: false, error: 'Timeout na conexão com SAP', material: data ?? undefined }
-  }
-}
 // ─── Value Dictionary ────────────────────────────────────────────────────────
 
 export type ValueDictionaryEntry = { id: number; value: string; abbreviation: string; pdm_usage?: string[] }
@@ -1815,6 +1659,7 @@ export async function createField(body: Record<string, unknown>): Promise<FieldD
   const tenantId = await getCurrentUserTenantId()
   const { data, error } = await supabase.from('field_dictionary').insert({ ...body, tenant_id: tenantId }).select().single()
   if (error) handleError(error)
+  invalidateApiCache()
   return data
 }
 
@@ -1822,6 +1667,7 @@ export async function updateField(id: number, body: Record<string, unknown>): Pr
   const supabase = createClient()
   const { data, error } = await supabase.from('field_dictionary').update(body).eq('id', id).select().single()
   if (error) handleError(error)
+  invalidateApiCache()
   return data
 }
 
@@ -1829,6 +1675,7 @@ export async function deleteField(id: number): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('field_dictionary').update({ is_active: false }).eq('id', id)
   if (error) handleError(error)
+  invalidateApiCache()
 }
 
 /** Maps workflow status_key to field_dictionary responsible_role */
@@ -1953,6 +1800,7 @@ export async function createRole(body: { name: string; role_type?: string; permi
   const tenantId = await getCurrentUserTenantId()
   const { data, error } = await supabase.from('roles').insert({ ...body, tenant_id: tenantId }).select().single()
   if (error) handleError(error)
+  invalidateApiCache()
   return data
 }
 
@@ -1960,6 +1808,7 @@ export async function updateRole(id: number, body: Partial<Role>): Promise<Role>
   const supabase = createClient()
   const { data, error } = await supabase.from('roles').update(body).eq('id', id).select().single()
   if (error) handleError(error)
+  invalidateApiCache()
   return data
 }
 
@@ -1971,6 +1820,7 @@ export async function deleteRole(id: number): Promise<void> {
   }
   const { error } = await supabase.from('roles').delete().eq('id', id)
   if (error) handleError(error)
+  invalidateApiCache()
 }
 
 // ─── Tenants ─────────────────────────────────────────────────────────────────
@@ -1979,27 +1829,20 @@ export type Tenant = { id: number; name: string; slug: string; is_active: boolea
 
 export async function getTenants(): Promise<Tenant[]> {
   const supabase = createClient()
-  const [tenantsRes, usersRes, materialsRes] = await Promise.all([
+  const [tenantsRes, overviewRes] = await Promise.all([
     supabase.from('tenants').select('id, name, slug, is_active').order('name'),
-    supabase.from('users').select('tenant_id'),
-    supabase.from('material_database').select('tenant_id'),
+    supabase.rpc('tenant_overview'),
   ])
   const { data: tenants, error } = tenantsRes
   if (error) handleError(error)
-  const userCountMap: Record<number, number> = {}
-  ;(usersRes.data ?? []).forEach((u) => {
-    const tid = u.tenant_id as number
-    if (tid != null) userCountMap[tid] = (userCountMap[tid] ?? 0) + 1
-  })
-  const materialCountMap: Record<number, number> = {}
-  ;(materialsRes.data ?? []).forEach((m) => {
-    const tid = m.tenant_id as number
-    if (tid != null) materialCountMap[tid] = (materialCountMap[tid] ?? 0) + 1
-  })
+  const counts = new Map<number, { users_count: number; materials_count: number }>()
+  for (const row of (overviewRes.data ?? []) as { tenant_id: number; users_count: number | string; materials_count: number | string }[]) {
+    counts.set(row.tenant_id, { users_count: Number(row.users_count), materials_count: Number(row.materials_count) })
+  }
   return (tenants ?? []).map((t) => ({
     ...t,
-    users_count: userCountMap[t.id] ?? 0,
-    materials_count: materialCountMap[t.id] ?? 0,
+    users_count: counts.get(t.id)?.users_count ?? 0,
+    materials_count: counts.get(t.id)?.materials_count ?? 0,
   }))
 }
 
@@ -2245,9 +2088,9 @@ export async function updateUserApi(
 export async function createTenantOnboardingApi(body: {
   tenant_name: string
   admin_email: string
-  admin_password: string
+  admin_password?: string
   admin_name: string
-}): Promise<{ tenant_id: number; admin_user_id: string }> {
+}): Promise<{ tenant_id: number; admin_user_id: string; reset_sent?: boolean }> {
   return apiFetch('/api/admin/onboarding', { method: 'POST', body: JSON.stringify(body) })
 }
 

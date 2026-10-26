@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { MATERIAL_STATUS } from '@/lib/material-api/payload'
 import { getCallerAccess } from '@/lib/server-access'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
 
@@ -37,7 +37,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `Informe de 1 a ${MAX_IDS} materiais.` }, { status: 400 })
   }
 
-  const supabase = await createServerSupabaseClient()
+  // Status e situação no ERP só mudam pelo servidor (gatilho guard_material_database, migration 032).
+  const supabase = supabaseAdmin
   const { data: rows, error: fetchErr } = await supabase
     .from('material_database')
     .select('id, id_sistema, id_erp, status, erp_status')

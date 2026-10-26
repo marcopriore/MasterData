@@ -11,7 +11,7 @@ PRO-MAT é o sistema de cadastro padronizado de materiais (PDM), governança por
 | Tema | `next-themes` — modo claro/escuro próprio da aplicação |
 | Dados e auth | Supabase (PostgreSQL, Auth, Storage, Realtime, RLS) |
 | Cliente | `@supabase/supabase-js` e `@supabase/ssr` |
-| Planilhas | `xlsx` (importação e exportação) |
+| Planilhas | `xlsx` 0.20.3 do CDN da SheetJS (importação e exportação; a do npm parou na 0.18.5, com falhas conhecidas) |
 | Testes | Vitest em `web/lib/**/*.test.ts` (regressão de acesso) e Playwright em `tests/e2e` |
 
 A maior parte das leituras e escritas vai direto do browser para o Supabase (`web/lib/supabase-api.ts`), com RLS filtrando por tenant. Rotas em `web/app/api` existem para operações que precisam da service role: usuários, onboarding, troca de tenant, import/export.
@@ -143,3 +143,5 @@ npm run test:e2e
 | 028 | `resubmit_request`: rejeitada corrigida volta para a primeira etapa (quem abriu, Admin ou Master) |
 | 029 | Relatórios: `report_request_flow`, `report_productivity`, `report_material_base` e permissão `can_view_reports` (ADMIN e MASTER, também em papel novo) |
 | 030 | Texto do ERP: funções `erp_text`, `erp_jsonb`, `erp_description` e normalização dos PDMs, materiais, solicitações e dicionário. PDM: recodificação no padrão `PARA001`, nome repetido vira "Nome 2", trava de código (até 10) e nome único por tenant |
+| 031 | Isolamento por tenant: RLS estrita também para o Master, funções fechadas para anônimo, `assign`/`advance`/`reject`/`move`/`resubmit` conferem o tenant, `users` sem gravação pelo navegador, `roles` só com `can_manage_roles`, histórico imutável, notificação e preferência do próprio usuário, `tenant_overview()` e `user_has_permission()`. Ajusta `create_tenant_onboarding` para aceitar a chamada do servidor |
+| 032 | Permissão no banco: `require_permission()` nas funções de aprovar/rejeitar/atender/mover e do dicionário; policies de escrita por permissão (PDM, campos, workflow, dicionário, solicitações, materiais, logs, anexos); gatilhos `guard_material_requests` e `guard_material_database` travam etapa, atendente, autor, status e ERP; log imutável; anexo até 25 MB na pasta da solicitação do tenant; `search_path` fixo em toda função SECURITY DEFINER |

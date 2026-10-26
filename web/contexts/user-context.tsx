@@ -17,7 +17,7 @@ import {
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { logAction } from '@/lib/supabase-api'
-import { emptyPermissions, mergeRolePermissions, type RolePermissions } from '@/lib/permissions'
+import { allPermissions, emptyPermissions, mergeRolePermissions, type RolePermissions } from '@/lib/permissions'
 import type { Session } from '@supabase/supabase-js'
 
 export type { RolePermissions }
@@ -180,40 +180,16 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const isMaster = authUser.app_metadata?.is_master === true
 
       if (isMaster) {
-        const cookieTenantId =
-          typeof document !== 'undefined'
-            ? document.cookie
-                .split('; ')
-                .find((r) => r.startsWith('mdm_selected_tenant='))
-                ?.split('=')[1]
-            : null
-
-        if (cookieTenantId) {
-          const parsed = parseInt(cookieTenantId, 10)
-          if (!isNaN(parsed)) {
-            effectiveTenantId = parsed
-          }
-          if (effectiveTenantId !== p.tenant_id) {
-            const { data: tenant } = await supabase
-              .from('tenants')
-              .select('name')
-              .eq('id', effectiveTenantId)
-              .single()
-            effectiveTenantName = tenant?.name ?? effectiveTenantName
-          }
-        } else {
-          const metaTenantId = authUser.app_metadata?.tenant_id as
-            | number
-            | undefined
-          if (metaTenantId && metaTenantId !== p.tenant_id) {
-            effectiveTenantId = metaTenantId
-            const { data: tenant } = await supabase
-              .from('tenants')
-              .select('name')
-              .eq('id', metaTenantId)
-              .single()
-            effectiveTenantName = tenant?.name ?? effectiveTenantName
-          }
+        // Mesmo valor que o banco usa em get_user_tenant_id(): o tenant_id do token da sessão.
+        const tokenTenantId = Number(session.user.app_metadata?.tenant_id)
+        if (Number.isInteger(tokenTenantId) && tokenTenantId !== p.tenant_id) {
+          effectiveTenantId = tokenTenantId
+          const { data: tenant } = await supabase
+            .from('tenants')
+            .select('name')
+            .eq('id', tokenTenantId)
+            .single()
+          effectiveTenantName = tenant?.name ?? effectiveTenantName
         }
       }
 
@@ -236,9 +212,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         }
       })
       const grantKeys = (grantRows ?? []).map((row) => row.permission_key as string)
-      const effectivePermissions = groupRoles.length
-        ? mergeRolePermissions(groupRoles, grantKeys)
-        : { ...EMPTY_PERMISSIONS, ...(p.roles?.permissions ?? {}) }
+      const effectivePermissions = isMaster
+        ? allPermissions()
+        : groupRoles.length
+          ? mergeRolePermissions(groupRoles, grantKeys)
+          : { ...EMPTY_PERMISSIONS, ...(p.roles?.permissions ?? {}) }
       const hasAdminGroup = groupRoles.some((group) => group.name.toUpperCase() === 'ADMIN')
         || (p.roles?.name ?? '').toUpperCase() === 'ADMIN'
 
@@ -319,50 +297,29 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     [loadUserFromSession]
   )
 
+  // Sem a troca no servidor nada muda (a tela não pode mostrar um tenant e o banco usar outro).
+  // O token novo vem do refreshSession; o log sai depois, já no tenant de destino.
   const switchTenant = useCallback(async (tenantId: number) => {
-    document.cookie = `mdm_selected_tenant=${tenantId}; path=/; max-age=${60 * 60 * 24 * 365}`
-
-    void logAction({
+    const { switchTenantApi } = await import('@/lib/supabase-api')
+    await switchTenantApi(tenantId)
+    const supabase = createClient()
+    const { error } = await supabase.auth.refreshSession()
+    if (error) console.error('[switchTenant] refresh error:', error)
+    await logAction({
       category: 'auth',
       action: 'switch_tenant',
-      description: `Master trocou para tenant ${tenantId}`,
+      description: `Master entrou no tenant ${tenantId}`,
       event_data: { tenant_id: tenantId },
     })
-
-    try {
-      const { switchTenantApi } = await import('@/lib/supabase-api')
-      await switchTenantApi(tenantId)
-    } catch (err) {
-      console.error('[switchTenant] API error:', err)
-    }
-
-    try {
-      const supabase = createClient()
-      await supabase.auth.refreshSession()
-    } catch (err) {
-      console.error('[switchTenant] refresh error:', err)
-    }
-
     window.location.href = '/'
   }, [])
 
   const switchTenantBack = useCallback(async () => {
-    document.cookie = 'mdm_selected_tenant=; path=/; max-age=0'
-
-    try {
-      const { switchTenantBackApi } = await import('@/lib/supabase-api')
-      await switchTenantBackApi()
-    } catch (err) {
-      console.error('[switchTenantBack] API error:', err)
-    }
-
-    try {
-      const supabase = createClient()
-      await supabase.auth.refreshSession()
-    } catch (err) {
-      console.error('[switchTenantBack] refresh error:', err)
-    }
-
+    const { switchTenantBackApi } = await import('@/lib/supabase-api')
+    await switchTenantBackApi()
+    const supabase = createClient()
+    const { error } = await supabase.auth.refreshSession()
+    if (error) console.error('[switchTenantBack] refresh error:', error)
     window.location.href = '/'
   }, [])
 
@@ -374,7 +331,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     })
     const supabase = createClient()
     await supabase.auth.signOut()
-    document.cookie = 'mdm_selected_tenant=; path=/; max-age=0'
     setUserState(null)
     setAccessTokenState(null)
     window.location.href = '/login'

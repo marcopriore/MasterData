@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { callerCanManageUsers } from '@/lib/user-access'
+import { randomPassword } from '@/lib/password-policy'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
 
   const url = new URL(request.url)
   const dryRun = url.searchParams.get('dry_run') !== 'false'
+  const appOrigin = process.env.NEXT_PUBLIC_APP_URL || url.origin
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null
@@ -143,9 +145,10 @@ export async function POST(request: Request) {
     if (status !== 'error' && !dryRun) {
       try {
         if (operacao === 'C') {
+          // Senha aleatória que ninguém conhece; o usuário cria a dele pelo e-mail de redefinição.
           const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
             email,
-            password: 'Mudar@1234',
+            password: randomPassword(),
             email_confirm: true,
             app_metadata: { tenant_id: effectiveTenantId },
           })
@@ -170,6 +173,10 @@ export async function POST(request: Request) {
               })
               created++
               emailToUserId[email] = authUser.user.id
+              const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+                redirectTo: `${appOrigin}/reset-password`,
+              })
+              if (resetError) warnings.push('conta criada; o e-mail para criar a senha não saiu — use a chave em Gestão de Usuários')
             }
           }
         } else if (operacao === 'E') {

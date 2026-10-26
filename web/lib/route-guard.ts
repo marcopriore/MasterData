@@ -27,6 +27,27 @@ export function classifyPath(pathname: string): RouteKind {
   return 'page'
 }
 
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS']
+
+/**
+ * Alteração (POST, PUT, PATCH, DELETE) pedida por outro site com o cookie da sessão (CSRF).
+ * Navegador atual manda Sec-Fetch-Site; os antigos, Origin. Sem os dois (curl, servidor), passa:
+ * sem cookie de outro site não há sessão para abusar.
+ */
+export function isCrossSiteWrite(method: string, headers: Headers): boolean {
+  if (SAFE_METHODS.includes(method.toUpperCase())) return false
+  const site = headers.get('sec-fetch-site')
+  if (site) return site !== 'same-origin' && site !== 'none'
+  const origin = headers.get('origin')
+  if (!origin) return false
+  const host = headers.get('x-forwarded-host') ?? headers.get('host')
+  try {
+    return new URL(origin).host !== host
+  } catch {
+    return true
+  }
+}
+
 /** Destino depois do login: só caminhos internos, nunca outro domínio. */
 export function safeRedirectTarget(from: string | null | undefined): string {
   if (!from || !from.startsWith('/') || from.startsWith('//') || from.startsWith('/\\')) return '/'

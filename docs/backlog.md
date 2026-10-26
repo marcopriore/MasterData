@@ -16,12 +16,22 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 - **Domínio público do PRO-MAT.** Roteiro em [deploy-producao.md](./deploy-producao.md) (Vercel + subdomínio no registro.br). Depois do go-live, a URL do webhook no AxisDesk fica `https://<app>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.
 - **Banco único.** Produção e desenvolvimento usam o mesmo projeto Supabase. `npm run dev` e os scripts de seed gravam em produção até existir um projeto de desenvolvimento (passo descrito no fim de `deploy-producao.md`).
 - **Integração ERP contra um ERP real.** A chamada existe e foi testada contra um servidor falso. Falta validar com o endpoint do cliente: nomes do cabeçalho (`internalGroup` para grupo de mercadoria é suposição), formato da resposta e mensagens de erro. A simulação continua enquanto o tenant não tiver integração ativa.
-- **Master vendo vários tenants na Base de Dados.** A lista de PDMs e as consultas por código já filtram pelo tenant em uso. `getMaterials` e a exportação de materiais ainda dependem só da RLS, então o Master vê os materiais de todos os tenants juntos. Desde a migration 030, dois tenants podem ter o mesmo código de PDM (`ROLA001`).
+- **Aprovar só na etapa do próprio papel.** Desde a 032, aprovar exige `can_approve` e rejeitar `can_reject`. Ainda não se confere se a etapa atual é da área do usuário: um aprovador de Compras aprova uma solicitação que está em Fiscal, se a abrir. A tela também não trava isso hoje. Definir a regra (área da etapa, ou ADMIN e Master em qualquer etapa) antes de travar no banco.
+- **Ajustes do Supabase Auth em produção.**
+  - Cadastro público desligado.
+  - Senha mínima 8 com letras e números, e leaked password protection.
+  - Rodar `scripts/rotate-default-passwords.mjs`.
+  - Desativar os usuários da Empresa Demo.
+  
+  O passo a passo está em `deploy-producao.md`.
 - **Dicionário com valores parecidos após a 030.** Quando o valor sem acento já existia (`Aco` e `Aço`), a migration normaliza só um. O outro aparece como parecido na tela do dicionário para unificar manualmente.
 - **Aviso no arraste.** Mover entre etapas intermediárias grava histórico (migration 026), mas não avisa a área da nova etapa, como a aprovação faz.
 - **Documentação para quem não tem login.** A documentação fica dentro do PRO-MAT. Um integrador externo recebe o OpenAPI baixado da tela; publicar uma página aberta depende do domínio público.
 - **Conector de notificação em tempo real.** A migration 006 habilita Realtime; o sino ainda consulta a API. Vale confirmar se o polling continua sendo o comportamento desejado.
-- **Segurança, próximos degraus.** Content-Security-Policy (precisa de nonce por causa dos scripts do Next), limite de tentativas de login, limite por IP nas chamadas sem chave, e trocar `xlsx` pela versão do CDN da SheetJS ou por `exceljs` (exceção da auditoria vence em 31/01/2027).
+- **Segurança, próximos degraus.**
+  - MFA (TOTP) para ADMIN e Master.
+  - Captcha no login e na redefinição de senha, se aparecer tentativa em massa.
+  - Rodar a sonda (`npm run security:probe`) no CI contra um banco de desenvolvimento, quando ele existir.
 
 ## Resíduos
 

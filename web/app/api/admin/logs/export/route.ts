@@ -1,11 +1,12 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { requirePermission } from '@/lib/server-access'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
 export async function GET(request: Request) {
+  const ctx = await requirePermission('can_view_logs')
+  if ('error' in ctx) return ctx.error
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
   const category = searchParams.get('category') ?? ''
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
   const from = searchParams.get('from') ?? ''
   const to = searchParams.get('to') ?? ''
 
-  let query = supabase.from('system_logs').select('*').order('created_at', { ascending: false }).limit(5000)
+  let query = supabase.from('system_logs').select('*').eq('tenant_id', ctx.tenantId).order('created_at', { ascending: false }).limit(5000)
   if (category) query = query.eq('category', category)
   if (userId) query = query.eq('user_id', userId)
   if (from) query = query.gte('created_at', from)
@@ -24,9 +25,9 @@ export async function GET(request: Request) {
 
   const userIds = [...new Set((logs ?? []).map((r) => r.user_id).filter(Boolean))] as string[]
   const userMap: Record<string, string> = {}
-  for (const uid of userIds) {
-    const { data: u } = await supabase.from('users').select('name').eq('id', uid).single()
-    userMap[uid] = u?.name ?? ''
+  if (userIds.length) {
+    const { data: names } = await supabase.from('users').select('id, name').in('id', userIds)
+    for (const u of names ?? []) userMap[u.id as string] = (u.name as string) ?? ''
   }
 
   const rows = (logs ?? []).map((r) => ({

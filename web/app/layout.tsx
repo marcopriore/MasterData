@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { UserProvider } from "@/contexts/user-context";
@@ -25,17 +26,19 @@ export const metadata: Metadata = {
   description: "PRO-MAT",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // O script de tema é inline e precisa do nonce do CSP (proxy.ts).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false}>
+        <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false} nonce={nonce}>
           <UserProvider>
             <NotificationsProvider>
               <AppShell>{children}</AppShell>

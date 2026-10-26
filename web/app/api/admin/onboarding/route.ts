@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { passwordProblem, randomPassword } from '@/lib/password-policy'
 
 function slugify(name: string): string {
   return name
@@ -22,11 +23,17 @@ export async function POST(request: Request) {
 
   const body = await request.json()
   const { tenant_name, admin_email, admin_password, admin_name } = body
-  if (!tenant_name || !admin_email || !admin_password || !admin_name) {
+  if (!tenant_name || !admin_email || !admin_name) {
     return NextResponse.json({
-      error: 'Campos obrigatórios: tenant_name, admin_email, admin_password, admin_name',
+      error: 'Campos obrigatórios: tenant_name, admin_email, admin_name',
     }, { status: 400 })
   }
+
+  // Sem senha informada: aleatória, e o administrador cria a dele pelo e-mail de redefinição.
+  const sendReset = !admin_password
+  const password = admin_password ? String(admin_password) : randomPassword()
+  const weak = passwordProblem(password)
+  if (weak) return NextResponse.json({ error: weak }, { status: 400 })
 
   const slug = slugify(tenant_name)
   if (!slug) return NextResponse.json({ error: 'Nome do tenant inválido' }, { status: 400 })
@@ -36,7 +43,7 @@ export async function POST(request: Request) {
     p_slug: slug,
     p_admin_name: String(admin_name).trim(),
     p_admin_email: String(admin_email).trim().toLowerCase(),
-    p_admin_password: String(admin_password),
+    p_admin_password: null,
   })
   if (rpcError) return NextResponse.json({ error: rpcError.message }, { status: 400 })
 
@@ -53,7 +60,7 @@ export async function POST(request: Request) {
 
   const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: String(admin_email).trim().toLowerCase(),
-    password: String(admin_password),
+    password,
     email_confirm: true,
     app_metadata: { tenant_id: tenantId },
   })
@@ -75,9 +82,19 @@ export async function POST(request: Request) {
     role_id: adminRole.id,
   })
 
+  let resetSent = false
+  if (sendReset) {
+    const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+    const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(String(admin_email).trim().toLowerCase(), {
+      redirectTo: `${origin}/reset-password`,
+    })
+    resetSent = !resetError
+  }
+
   return NextResponse.json({
     tenant_id: tenantId,
     admin_user_id: authUser.user.id,
+    reset_sent: resetSent,
     success: true,
   })
 }

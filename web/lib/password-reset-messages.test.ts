@@ -29,6 +29,7 @@ describe('translateResetError', () => {
 
 describe('newPasswordProblem', () => {
   it('senha curta', () => expect(newPasswordProblem('123', '123')).toMatch(/pelo menos/))
-  it('confirmação diferente', () => expect(newPasswordProblem('123456', '123457')).toMatch(/não coincidem/))
-  it('válida', () => expect(newPasswordProblem('123456', '123456')).toBeNull())
+  it('sem letras', () => expect(newPasswordProblem('12345678', '12345678')).toMatch(/letras e números/))
+  it('confirmação diferente', () => expect(newPasswordProblem('senhaBoa1', 'senhaBoa2')).toMatch(/não coincidem/))
+  it('válida', () => expect(newPasswordProblem('senhaBoa1', 'senhaBoa1')).toBeNull())
 })

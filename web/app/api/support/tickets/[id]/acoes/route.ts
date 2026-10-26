@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { executeAction } from '@/lib/axisdesk/client'
+import { executeAction, getTicketDetail } from '@/lib/axisdesk/client'
 import { getSupportContext } from '@/lib/axisdesk/support-context'
 import { AXISDESK_MAX_TEXTO, parseAnexos } from '@/lib/axisdesk/support-form'
 import type { AxisDeskChamadoAcao } from '@/lib/axisdesk/types'
@@ -33,6 +33,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const anexos = parseAnexos(body?.anexos)
   if ('error' in anexos) return NextResponse.json({ error: anexos.error }, { status: 400 })
+
+  // A ação do AxisDesk não recebe o tenant; o chamado precisa aparecer para este tenant antes.
+  const owned = await getTicketDetail(id, ctx.tenantIdExterno)
+  if (!owned.ok) return NextResponse.json({ error: owned.message }, { status: owned.status })
 
   const result = await executeAction(id, acao as AxisDeskChamadoAcao, mensagem, anexos)
   if (!result.ok) return NextResponse.json({ error: result.message }, { status: result.status })

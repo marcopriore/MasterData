@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { mergeRolePermissions, type RolePermissions } from '@/lib/permissions'
+import { allPermissions, mergeRolePermissions, type PermissionKey, type RolePermissions } from '@/lib/permissions'
 
 export type CallerAccess = {
   userId: string
@@ -34,6 +34,7 @@ export async function getCallerAccess(): Promise<CallerAccess | { error: NextRes
   const isMaster = user.app_metadata?.is_master === true
   const tenantId = Number(isMaster ? user.app_metadata?.tenant_id ?? profile.tenant_id : profile.tenant_id)
   if (!Number.isFinite(tenantId)) return { error: NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 }) }
+  if (isMaster) return { userId: user.id, isMaster, tenantId, permissions: allPermissions() }
 
   const { data: memberships } = await supabase.from('user_role_groups').select('roles(permissions)').eq('user_id', user.id)
   const groups = memberships?.length
@@ -43,4 +44,16 @@ export async function getCallerAccess(): Promise<CallerAccess | { error: NextRes
   const permissions = mergeRolePermissions(groups, (grants ?? []).map((grant) => grant.permission_key as string))
 
   return { userId: user.id, isMaster, tenantId, permissions }
+}
+
+/** getCallerAccess + exige ao menos uma das permissões (Master sempre passa). */
+export async function requirePermission(
+  ...keys: PermissionKey[]
+): Promise<CallerAccess | { error: NextResponse }> {
+  const ctx = await getCallerAccess()
+  if ('error' in ctx) return ctx
+  if (keys.length && !keys.some((key) => ctx.permissions[key])) {
+    return { error: NextResponse.json({ error: 'Sem permissão' }, { status: 403 }) }
+  }
+  return ctx
 }

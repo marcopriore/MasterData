@@ -91,15 +91,16 @@ function OnboardingModal({ onClose, onSuccess }: OnboardingModalProps) {
     }
     setLoading(true)
     try {
-      const password = tempPassword.trim() || 'Mudar@1234'
       const res = await createTenantOnboardingApi({
         tenant_name: tenantName.trim(),
         admin_name: adminName.trim(),
         admin_email: adminEmail.trim(),
-        admin_password: password,
+        ...(tempPassword.trim() ? { admin_password: tempPassword.trim() } : {}),
       })
       if (res.tenant_id) {
-        toast.success('Tenant criado com sucesso!')
+        toast.success('Tenant criado com sucesso!', {
+          description: tempPassword.trim() ? undefined : 'O administrador recebe um e-mail para criar a senha.',
+        })
       }
       onSuccess()
       onClose()
@@ -204,7 +205,7 @@ function OnboardingModal({ onClose, onSuccess }: OnboardingModalProps) {
                   type="password"
                   value={tempPassword}
                   onChange={(e) => setTempPassword(e.target.value)}
-                  placeholder="Gerada automaticamente"
+                  placeholder="Vazio: o administrador cria pelo e-mail"
                   className="h-10"
                 />
               </div>

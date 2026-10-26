@@ -15,6 +15,7 @@ import {
 } from '@/lib/supabase-api'
 import { requestPasswordReset } from '@/lib/password-reset'
 import { RESET_SENT_MESSAGE } from '@/lib/password-reset-messages'
+import { passwordProblem } from '@/lib/password-policy'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -272,7 +273,8 @@ export default function ProfilePage() {
   const handleSavePassword = async () => {
     if (!user) return
     if (!currentPassword) { toast.error('Informe a senha atual.'); return }
-    if (newPassword.length < 6) { toast.error('A nova senha deve ter pelo menos 6 caracteres.'); return }
+    const problem = passwordProblem(newPassword)
+    if (problem) { toast.error(problem); return }
     if (newPassword !== confirmPassword) { toast.error('As senhas não coincidem.'); return }
     setSavingPassword(true)
     try {

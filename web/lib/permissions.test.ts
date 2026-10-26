@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PERMISSION_GROUPS,
   PERMISSION_KEYS,
+  allPermissions,
   emptyPermissions,
   isPermissionKey,
   isSystemRoleName,
@@ -30,6 +31,11 @@ describe('catálogo de permissões', () => {
     expect(isSystemRoleName('master')).toBe(true)
     expect(isSystemRoleName(' ADMIN ')).toBe(true)
     expect(isSystemRoleName('QUALIDADE')).toBe(false)
+  })
+
+  it('Master tem todas as flags ligadas', () => {
+    const all = allPermissions()
+    expect(PERMISSION_KEYS.every((key) => all[key])).toBe(true)
   })
 })
 

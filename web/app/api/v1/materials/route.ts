@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { safeSearchTerm } from '@/lib/search-term'
 import { MATERIAL_API_COLUMNS, MATERIAL_STATUS, parseMaterialInput, toApiMaterial } from '@/lib/material-api/payload'
 import { apiError, findPdm, handleApiCall, readJson } from '@/lib/material-api/server'
 
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const status = params.get('status')
     const erpStatus = params.get('erp_status')
     const since = params.get('alterado_desde')
-    const q = (params.get('q') ?? '').replace(/[^\p{L}\p{N}\s\-_/]/gu, '').trim().slice(0, 100)
+    const q = safeSearchTerm(params.get('q'))
 
     if (status && !(MATERIAL_STATUS as readonly string[]).includes(status)) {
       return apiError(400, `status deve ser ${MATERIAL_STATUS.join(', ')}`)

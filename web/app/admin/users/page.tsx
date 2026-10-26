@@ -236,7 +236,7 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
                 type={showPw ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'create' ? 'Mínimo 6 caracteres' : '••••••••'}
+                placeholder={mode === 'create' ? 'Mínimo 8 caracteres, com letras e números' : '••••••••'}
                 className="h-10 pr-10"
               />
               <button
@@ -797,7 +797,7 @@ export default function UsersPage() {
                     <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Regras principais:</p>
                     <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-1 list-disc list-inside">
                       <li>A planilha tem uma aba <strong>Usuários</strong></li>
-                      <li><strong>operacao=C</strong>: cria usuário com senha inicial &quot;Mudar@1234&quot;</li>
+                      <li><strong>operacao=C</strong>: cria o usuário, que recebe um e-mail para criar a própria senha</li>
                       <li><strong>operacao=E</strong>: atualiza nome, perfil e/ou ativo — e-mail não pode ser alterado</li>
                       <li>Perfis aceitos: ADMIN, MASTER, TRIAGEM, FISCAL, MRP, SOLICITANTE</li>
                       <li>ativo aceita: Sim ou Não</li>
