@@ -783,7 +783,7 @@ export default function GovernancePage() {
               </p>
             </div>
           </div>
-          <Link href="/request">
+          <Link href="/requests/new">
             <Button
               className="gap-2 transition-colors duration-200 border-[#C69A46] bg-[#C69A46] text-[#0F1C38] hover:bg-[#C69A46]/90"
             >

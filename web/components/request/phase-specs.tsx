@@ -22,7 +22,7 @@ import { Clipboard, Settings2, Info, AlertCircle } from "lucide-react"
 import { FIELD_MASKS } from "@/lib/masks"
 import { NumericUnitInput } from "@/components/ui/numeric-unit-input"
 import type { MeasurementUnit } from "@/hooks/useMeasurementUnits"
-import type { PDMTemplate, Attribute } from "@/app/request/page"
+import type { PDMTemplate, Attribute } from "@/app/requests/new/page"
 
 export type AttrValue = string | { value: string; unit: string }
 

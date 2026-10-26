@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Paperclip, X, FileText, ImageIcon, Upload } from "lucide-react"
-import type { UploadedFile } from "@/app/request/page"
+import type { UploadedFile } from "@/app/requests/new/page"
 
 interface PhaseDocsProps {
   files: UploadedFile[]

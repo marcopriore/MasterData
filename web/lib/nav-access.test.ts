@@ -9,7 +9,7 @@ function access(partial: Partial<RolePermissions>, isMaster = false): NavAccess 
   }
 }
 
-const MAIN = ['/', '/request', '/governance', '/database', '/admin-pdm']
+const MAIN = ['/', '/requests', '/governance', '/database', '/admin-pdm']
 const ADMIN = ['/admin/users', '/admin/roles', '/admin/fields', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/integration-docs', '/admin/tenants']
 
 describe('simulador de menu', () => {
@@ -24,7 +24,7 @@ describe('simulador de menu', () => {
     }
     expect(canSeeHomeShortcut('/admin-pdm', master)).toBe(true)
     expect(canSeeHomeShortcut('/governance', master)).toBe(true)
-    expect(canSeeHomeShortcut('/request', master)).toBe(true)
+    expect(canSeeHomeShortcut('/requests/new', master)).toBe(true)
     expect(canSeeHomeShortcut('/settings/workflow', master)).toBe(true)
   })
 
@@ -32,7 +32,7 @@ describe('simulador de menu', () => {
     const none = access({})
     expect(MAIN.filter((href) => canSeeMainNav(href, none))).toEqual(['/'])
     expect(canSeeMainNav('/', none)).toBe(true)
-    expect(canSeeMainNav('/request', none)).toBe(false)
+    expect(canSeeMainNav('/requests', none)).toBe(false)
     expect(canSeeMainNav('/governance', none)).toBe(false)
     expect(canSeeMainNav('/database', none)).toBe(false)
     expect(canSeeMainNav('/admin-pdm', none)).toBe(false)
@@ -44,7 +44,7 @@ describe('simulador de menu', () => {
 
   it('cada flag abre a tela correspondente', () => {
     const cases: Array<[Partial<RolePermissions>, string, 'main' | 'admin' | 'settings']> = [
-      [{ can_submit_request: true }, '/request', 'main'],
+      [{ can_submit_request: true }, '/requests', 'main'],
       [{ can_approve: true }, '/governance', 'main'],
       [{ can_reject: true }, '/governance', 'main'],
       [{ can_view_database: true }, '/database', 'main'],
@@ -84,7 +84,7 @@ describe('simulador de menu', () => {
         ['can_manage_users']
       ),
     }
-    expect(canSeeMainNav('/request', user)).toBe(true)
+    expect(canSeeMainNav('/requests', user)).toBe(true)
     expect(canSeeAdminHref('/admin/users', user)).toBe(true)
     expect(canSeeAdminHref('/admin/roles', user)).toBe(false)
     expect(canSeeAdminHref('/admin/tenants', user)).toBe(false)

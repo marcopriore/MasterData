@@ -4,7 +4,7 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 ## Produto
 
-- **Tela "Minhas Solicitações".** Cada usuário precisa de uma tela com as próprias solicitações: as que abriu, em que etapa estão, quem está atendendo, o que foi rejeitado e por quê, e o material gerado (com a situação no ERP). É diferente da tela inicial, que é um painel resumido, e da governança, que é a fila de trabalho das áreas. Ainda a definir: se inclui as solicitações que o usuário atendeu, os filtros, e se o solicitante pode cancelar ou responder a uma rejeição. O link "Ver todas" da tela inicial já aponta o SOLICITANTE para `/requests`, que hoje não existe; essa tela deve ocupar esse endereço.
+- **Minhas Solicitações, próximos passos.** A primeira versão (`/requests`) lista só o que o usuário abriu, em leitura. Ainda a definir: aba com as solicitações que o usuário atendeu; o solicitante cancelar uma solicitação em andamento ou reabrir uma rejeitada com correção; anexos no detalhe; exportar a lista.
 - **E-mail de redefinição de senha.** O link sai pelo e-mail do Supabase Auth. O SMTP padrão do Supabase só entrega para membros da equipe do projeto e tem limite baixo; em produção é preciso o SMTP próprio (Resend) e o modelo de e-mail com `token_hash`, descritos em `deploy-producao.md`.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
 - **Domínio público do PRO-MAT.** Roteiro em [deploy-producao.md](./deploy-producao.md) (Vercel + subdomínio no registro.br). Depois do go-live, a URL do webhook no AxisDesk fica `https://<app>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.

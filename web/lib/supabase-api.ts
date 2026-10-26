@@ -14,6 +14,7 @@ import {
   type DuplicateCandidate,
 } from '@/lib/material-duplicates'
 import type { RequestErpInfo } from '@/lib/request-erp-state'
+import { isRejectedStatus, type MyRequestRow } from '@/lib/my-requests'
 
 // ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
 
@@ -508,6 +509,74 @@ export async function getRequests(params?: {
     })
   }
   return result
+}
+
+/** Solicitações abertas pelo usuário logado, no tenant efetivo, com etapa, atendente e motivo da rejeição. */
+export async function getMyRequests(): Promise<MyRequestRow[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const tenantId = await getCurrentUserTenantId()
+
+  const { data, error } = await supabase
+    .from('material_requests')
+    .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, pdm_templates(name, internal_code)')
+    .eq('tenant_id', tenantId)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+  if (error) handleError(error)
+  const rows = data ?? []
+
+  const assigneeIds = [...new Set(rows.map((r) => r.assigned_to_id).filter(Boolean))] as string[]
+  const workflowIds = [...new Set(rows.map((r) => r.workflow_id).filter(Boolean))] as number[]
+  const rejectedIds = rows.filter((r) => isRejectedStatus(r.status)).map((r) => r.id)
+
+  const [usersRes, stepsRes, rejectionsRes] = await Promise.all([
+    assigneeIds.length ? supabase.from('users').select('id, name').in('id', assigneeIds) : Promise.resolve({ data: [] }),
+    workflowIds.length
+      ? supabase.from('workflow_config').select('workflow_id, status_key, step_name').in('workflow_id', workflowIds)
+      : Promise.resolve({ data: [] }),
+    rejectedIds.length
+      ? supabase
+          .from('request_history')
+          .select('request_id, event_data, created_at')
+          .in('request_id', rejectedIds)
+          .eq('event_type', 'rejected')
+          .order('created_at', { ascending: false })
+      : Promise.resolve({ data: [] }),
+  ])
+
+  const names = new Map(((usersRes.data ?? []) as Array<{ id: string; name: string | null }>).map((u) => [u.id, u.name ?? '']))
+  const steps = new Map(
+    ((stepsRes.data ?? []) as Array<{ workflow_id: number; status_key: string; step_name: string }>).map((s) => [
+      `${s.workflow_id}:${s.status_key.toLowerCase()}`,
+      s.step_name,
+    ])
+  )
+  const reasons = new Map<number, string>()
+  for (const h of (rejectionsRes.data ?? []) as Array<{ request_id: number; event_data: { justification?: string | null } | null }>) {
+    if (!reasons.has(h.request_id)) reasons.set(h.request_id, h.event_data?.justification?.trim() ?? '')
+  }
+
+  return rows.map((r) => {
+    const pdm = (Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates) as { name?: string; internal_code?: string } | null
+    const status = String(r.status ?? '')
+    return {
+      id: r.id,
+      code: `REQ-${String(r.id).padStart(4, '0')}`,
+      pdm_name: pdm?.name ?? '—',
+      pdm_code: pdm?.internal_code ?? '',
+      description: r.generated_description ?? '',
+      status,
+      step_label: isRejectedStatus(status)
+        ? 'Rejeitada'
+        : steps.get(`${r.workflow_id}:${status.toLowerCase()}`) ?? requestStatusLabel(status),
+      urgency: (r.urgency ?? 'low') as MyRequestRow['urgency'],
+      created_at: r.created_at ?? null,
+      assigned_to_name: r.assigned_to_id ? names.get(r.assigned_to_id) ?? null : null,
+      rejection_reason: reasons.get(r.id) || null,
+    }
+  })
 }
 
 export async function createRequest(body: {

@@ -25,7 +25,7 @@ const NAV_WIDTH = '14rem'
 
 const navLinks = [
   { href: '/', label: 'Início', icon: Home },
-  { href: '/request', label: 'Solicitações', icon: FileText },
+  { href: '/requests', label: 'Minhas Solicitações', icon: FileText },
   { href: '/governance', label: 'Governança', icon: ShieldCheck },
   { href: '/database', label: 'Base de Dados', icon: Database },
   { href: '/admin-pdm', label: 'Gestão PDM', icon: LayoutGrid },

@@ -11,7 +11,7 @@ export function canSeeMainNav(href: string, access: NavAccess): boolean {
   if (access.isMaster) return true
   if (href === '/') return true
   if (href === '/support') return true
-  if (href === '/request') return access.permissions.can_submit_request
+  if (href === '/requests') return access.permissions.can_submit_request
   if (href === '/governance') return access.permissions.can_approve || access.permissions.can_reject
   if (href === '/database') return access.permissions.can_view_database
   if (href === '/admin-pdm') return access.permissions.can_view_pdm
@@ -44,6 +44,6 @@ export function canSeeHomeShortcut(href: string, access: NavAccess): boolean {
   if (href === '/admin-pdm') return access.isMaster || access.permissions.can_edit_pdm
   if (href === '/governance') return access.isMaster || access.permissions.can_approve || access.permissions.can_reject
   if (href === '/settings/workflow') return access.isMaster || access.permissions.can_view_workflows
-  if (href === '/request') return access.isMaster || access.permissions.can_submit_request
+  if (href === '/requests/new') return access.isMaster || access.permissions.can_submit_request
   return false
 }

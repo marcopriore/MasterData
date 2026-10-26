@@ -7,7 +7,7 @@ import { getDashboardStats } from '@/lib/supabase-api'
 import { RecentActivitiesList } from '@/components/recent-activities-list'
 import { useUser } from '@/contexts/user-context'
 import { mergeRolePermissions } from '@/lib/permissions'
-import { canSeeHomeShortcut } from '@/lib/nav-access'
+import { canSeeHomeShortcut, canSeeMainNav } from '@/lib/nav-access'
 import {
   PieChart,
   Pie,
@@ -201,9 +201,13 @@ export default function DashboardPage() {
     load()
   }, [ready, pathname])
 
+  /** Quem não tem governança (solicitante) filtra as próprias solicitações. */
+  const seesGovernance = canSeeMainNav('/governance', access)
+
   function handleSliceClick(entry: { name: string }) {
     const key = stats?.by_status.find((s) => s.name === entry.name)?.key
-    router.push(key ? `/governance?status=${encodeURIComponent(key)}` : '/governance')
+    const base = seesGovernance ? '/governance' : '/requests'
+    router.push(key ? `${base}?status=${encodeURIComponent(key)}` : base)
   }
 
   const displayName = stats?.user_name?.split(' ')[0] || user?.name?.split(' ')[0] || 'Usuário'
@@ -254,9 +258,9 @@ export default function DashboardPage() {
               description="Etapas de aprovação"
             />
           )}
-          {canSeeHomeShortcut('/request', access) && (
+          {canSeeHomeShortcut('/requests/new', access) && (
             <NavCard
-              href="/request"
+              href="/requests/new"
               icon={FilePlus}
               label="Nova Requisição"
               description="Criar nova solicitação"
@@ -309,7 +313,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-muted-foreground">Clique em uma fatia para filtrar</p>
               </div>
               <Link
-                href={user?.role_name === 'SOLICITANTE' ? '/requests' : '/governance'}
+                href={seesGovernance ? '/governance' : '/requests'}
                 className="flex items-center gap-1 text-xs font-medium text-[#0F1C38] hover:text-[#C69A46] transition-colors"
               >
                 Ver todas <ArrowRight className="size-3" />

@@ -10,9 +10,10 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/reset-password` | Página pública do link de redefinição: valida o link e grava a nova senha. |
 | `/` | Dashboard: atalhos, contagens e atividades recentes. |
 | `/activity` | Lista completa das atividades do usuário. |
-| `/request` | Nova solicitação em 5 passos. |
+| `/requests` | **Minhas Solicitações**: as solicitações que o usuário abriu, com etapa, atendente, motivo da rejeição, material e situação no ERP, histórico no detalhe. Contadores por situação filtram a lista; `?status=chave` filtra pela etapa (gráfico da tela inicial) e `?req=ID` abre o detalhe. |
+| `/requests/new` | Nova solicitação em 5 passos. Ao enviar, volta para Minhas Solicitações com a nova aberta. `/request` redireciona para cá. |
 | `/governance` | Kanban e lista. É aqui que assumir, aprovar e rejeitar chamam as RPCs. |
-| `/governance/request/[id]` | Detalhe da solicitação. Os botões de atendimento só mudam estado local e não gravam no banco. |
+| `/governance/request/[id]` | Endereço antigo do e-mail; redireciona para `/governance?req=ID`. |
 | `/database` | Base de materiais: filtros, colunas, import/export, alteração de status em lote, status ERP. |
 | `/database/[id]` | Detalhe do material, descrições curta e detalhada. |
 | `/admin-pdm` | Lista de todos os PDMs, 25 por página: busca por nome ou código, filtro de situação (ativo/inativo) e de uso (com/sem materiais), colunas Código, Nome, Materiais e Situação, ordenáveis. Filtros e página ficam na URL. Exportar, importação em massa e Novo PDM no cabeçalho. |
@@ -34,7 +35,7 @@ Rotas fora do menu: `/products` (CRUD simples da tabela `products`) e `/teste` (
 
 ## Nova solicitação
 
-Passos em `web/app/request/page.tsx`:
+Passos em `web/app/requests/new/page.tsx`:
 
 1. **Pesquisa** — busca na base para evitar duplicata.
 2. **Fase 1** — solicitante, urgência, centro de custo e quantidade.

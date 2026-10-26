@@ -126,7 +126,7 @@ interface RequestCardProps {
   erpState?: RequestErpState
 }
 
-function ErpStateBadge({ state }: { state: RequestErpState }) {
+export function ErpStateBadge({ state }: { state: RequestErpState }) {
   if (state.tone === "alert") {
     return (
       <span
