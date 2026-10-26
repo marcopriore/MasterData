@@ -9,7 +9,7 @@ function access(partial: Partial<RolePermissions>, isMaster = false): NavAccess 
   }
 }
 
-const MAIN = ['/', '/requests', '/governance', '/database', '/admin-pdm']
+const MAIN = ['/', '/requests', '/governance', '/database', '/admin-pdm', '/reports']
 const ADMIN = ['/admin/users', '/admin/roles', '/admin/fields', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/integration-docs', '/admin/tenants']
 
 describe('simulador de menu', () => {
@@ -49,6 +49,7 @@ describe('simulador de menu', () => {
       [{ can_reject: true }, '/governance', 'main'],
       [{ can_view_database: true }, '/database', 'main'],
       [{ can_view_pdm: true }, '/admin-pdm', 'main'],
+      [{ can_view_reports: true }, '/reports', 'main'],
       [{ can_view_workflows: true }, '/settings/workflow', 'settings'],
       [{ can_manage_users: true }, '/admin/users', 'admin'],
       [{ can_manage_roles: true }, '/admin/roles', 'admin'],

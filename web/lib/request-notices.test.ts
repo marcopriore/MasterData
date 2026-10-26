@@ -36,6 +36,10 @@ describe('evento a partir do histórico', () => {
     expect(noticeEventFromHistory('rejected', 'rejected')).toBe('rejected')
   })
 
+  it('reenvio após rejeição avisa a etapa como solicitação nova', () => {
+    expect(noticeEventFromHistory('resubmitted', 'cadastro')).toBe('created')
+  })
+
   it('aprovação vira conclusão quando a etapa é final', () => {
     expect(noticeEventFromHistory('approved', 'compras')).toBe('approved')
     expect(noticeEventFromHistory('approved', 'finalizado')).toBe('completed')

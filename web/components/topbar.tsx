@@ -55,7 +55,7 @@ export function Topbar() {
 
   return (
     <header
-      className="fixed left-0 top-0 z-30 flex h-14 w-full items-center justify-between gap-2 border-b px-4 md:left-[14rem] md:w-[calc(100%-14rem)]"
+      className="fixed left-0 top-0 z-30 flex h-14 w-full items-center justify-between gap-2 border-b px-4 transition-[left,width] duration-200 md:left-[var(--nav-width)] md:w-[calc(100%-var(--nav-width))]"
       style={{
         backgroundColor: 'var(--sidebar-bg)',
         borderColor: 'var(--sidebar-border)',

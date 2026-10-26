@@ -139,7 +139,6 @@ export default function DatabasePage() {
   const isDark = resolvedTheme === 'dark'
   const { user, can } = useUser()
   const maxLength = user?.max_description_length ?? 40
-  const tenantId = user?.tenant_id
   const [items, setItems] = useState<MaterialItem[]>([])
   const [duplicateIds, setDuplicateIds] = useState<Map<number, string[]>>(new Map())
   const [total, setTotal] = useState(0)
@@ -294,16 +293,17 @@ export default function DatabasePage() {
       date_to: appliedDateTo || undefined,
     })
       .then((data) => {
-        setItems((data.items ?? []) as MaterialItem[])
+        const pageItems = (data.items ?? []) as MaterialItem[]
+        setItems(pageItems)
         setTotal(data.total ?? 0)
-        getDuplicateMaterials(tenantId).then(setDuplicateIds).catch(() => {})
+        getDuplicateMaterials(pageItems.map((m) => m.id)).then(setDuplicateIds).catch(() => {})
       })
       .catch(() => {
         setItems([])
         setTotal(0)
       })
       .finally(() => setLoading(false))
-  }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo, tenantId])
+  }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
     const load = async () => {
@@ -322,9 +322,10 @@ export default function DatabasePage() {
           }),
           getPdms(),
         ])
-        setItems((matsRes.items ?? []) as MaterialItem[])
+        const pageItems = (matsRes.items ?? []) as MaterialItem[]
+        setItems(pageItems)
         setTotal(matsRes.total ?? 0)
-        getDuplicateMaterials(tenantId).then(setDuplicateIds).catch(() => {})
+        getDuplicateMaterials(pageItems.map((m) => m.id)).then(setDuplicateIds).catch(() => {})
         setPdms((pdmList ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code })))
       } catch {
         setItems([])
@@ -335,7 +336,7 @@ export default function DatabasePage() {
       }
     }
     load()
-  }, [pathname, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo, tenantId])
+  }, [pathname, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   const handleFilter = () => {
     setAppliedSearch(search.trim())
@@ -530,7 +531,6 @@ export default function DatabasePage() {
       }
       const otherSkipped = res.skipped.length - blockedDup.length
       if (otherSkipped) toast.message(`${otherSkipped} não sincronizados.`)
-      getDuplicateMaterials(tenantId).then(setDuplicateIds).catch(() => {})
     } catch (err) {
       setErpModalError((err as Error)?.message ?? 'Falha ao sincronizar materiais')
     } finally {

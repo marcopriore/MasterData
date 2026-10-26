@@ -17,6 +17,7 @@ export type RolePermissions = {
   can_standardize: boolean
   can_bulk_import: boolean
   can_attend: boolean
+  can_view_reports: boolean
 }
 
 export type PermissionKey = keyof RolePermissions
@@ -38,6 +39,7 @@ export const PERMISSION_KEYS: PermissionKey[] = [
   'can_standardize',
   'can_bulk_import',
   'can_attend',
+  'can_view_reports',
 ]
 
 export const PERMISSION_GROUPS: {
@@ -85,6 +87,12 @@ export const PERMISSION_GROUPS: {
       { key: 'can_bulk_import', label: 'Importação em Massa', description: 'Importação em massa de materiais' },
     ],
   },
+  {
+    title: 'Relatórios',
+    items: [
+      { key: 'can_view_reports', label: 'Ver Relatórios', description: 'Fluxo, produtividade e base de materiais, com exportação' },
+    ],
+  },
 ]
 
 /** Papéis criados com o tenant. O nome não muda e o grupo não é apagado. */
@@ -130,6 +138,7 @@ export function emptyPermissions(): RolePermissions {
     can_standardize: false,
     can_bulk_import: false,
     can_attend: false,
+    can_view_reports: false,
   }
 }
 

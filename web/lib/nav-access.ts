@@ -15,6 +15,7 @@ export function canSeeMainNav(href: string, access: NavAccess): boolean {
   if (href === '/governance') return access.permissions.can_approve || access.permissions.can_reject
   if (href === '/database') return access.permissions.can_view_database
   if (href === '/admin-pdm') return access.permissions.can_view_pdm
+  if (href === '/reports') return access.permissions.can_view_reports
   return true
 }
 

@@ -51,7 +51,7 @@ export function requestCode(id: number): string {
 export function noticeEventFromHistory(eventType: string, stage: string | null | undefined): NoticeEvent | null {
   const type = eventType.trim().toLowerCase()
   const stageKey = (stage ?? '').trim().toLowerCase()
-  if (type === 'created') return 'created'
+  if (type === 'created' || type === 'resubmitted') return 'created'
   if (type === 'assigned') return 'assigned'
   if (type === 'rejected') return 'rejected'
   if (type === 'approved') return FINAL_STAGES.has(stageKey) ? 'completed' : 'approved'

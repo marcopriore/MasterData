@@ -3,7 +3,7 @@
 ## Multi-tenant
 
 - Quase toda tabela de negócio tem `tenant_id`.
-- RLS usa `get_user_tenant_id()`. Para usuário comum, o tenant vem do perfil. Para master, vem de `app_metadata.tenant_id` (troca de cliente).
+- RLS usa `get_user_tenant_id()`. Nas policies, essa função, `is_master_user()` e `auth.uid()` ficam dentro de `(SELECT …)` (migration 027): assim o Postgres calcula uma vez por consulta, não uma vez por linha. Policy nova deve seguir o mesmo formato. Para usuário comum, o tenant vem do perfil. Para master, vem de `app_metadata.tenant_id` (troca de cliente).
 - `is_master_user()` libera visão cruzada onde a policy permite. No dashboard, a aplicação ainda filtra pelo tenant efetivo, porque a policy do master devolve todas as linhas.
 - Unidades de medida são globais.
 - Troca de tenant é exclusiva de quem tem `is_master` no metadata de auth.
@@ -37,6 +37,7 @@ Ficam em `roles.permissions` (JSONB). A UI está em `web/app/admin/roles/page.ts
 | `can_manage_value_dictionary` | Dicionário de valores |
 | `can_view_logs` | Auditoria |
 | `can_standardize` | Padronização na base, integração/eliminação ERP e alteração de status em lote (Ativo / Bloqueado / Obsoleto) |
+| `can_view_reports` | Tela de Relatórios. Ligada em ADMIN e MASTER (migration 029, também em papel novo) |
 
 Papéis semeados no onboarding e na Empresa Demo: ADMIN e MASTER (quase tudo), SOLICITANTE (abre pedido, vê PDM, base e workflow), CADASTRO (atende, edita PDM, campos e importação), COMPRAS, MRP, FISCAL e CONTABILIDADE (aprovam, rejeitam, consultam).
 
@@ -57,6 +58,7 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 - Aprovar vai para o próximo `status_key`. Sem próximo, o status vira concluído.
 - Status final (`completed`, `approved`, `concluído`, `finalizado`, `rejected`) não avança de novo.
 - Só o atendente atual (ou ninguém) pode assumir. Outro usuário recebe erro de conflito.
+- Rejeitada pode ser **corrigida e reenviada** (`resubmit_request`, migration 028) por quem abriu, por quem está no grupo ADMIN do tenant ou pelo Master. A mesma solicitação (mesmo REQ) recebe PDM, atributos, descrição, urgência e justificativa corrigidos e volta para a primeira etapa ativa do workflow, sem atendente. O histórico grava `resubmitted` com a descrição e os atributos anteriores; a área da primeira etapa é avisada como numa solicitação nova. Antes de reenviar, a checagem de duplicidade roda de novo.
 - O arraste no kanban não finaliza, não rejeita e não reabre solicitação finalizada ou rejeitada. Essas mudanças só pelas RPCs (`advance_workflow`, `reject_request`), que gravam histórico, avisam e criam o material.
 - Entre etapas intermediárias, o arraste passa por `move_request_stage` (migration 026): valida que a etapa é do workflow, libera o atendente e grava `stage_change` no histórico com etapa de origem, destino e atendente anterior. Não gera aviso.
 - Ao entrar em finalizado, nasce o material na base, com descrições preenchidas a partir do PDM.

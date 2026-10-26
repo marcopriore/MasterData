@@ -15,6 +15,13 @@ import {
 } from '@/lib/material-duplicates'
 import type { RequestErpInfo } from '@/lib/request-erp-state'
 import { isRejectedStatus, type MyRequestRow } from '@/lib/my-requests'
+import {
+  toNullableNumber,
+  toNumber,
+  type FlowRow,
+  type MaterialBaseRow,
+  type ProductivityRow,
+} from '@/lib/reports'
 
 // ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
 
@@ -235,15 +242,14 @@ export async function getPdms(): Promise<PDMTemplate[]> {
   const supabase = createClient()
   const [pdmsRes, countsRes] = await Promise.all([
     supabase.from('pdm_templates').select(PDM_LIST_COLS).order('name'),
-    supabase.from('material_database').select('pdm_code'),
+    supabase.rpc('pdm_material_counts'),
   ])
   const { data: pdms, error } = pdmsRes
   if (error) handleError(error)
 
   const countMap: Record<string, number> = {}
-  ;(countsRes.data ?? []).forEach((c) => {
-    const code = c.pdm_code as string
-    if (code) countMap[code] = (countMap[code] ?? 0) + 1
+  ;((countsRes.data ?? []) as Array<{ pdm_code: string; total: number }>).forEach((c) => {
+    if (c.pdm_code) countMap[c.pdm_code] = Number(c.total) || 0
   })
 
   return (pdms ?? []).map((p) => ({
@@ -410,6 +416,7 @@ export async function deletePdm(id: number): Promise<void> {
 
 export type ApiRequest = {
   id: number
+  user_id?: string | null
   pdm_id: number
   pdm_name?: string
   status: string
@@ -490,6 +497,7 @@ export async function getRequests(params?: {
     const pdmAttributes = (pdm?.id ? pdmAttrMap[pdm.id] : {}) ?? {}
     result.push({
       id: r.id,
+      user_id: r.user_id ?? null,
       pdm_id: r.pdm_id,
       pdm_name: pdm?.name,
       status: r.status,
@@ -509,6 +517,55 @@ export async function getRequests(params?: {
     })
   }
   return result
+}
+
+// ─── Relatórios (migration 029) ──────────────────────────────────────────────
+
+export async function getReportFlow(fromIso: string, toIso: string): Promise<FlowRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('report_request_flow', { p_from: fromIso, p_to: toIso })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    stage: String(r.stage ?? ''),
+    entered: toNumber(r.entered),
+    avg_hours: toNullableNumber(r.avg_hours),
+    max_hours: toNullableNumber(r.max_hours),
+    current_open: toNumber(r.current_open),
+  }))
+}
+
+export async function getReportProductivity(fromIso: string, toIso: string): Promise<ProductivityRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('report_productivity', { p_from: fromIso, p_to: toIso })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    user_id: String(r.user_id ?? ''),
+    user_name: String(r.user_name ?? '—'),
+    role_name: r.role_name ? String(r.role_name) : null,
+    attended: toNumber(r.attended),
+    approved: toNumber(r.approved),
+    rejected: toNumber(r.rejected),
+    moved: toNumber(r.moved),
+    avg_decision_hours: toNullableNumber(r.avg_decision_hours),
+  }))
+}
+
+export async function getReportMaterialBase(): Promise<MaterialBaseRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('report_material_base')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    pdm_code: String(r.pdm_code ?? ''),
+    pdm_name: String(r.pdm_name ?? ''),
+    total: toNumber(r.total),
+    ativos: toNumber(r.ativos),
+    bloqueados: toNumber(r.bloqueados),
+    obsoletos: toNumber(r.obsoletos),
+    pendente_erp: toNumber(r.pendente_erp),
+    integrados: toNumber(r.integrados),
+    erro_erp: toNumber(r.erro_erp),
+    duplicados: toNumber(r.duplicados),
+  }))
 }
 
 /** Solicitações abertas pelo usuário logado, no tenant efetivo, com etapa, atendente e motivo da rejeição. */
@@ -763,6 +820,37 @@ export async function advanceWorkflow(id: number): Promise<ApiRequest> {
   })
   queueRequestNotice(id)
   queueRequestErp(id, (data as { status?: unknown } | null)?.status)
+  return data as ApiRequest
+}
+
+/** Reenvio de rejeitada: a mesma solicitação recebe a correção e volta para a primeira etapa. */
+export async function resubmitRequest(
+  id: number,
+  body: {
+    pdm_id: number
+    values: Record<string, string | { value: string; unit?: string }>
+    generated_description: string
+    urgency?: string
+    justificativa?: string
+  }
+): Promise<ApiRequest> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('resubmit_request', {
+    p_request_id: id,
+    p_pdm_id: body.pdm_id,
+    p_technical_attributes: body.values,
+    p_generated_description: body.generated_description,
+    p_urgency: body.urgency ?? null,
+    p_justification: body.justificativa ?? null,
+  })
+  if (error) throw new Error(error.message)
+  void logAction({
+    category: 'requests',
+    action: 'request_resubmitted',
+    description: 'Solicitação reenviada após correção',
+    event_data: { request_id: id },
+  })
+  queueRequestNotice(id)
   return data as ApiRequest
 }
 
@@ -1034,24 +1122,16 @@ export async function getMaterials(params: {
 }
 
 /** Map of duplicated material IDs -> other duplicated materials' id_sistema codes (same description + pdm_code). */
-export async function getDuplicateMaterials(tenantId?: number): Promise<Map<number, string[]>> {
+/** Selo DUP dos materiais informados (a página da lista). O banco devolve só os candidatos; a regra é a de material-duplicates. */
+export async function getDuplicateMaterials(materialIds: number[]): Promise<Map<number, string[]>> {
+  if (materialIds.length === 0) return new Map()
   try {
     const supabase = createClient()
-    const PAGE = 1000
-    const rows: DuplicateCandidate[] = []
-    for (let from = 0; ; from += PAGE) {
-      let query = supabase
-        .from('material_database')
-        .select('id, id_sistema, description, detailed_description, pdm_code, status')
-        .order('id')
-        .range(from, from + PAGE - 1)
-      if (tenantId) query = query.eq('tenant_id', tenantId)
-      const { data, error } = await query
-      if (error) throw error
-      rows.push(...((data ?? []) as DuplicateCandidate[]))
-      if (!data || data.length < PAGE) break
-    }
-    return groupMaterialDuplicates(rows)
+    const { data, error } = await supabase.rpc('material_duplicate_candidates', { p_ids: materialIds })
+    if (error) throw error
+    const all = groupMaterialDuplicates((data ?? []) as DuplicateCandidate[])
+    const wanted = new Set(materialIds)
+    return new Map([...all].filter(([id]) => wanted.has(id)))
   } catch (e) {
     console.error('getDuplicateMaterials', e)
     return new Map()

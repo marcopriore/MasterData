@@ -139,3 +139,6 @@ npm run test:e2e
 | 024 | índices para o limite de chamadas das APIs de material |
 | 025 | `can_attend` em todo papel novo (gatilho em `roles`) e nos papéis criados depois da 008 |
 | 026 | `move_request_stage`: arraste entre etapas intermediárias com histórico |
+| 027 | Desempenho: RLS com `(SELECT …)` (função calculada uma vez por consulta, não por linha), índices de lista/filtro/busca, `pdm_material_counts` e `material_duplicate_candidates` |
+| 028 | `resubmit_request`: rejeitada corrigida volta para a primeira etapa (quem abriu, Admin ou Master) |
+| 029 | Relatórios: `report_request_flow`, `report_productivity`, `report_material_base` e permissão `can_view_reports` (ADMIN e MASTER, também em papel novo) |

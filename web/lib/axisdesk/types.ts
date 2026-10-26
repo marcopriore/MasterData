@@ -134,6 +134,24 @@ export function getAxisDeskStatusLabel(status: string): string {
   return AXISDESK_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
 }
 
+export function getAxisDeskStatusVariant(status: string): 'success' | 'warning' | 'destructive' | 'info' | 'muted' {
+  switch (status) {
+    case 'concluido':
+      return 'success'
+    case 'reprovado':
+    case 'cancelado':
+      return 'destructive'
+    case 'pendente_usuario':
+    case 'validacao_usuario':
+      return 'warning'
+    case 'em_atendimento':
+    case 'pendente_publicacao':
+      return 'info'
+    default:
+      return 'muted'
+  }
+}
+
 export function getAxisDeskPrioridadeLabel(prioridade: string): string {
   return AXISDESK_PRIORIDADE_OPTIONS.find((option) => option.value === prioridade)?.label ?? prioridade
 }

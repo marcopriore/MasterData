@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, FilePlus, FileText, Loader2, Search, X } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, FilePlus, FileText, Loader2, RotateCcw, Search, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import {
@@ -266,11 +266,6 @@ function MyRequestsContent() {
                           <StageBadge row={row} />
                           {erp && <ErpStateBadge state={erp} />}
                         </div>
-                        {row.rejection_reason && (
-                          <p className="mt-1 line-clamp-1 text-xs text-red-700 dark:text-red-300" title={row.rejection_reason}>
-                            {row.rejection_reason}
-                          </p>
-                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-700 dark:text-foreground">
                         {row.assigned_to_name ?? <span className="italic text-muted-foreground">{situationOf(row.status) === 'andamento' ? 'Aguardando' : '—'}</span>}
@@ -345,6 +340,12 @@ function MyRequestsContent() {
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                   <p className="font-semibold">Solicitação rejeitada</p>
                   <p className="mt-1">{detail.rejection_reason || 'Sem justificativa registrada.'}</p>
+                  <Link href={`/requests/new?reenviar=${detail.id}`} className="mt-3 inline-block">
+                    <Button size="sm" className="gap-1.5 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90">
+                      <RotateCcw className="size-3.5" />
+                      Corrigir e reenviar
+                    </Button>
+                  </Link>
                 </div>
               )}
 

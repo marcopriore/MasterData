@@ -4,7 +4,13 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 ## Produto
 
+- **Desligar o cadastro público no Supabase.** O `prd:check` acusa "Allow new users to sign up" ligado no projeto atual (que também é o de produção): qualquer pessoa com a chave pública cria conta no Auth. Desligar em Authentication → Sign In / Providers → Email.
+- **`NEXT_PUBLIC_APP_URL` no ambiente.** Falta no `.env.local` (esperado em desenvolvimento) e é obrigatória em produção, para os links de e-mail e das solicitações criadas por API apontarem para o endereço certo.
+
 - **Minhas Solicitações, próximos passos.** A primeira versão (`/requests`) lista só o que o usuário abriu, em leitura. Ainda a definir: aba com as solicitações que o usuário atendeu; o solicitante cancelar uma solicitação em andamento ou reabrir uma rejeitada com correção; anexos no detalhe; exportar a lista.
+- **Relatórios, próximos.** Rejeições por área e motivo e integrações com o ERP no período ficaram fora da primeira versão.
+- **AxisDesk em produção respondendo 500.** A chave do PRO-MAT é aceita, mas `/api/categorias` e `/api/chamados` do AxisDesk falham na primeira consulta ao próprio banco. Conferir o projeto Supabase do AxisDesk (pausado?) e os logs da Vercel dele.
+- **Consultas que ainda carregam tudo.** O painel inicial (`getDashboardStats`) e a governança (`getRequests`) leem todas as solicitações do tenant ou do workflow; acima de 1000 linhas o PostgREST corta. Próximo passo: contagens por RPC e paginação na lista da governança.
 - **E-mail de redefinição de senha.** O link sai pelo e-mail do Supabase Auth. O SMTP padrão do Supabase só entrega para membros da equipe do projeto e tem limite baixo; em produção é preciso o SMTP próprio (Resend) e o modelo de e-mail com `token_hash`, descritos em `deploy-producao.md`.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
 - **Domínio público do PRO-MAT.** Roteiro em [deploy-producao.md](./deploy-producao.md) (Vercel + subdomínio no registro.br). Depois do go-live, a URL do webhook no AxisDesk fica `https://<app>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.

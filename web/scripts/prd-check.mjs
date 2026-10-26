@@ -155,6 +155,22 @@ async function checkSupabase(env) {
   if (moveErr && /não encontrada/i.test(moveErr.message)) ok('migration 026: move_request_stage')
   else fail(`migration 026: move_request_stage não responde como esperado (${moveErr?.message ?? 'sem erro'}) — rode supabase/migrations/026_move_request_stage.sql`)
 
+  const rpcs = [
+    ['027', 'pdm_material_counts', {}],
+    ['027', 'material_duplicate_candidates', { p_ids: [] }],
+    ['028', 'resubmit_request', { p_request_id: -1, p_pdm_id: -1, p_technical_attributes: {}, p_generated_description: '' }],
+    ['029', 'report_material_base', {}],
+  ]
+  for (const [migration, fn, params] of rpcs) {
+    const { error: rpcErr } = await admin.rpc(fn, params)
+    // Sem a função o PostgREST responde PGRST202; "não encontrada" é a resposta esperada do resubmit com id -1.
+    if (rpcErr && (rpcErr.code === 'PGRST202' || /could not find the function/i.test(rpcErr.message))) {
+      fail(`migration ${migration}: função ${fn} não existe — rode supabase/migrations/${migration}_*.sql`)
+    } else {
+      ok(`migration ${migration}: ${fn}`)
+    }
+  }
+
   const { data: bucket, error: bucketErr } = await admin.storage.getBucket('request-attachments')
   if (bucketErr || !bucket) fail('bucket request-attachments não existe (migration 006)')
   else if (bucket.public) fail('bucket request-attachments está público; deveria ser privado')

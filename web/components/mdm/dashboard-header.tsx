@@ -25,11 +25,14 @@ interface DashboardHeaderProps {
   headerActions?: React.ReactNode
   /** No detalhe: link de volta para a lista, mantendo filtros e página */
   listHref?: string
+  /** Conteúdo no mesmo bloco, abaixo do título (ex.: filtros da lista) */
+  footer?: React.ReactNode
 }
 
-export function DashboardHeader({ status, isEditMode = false, onEditClick, onSave, onClone, minimal = false, pdmName, headerActions, listHref }: DashboardHeaderProps) {
+export function DashboardHeader({ status, isEditMode = false, onEditClick, onSave, onClone, minimal = false, pdmName, headerActions, listHref, footer }: DashboardHeaderProps) {
   return (
-    <header className="flex flex-col gap-3 rounded-2xl border-b border-slate-200/60 bg-white px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] dark:border-zinc-700/50 dark:bg-card dark:shadow-[0_2px_8px_rgba(0,0,0,0.2),0_4px_6px_-1px_rgba(0,0,0,0.1)] md:flex-row md:items-center md:justify-between">
+    <header className="rounded-2xl border-b border-slate-200/60 bg-white px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] dark:border-zinc-700/50 dark:bg-card dark:shadow-[0_2px_8px_rgba(0,0,0,0.2),0_4px_6px_-1px_rgba(0,0,0,0.1)]">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div className="flex flex-col gap-2">
         <Breadcrumb>
           <BreadcrumbList>
@@ -106,6 +109,8 @@ export function DashboardHeader({ status, isEditMode = false, onEditClick, onSav
           </>
         )}
       </div>
+    </div>
+    {footer && <div className="mt-4 border-t border-slate-200/70 pt-4 dark:border-zinc-700/50">{footer}</div>}
     </header>
   )
 }

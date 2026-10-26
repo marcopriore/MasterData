@@ -1,9 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import Link from 'next/link'
-import { useRouter, usePathname } from 'next/navigation'
-import { getPdms, getPdmById, searchMaterials, createRequest, checkDuplicateRequest, uploadRequestAttachment } from '@/lib/supabase-api'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
+import {
+  getPdms,
+  getPdmById,
+  searchMaterials,
+  createRequest,
+  checkDuplicateRequest,
+  uploadRequestAttachment,
+  getRequestById,
+  getRequestHistory,
+  resubmitRequest,
+} from '@/lib/supabase-api'
+import { isRejectedStatus } from '@/lib/my-requests'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Stepper, type StepItem } from '@/components/request/stepper'
@@ -81,9 +92,22 @@ type MaterialSearchItem = {
 }
 
 export default function NewMaterialRequestPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewMaterialRequestForm />
+    </Suspense>
+  )
+}
+
+function NewMaterialRequestForm() {
   const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { user } = useUser()
+  const resubmitParam = Number(searchParams.get('reenviar'))
+  const resubmitId = Number.isInteger(resubmitParam) && resubmitParam > 0 ? resubmitParam : null
+  const [resubmitReady, setResubmitReady] = useState(resubmitId == null)
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null)
   const [currentStep, setCurrentStep] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
@@ -119,10 +143,38 @@ export default function NewMaterialRequestPage() {
 
   // Auto-fill requester name from the logged-in user when it becomes available
   useEffect(() => {
-    if (user?.name) {
+    if (user?.name && resubmitId == null) {
       setRequesterName(user.name.toUpperCase())
     }
-  }, [user?.name, pathname])
+  }, [user?.name, pathname, resubmitId])
+
+  // Reenvio: carrega a rejeitada já preenchida e começa nos atributos
+  useEffect(() => {
+    if (resubmitId == null) return
+    let cancelled = false
+    void (async () => {
+      const req = await getRequestById(resubmitId)
+      if (cancelled) return
+      if (!req || !isRejectedStatus(req.status)) {
+        toast.error('Só solicitação rejeitada pode ser corrigida e reenviada.')
+        router.replace('/requests')
+        return
+      }
+      const history = await getRequestHistory(resubmitId).catch(() => [])
+      if (cancelled) return
+      const rejection = history.find((evt) => evt.event_type === 'rejected')
+      const justification = (rejection?.event_data as { justification?: string } | null | undefined)?.justification
+      setRejectionReason(justification?.trim() || null)
+      setSelectedPdm(req.pdm_id)
+      setFormData((req.technical_attributes ?? {}) as Record<string, string | { value: string; unit: string }>)
+      if (req.urgency === 'low' || req.urgency === 'medium' || req.urgency === 'high') setUrgency(req.urgency)
+      setJustificativa(req.justification ?? '')
+      if (req.requester) setRequesterName(req.requester)
+      setCurrentStep(2)
+      setResubmitReady(true)
+    })()
+    return () => { cancelled = true }
+  }, [resubmitId, router])
 
   // Fetch PDM templates on mount
   useEffect(() => {
@@ -267,7 +319,7 @@ export default function NewMaterialRequestPage() {
         pdm_id: selectedPdm,
         formData: formData as Record<string, unknown>,
       })
-      if (dupCheck.isDuplicate) {
+      if (dupCheck.isDuplicate && !(dupCheck.source === 'request' && dupCheck.existingId === resubmitId)) {
         setDuplicateInfo({ existingCode: dupCheck.existingCode, source: dupCheck.source })
         setDuplicateModalOpen(true)
         return
@@ -275,9 +327,14 @@ export default function NewMaterialRequestPage() {
 
       setIsSubmitting(true)
       try {
-        // Step 1 — create the request record
-        const result = await createRequest(payload)
-        const requestId = result.id
+        // Step 1 — create the request record (ou reabre a rejeitada)
+        let requestId: number
+        if (resubmitId != null) {
+          await resubmitRequest(resubmitId, payload)
+          requestId = resubmitId
+        } else {
+          requestId = (await createRequest(payload)).id
+        }
 
         // Step 2 — upload each file to Supabase Storage
         if (uploadedFiles.length > 0) {
@@ -297,7 +354,11 @@ export default function NewMaterialRequestPage() {
           }
         }
 
-        toast.success(`Solicitação #${requestId} criada com sucesso!`, {
+        toast.success(
+          resubmitId != null
+            ? `Solicitação REQ-${String(requestId).padStart(4, '0')} reenviada para a primeira etapa.`
+            : `Solicitação #${requestId} criada com sucesso!`,
+          {
           description: 'Redirecionando para Minhas Solicitações…',
           duration: 3000,
         })
@@ -321,7 +382,7 @@ export default function NewMaterialRequestPage() {
     if (currentStep > 0 && currentStep !== 1) {
       if (currentStep === 2) setInvalidFieldIds(new Set())
       setCurrentStep((s) => s - 1)
-    } else if (currentStep === 1) {
+    } else if (currentStep === 1 && resubmitId == null) {
       setCurrentStep(0)
     }
   }
@@ -345,13 +406,34 @@ export default function NewMaterialRequestPage() {
           <div>
             <h1 className="text-2xl font-semibold text-foreground flex items-center gap-2">
               <FileText className="size-6 text-[#0F1C38]" />
-              Nova Solicitação de Cadastro
+              {resubmitId != null
+                ? `Corrigir e reenviar REQ-${String(resubmitId).padStart(4, '0')}`
+                : 'Nova Solicitação de Cadastro'}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Siga as etapas para criar uma nova solicitação de descrição de material
+              {resubmitId != null
+                ? 'Ajuste o que motivou a rejeição. Ao enviar, a solicitação volta para a primeira etapa do fluxo.'
+                : 'Siga as etapas para criar uma nova solicitação de descrição de material'}
             </p>
           </div>
         </div>
+
+        {resubmitId != null && rejectionReason && (
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-semibold">Motivo da rejeição</p>
+              <p className="mt-0.5">{rejectionReason}</p>
+            </div>
+          </div>
+        )}
+
+        {!resubmitReady && (
+          <p className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Carregando a solicitação…
+          </p>
+        )}
 
         {/* Stepper */}
         <div className="mb-6 rounded-2xl border border-[#B4B9BE] bg-white px-6 py-5 shadow-[var(--shadow-card-float)]">
@@ -433,7 +515,7 @@ export default function NewMaterialRequestPage() {
                   <Button
                     variant="outline"
                     onClick={handleBack}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !resubmitReady || (resubmitId != null && currentStep === 1)}
                     className="gap-1.5"
                   >
                     <ChevronLeft className="size-4" />
@@ -442,14 +524,14 @@ export default function NewMaterialRequestPage() {
                 ) : <div />}
                 <Button
                   onClick={handleNext}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !resubmitReady}
                   className="gap-1.5 bg-[#0F1C38] hover:bg-[#0F1C38]/90 focus-visible:ring-[#C69A46]/50 disabled:opacity-60"
                 >
                   {currentStep === 4 ? (
                     isSubmitting ? (
                       <><Loader2 className="size-4 animate-spin" />Enviando…</>
                     ) : (
-                      <><Check className="size-4" />Finalizar Solicitação</>
+                      <><Check className="size-4" />{resubmitId != null ? 'Reenviar Solicitação' : 'Finalizar Solicitação'}</>
                     )
                   ) : (
                     <>Próximo<ChevronRight className="size-4" /></>

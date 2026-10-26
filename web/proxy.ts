@@ -33,9 +33,10 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // getClaims valida o JWT localmente com as chaves de assinatura do projeto (sem ida ao Auth a cada
+  // requisição); com segredo HS256 legado, ele mesmo cai no getUser.
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const user = claimsData?.claims?.sub ? { id: claimsData.claims.sub } : null
 
   if (!user && kind === 'api-session') {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })

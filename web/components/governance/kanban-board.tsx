@@ -335,13 +335,13 @@ export function KanbanBoard({
       onDragEnd={handleDragEnd}
     >
       <ScrollArea className="w-full">
-        <div className="flex gap-4 pb-4 min-w-[900px]">
+        <div className="flex gap-4 pb-4">
           {columnsToRender.map((col) => {
             const items = cardsByColumn(col.id)
             const isOver = overColumnId === col.id && activeCard?.status !== col.id
 
             return (
-              <div key={col.id} className="flex w-[260px] shrink-0 flex-col">
+              <div key={col.id} className="flex min-w-[250px] flex-1 basis-0 flex-col">
                 {/* Column header */}
                 <div
                   className="mb-3 flex items-center gap-2 rounded-lg border px-3 py-2.5 shadow-sm"

@@ -123,9 +123,7 @@ export function PdmList() {
             </Button>
           </>
         }
-      />
-
-      <div className="rounded-2xl border border-slate-200/60 bg-white px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)] dark:border-zinc-700/50 dark:bg-card">
+        footer={
         <div className="flex flex-wrap items-end gap-3">
           <div className="relative min-w-64 flex-1">
             <label htmlFor="pdm-search" className="mb-1 block text-xs font-medium text-slate-500 dark:text-muted-foreground">Buscar</label>
@@ -178,7 +176,8 @@ export function PdmList() {
             </Button>
           )}
         </div>
-      </div>
+        }
+      />
 
       <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] dark:border-zinc-700/50 dark:bg-card">
         <div className="overflow-x-auto">

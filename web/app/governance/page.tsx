@@ -40,7 +40,8 @@ import {
 } from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
-import { AlertTriangle, ChevronLeft, FilePlus, Check, X, Save, Loader2, RefreshCw, ExternalLink } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, Check, X, Save, Loader2, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react'
+import { isRejectedStatus } from '@/lib/my-requests'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
 import { formatAttrValue } from '@/lib/format-attr-value'
@@ -84,6 +85,7 @@ function attrValStr(v: string | { value: string; unit?: string } | undefined): s
 
 type ApiRequest = {
   id: number
+  user_id?: string | null
   id_sistema?: string | null
   pdm_id: number
   pdm_name: string | null
@@ -761,7 +763,7 @@ export default function GovernancePage() {
   return (
     <div className="min-h-screen">
       {/* Header – dark bar with white title in light mode */}
-      <header className="mx-auto max-w-7xl">
+      <header>
         <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/60 bg-[#0F1C38] px-6 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.08),0_4px_12px_-2px_rgba(0,0,0,0.06)] dark:rounded-2xl dark:border-slate-200/10 dark:bg-[#0F1C38] dark:shadow-[0_2px_8px_rgba(0,0,0,0.2)] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <Link href="/">
@@ -783,18 +785,10 @@ export default function GovernancePage() {
               </p>
             </div>
           </div>
-          <Link href="/requests/new">
-            <Button
-              className="gap-2 transition-colors duration-200 border-[#C69A46] bg-[#C69A46] text-[#0F1C38] hover:bg-[#C69A46]/90"
-            >
-              <FilePlus className="size-4" />
-              Nova Solicitação
-            </Button>
-          </Link>
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl mt-4">
+      <div className="mt-4">
 
         <div className="space-y-6">
           {/* Stats Summary – indicadores de SLA e gestão */}
@@ -902,6 +896,18 @@ export default function GovernancePage() {
                     description={(canEditTechnicalAttributes ? generatedDescription : selectedRequest.generated_description) || ''}
                     maxLength={user?.max_description_length ?? 40}
                   />
+                </div>
+              )}
+
+              {isRejectedStatus(selectedRequest.status) && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+                  <p>Solicitação rejeitada. Ela pode ser corrigida e reenviada para a primeira etapa.</p>
+                  <Link href={`/requests/new?reenviar=${selectedRequest.id}`}>
+                    <Button size="sm" className="gap-1.5 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90">
+                      <RotateCcw className="size-3.5" />
+                      Corrigir e reenviar
+                    </Button>
+                  </Link>
                 </div>
               )}
 
@@ -1212,6 +1218,7 @@ export default function GovernancePage() {
                           rejected: { icon: '❌', color: 'text-red-600 dark:text-red-400' },
                           status_changed: { icon: '🔄', color: 'text-violet-600 dark:text-violet-400' },
                           stage_change: { icon: '🔄', color: 'text-violet-600 dark:text-violet-400' },
+                          resubmitted: { icon: '↩️', color: 'text-blue-600 dark:text-blue-400' },
                           action: { icon: '⚡', color: 'text-orange-600 dark:text-orange-400' },
                         }
                         const cfg = iconMap[evt.event_type] ?? { icon: '•', color: 'text-slate-500' }
