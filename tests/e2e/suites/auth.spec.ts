@@ -1,39 +1,46 @@
-import { test, expect } from '@playwright/test'
-import { loginAsMaster, loginAsAdmin, logout } from '../fixtures/auth'
+import { expect, test } from '@playwright/test'
+import { admin } from '../helpers/supabase'
 import { getState } from '../helpers/state'
+import { INACTIVE_MESSAGE, login, loginAs } from '../helpers/ui'
 
 test.describe('01 - Autenticação', () => {
-  test('Master consegue fazer login', async ({ page }) => {
-    await loginAsMaster(page)
-    await expect(page).toHaveURL(/\/$|\/inicio/)
-    await expect(page.getByText('MASTER', { exact: true }).first()).toBeVisible()
+  test('página protegida sem sessão vai para o login', async ({ page }) => {
+    await page.goto('/governance')
+    await expect(page).toHaveURL(/\/login\?from=%2Fgovernance/)
   })
 
-  test('Admin do tenant consegue fazer login', async ({ page }) => {
-    await loginAsAdmin(page)
-    await expect(page).toHaveURL(/\/$|\/inicio/)
+  test('login do administrador abre o sistema com o menu dele', async ({ page }) => {
+    await loginAs(page, 'admin')
+    await expect(page.getByRole('button', { name: 'Sair' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Governança' }).first()).toBeVisible()
   })
 
-  test('Logout funciona corretamente', async ({ page }) => {
-    await loginAsAdmin(page)
-    await logout(page)
-    await expect(page).toHaveURL(/\/login/)
-  })
-
-  test('Credenciais inválidas exibem erro', async ({ page }) => {
-    await page.goto('/login')
-    await page.fill('input[type="email"]', 'invalido@test.com')
-    await page.fill('input[type="password"]', 'senhaerrada')
-    await page.click('button[type="submit"]')
-    await expect(page).toHaveURL(/\/login/)
-  })
-
-  test('Estado de teste foi criado corretamente', async () => {
+  test('senha errada mostra "Credenciais inválidas"', async ({ page }) => {
     const state = getState()
-    expect(state.tenantId).toBeDefined()
-    expect(state.adminEmail).toContain('@test.com')
-    expect(state.operatorEmail).toContain('@test.com')
-    expect(state.adminToken).toBeDefined()
-    console.log(`Tenant: ${state.tenantId}, Admin: ${state.adminEmail}`)
+    await login(page, state.users.admin.email, 'SenhaErrada1!')
+    await expect(page.getByText('Credenciais inválidas')).toBeVisible()
+    await expect(page).toHaveURL(/\/login/)
+  })
+
+  test('usuário inativo não entra', async ({ page }) => {
+    const state = getState()
+    await admin.from('users').update({ is_active: false }).eq('id', state.spare.id)
+    try {
+      await login(page, state.spare.email, state.password)
+      await expect(page.getByText(INACTIVE_MESSAGE)).toBeVisible()
+      await expect(page).toHaveURL(/\/login/)
+    } finally {
+      await admin.from('users').update({ is_active: true }).eq('id', state.spare.id)
+    }
+  })
+
+  test('sair encerra a sessão', async ({ page }) => {
+    const state = getState()
+    await login(page, state.spare.email, state.password)
+    await page.waitForURL((url) => !url.pathname.startsWith('/login'))
+    await page.getByRole('button', { name: 'Sair' }).click()
+    await expect(page).toHaveURL(/\/login/)
+    await page.goto('/governance')
+    await expect(page).toHaveURL(/\/login/)
   })
 })

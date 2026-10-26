@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import {
   getMaterials,
@@ -280,7 +280,11 @@ export default function DatabasePage() {
   const createCount = bulkImportResult?.rows.filter((r) => r.operacao === 'C' && r.status !== 'error').length ?? 0
   const updateCount = bulkImportResult?.rows.filter((r) => r.operacao === 'E' && r.status !== 'error').length ?? 0
 
+  // Só a consulta mais recente atualiza a tabela (uma carga lenta não pode sobrescrever a busca).
+  const loadSeq = useRef(0)
+
   const fetchMaterials = useCallback(() => {
+    const seq = ++loadSeq.current
     setLoading(true)
     getMaterials({
       page,
@@ -293,19 +297,22 @@ export default function DatabasePage() {
       date_to: appliedDateTo || undefined,
     })
       .then((data) => {
+        if (seq !== loadSeq.current) return
         const pageItems = (data.items ?? []) as MaterialItem[]
         setItems(pageItems)
         setTotal(data.total ?? 0)
         getDuplicateMaterials(pageItems.map((m) => m.id)).then(setDuplicateIds).catch(() => {})
       })
       .catch(() => {
+        if (seq !== loadSeq.current) return
         setItems([])
         setTotal(0)
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {
+    const seq = ++loadSeq.current
     const load = async () => {
       setLoading(true)
       try {
@@ -322,17 +329,19 @@ export default function DatabasePage() {
           }),
           getPdms(),
         ])
+        setPdms((pdmList ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code })))
+        if (seq !== loadSeq.current) return
         const pageItems = (matsRes.items ?? []) as MaterialItem[]
         setItems(pageItems)
         setTotal(matsRes.total ?? 0)
         getDuplicateMaterials(pageItems.map((m) => m.id)).then(setDuplicateIds).catch(() => {})
-        setPdms((pdmList ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code })))
       } catch {
+        if (seq !== loadSeq.current) return
         setItems([])
         setTotal(0)
         setPdms([])
       } finally {
-        setLoading(false)
+        if (seq === loadSeq.current) setLoading(false)
       }
     }
     load()

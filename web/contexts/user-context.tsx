@@ -67,6 +67,8 @@ type UserContextValue = {
 
 const EMPTY_PERMISSIONS = emptyPermissions()
 
+const INACTIVE_MESSAGE = 'Usuário inativo. Fale com o administrador da sua empresa.'
+
 // ─── Profile helpers ───────────────────────────────────────────────────────────
 
 type DbProfile = {
@@ -265,12 +267,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           const msg =
             error.message === 'Invalid login credentials'
               ? 'Credenciais inválidas'
-              : error.message
+              : /banned/i.test(error.message)
+                ? INACTIVE_MESSAGE
+                : error.message
           return { ok: false, error: msg }
         }
 
         if (!data.session?.user) {
           return { ok: false, error: 'Sessão não criada' }
+        }
+
+        const { data: status } = await supabase.from('users').select('is_active').eq('id', data.session.user.id).single()
+        if (status?.is_active === false) {
+          await supabase.auth.signOut()
+          return { ok: false, error: INACTIVE_MESSAGE }
         }
 
         const loaded = await loadUserFromSession()

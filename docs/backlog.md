@@ -14,12 +14,16 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 - **E-mail de redefinição de senha.** O link sai pelo e-mail do Supabase Auth. O SMTP padrão do Supabase só entrega para membros da equipe do projeto e tem limite baixo; em produção é preciso o SMTP próprio (Resend) e o modelo de e-mail com `token_hash`, descritos em `deploy-producao.md`.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
 - **Domínio público do PRO-MAT.** Roteiro em [deploy-producao.md](./deploy-producao.md) (Vercel + subdomínio no registro.br). Depois do go-live, a URL do webhook no AxisDesk fica `https://<app>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.
-- **Banco único.** Produção e desenvolvimento usam o mesmo projeto Supabase. `npm run dev` e os scripts de seed gravam em produção até existir um projeto de desenvolvimento (passo descrito no fim de `deploy-producao.md`).
+- **Banco único (decidido, 26/10/2026).** Produção e desenvolvimento usam o mesmo projeto Supabase. O banco de desenvolvimento fica para depois do primeiro cliente fechado, junto com o plano Pro. Sem Docker local. Até lá:
+  - `npm run dev`, os scripts de seed e a sonda gravam em produção;
+  - teste que grava dado usa tenant temporário e apaga no fim, como `security:probe`.
+  
+  O passo a passo da separação está no fim de `deploy-producao.md`.
 - **Integração ERP contra um ERP real.** A chamada existe e foi testada contra um servidor falso. Falta validar com o endpoint do cliente: nomes do cabeçalho (`internalGroup` para grupo de mercadoria é suposição), formato da resposta e mensagens de erro. A simulação continua enquanto o tenant não tiver integração ativa.
 - **Aprovar só na etapa do próprio papel.** Desde a 032, aprovar exige `can_approve` e rejeitar `can_reject`. Ainda não se confere se a etapa atual é da área do usuário: um aprovador de Compras aprova uma solicitação que está em Fiscal, se a abrir. A tela também não trava isso hoje. Definir a regra (área da etapa, ou ADMIN e Master em qualquer etapa) antes de travar no banco.
 - **Ajustes do Supabase Auth em produção.**
   - Cadastro público desligado.
-  - Senha mínima 8 com letras e números, e leaked password protection.
+  - Senha mínima 8 com minúscula, maiúscula, número e símbolo (feito em 26/10/2026), e leaked password protection.
   - Rodar `scripts/rotate-default-passwords.mjs`.
   - Desativar os usuários da Empresa Demo.
   
@@ -45,8 +49,8 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 ## Documentação e engenharia
 
 - Manter `docs/` junto com mudança de regra. Se nascer permissão, etapa de workflow ou RPC, atualizar `regras.md` e `funcionalidades.md` no mesmo trabalho.
-- Os testes e2e em `tests/e2e` ainda chamam `http://localhost:8000` (`/admin/auth/login`, `/api/requests`, `/api/pdm`), a API FastAPI que saiu do repositório. Enquanto o helper não falar com o Next.js e o Supabase, a suíte não protege o sistema atual. Há TODOs em `request.spec.ts` e `governance.spec.ts` que aceitam HTTP 200 onde a validação deveria falhar.
-- Não há suíte de tenants, troca de tenant, importação de planilha nem notificações.
+- **Resposta antiga sobrescrevendo a busca.** A Base de Dados mostrava a carga inicial por cima do resultado da busca quando ela chegava depois (corrigido: só a consulta mais recente vale). Conferir o mesmo padrão nas outras listas com filtro (governança, Minhas Solicitações, logs, dicionário).
+- E2E ainda sem suíte de troca de tenant pelo Master, importação de planilha, anexos, notificações e integração ERP (simulada). Rodar o E2E no CI depende do banco de desenvolvimento.
 - Senha dos usuários demo continua hardcoded no script de criação. Aceitável para demo; não usar esse valor fora do tenant de demonstração.
 
 ## Ideias já modeladas e ainda abertas

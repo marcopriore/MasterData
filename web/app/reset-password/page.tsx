@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, KeyRound, Loader2, Lock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
-import { MIN_PASSWORD_LENGTH, newPasswordProblem, translateResetError } from '@/lib/password-reset-messages'
+import { newPasswordProblem, translateResetError } from '@/lib/password-reset-messages'
+import { PASSWORD_RULE_TEXT } from '@/lib/password-policy'
 
 type Stage = 'checking' | 'ready' | 'invalid' | 'saving'
 
@@ -125,7 +126,7 @@ export default function ResetPasswordPage() {
 
             {(stage === 'ready' || stage === 'saving') && (
               <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                <p className="text-sm text-slate-600">Crie a nova senha, com pelo menos {MIN_PASSWORD_LENGTH} caracteres, letras e números.</p>
+                <p className="text-sm text-slate-600">Crie a nova senha, com {PASSWORD_RULE_TEXT}.</p>
                 <div className="space-y-1.5">
                   <label htmlFor="new-password" className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
                     Nova senha

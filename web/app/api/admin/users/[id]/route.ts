@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/server-access'
-import { syncUserAccess } from '@/lib/user-access'
+import { setAuthAccess, syncUserAccess } from '@/lib/user-access'
 import { NextResponse } from 'next/server'
 
 async function insertLog(params: {
@@ -80,6 +80,11 @@ export async function PUT(
     .select('*, roles!users_role_id_fkey(id, name), tenants(id, name)')
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  if (updates.is_active !== undefined) {
+    const blocked = await setAuthAccess(id, updates.is_active === true)
+    if (blocked.error) return NextResponse.json({ error: blocked.error }, { status: 500 })
+  }
 
   const safeBody = { ...(body as Record<string, unknown>) }
   delete safeBody.password

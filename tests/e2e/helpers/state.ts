@@ -1,47 +1,54 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
-const STATE_FILE = path.resolve(__dirname, '../test-state.json')
+export const STATE_FILE = path.resolve(__dirname, '../test-state.json')
+export const AUTH_DIR = path.resolve(__dirname, '../.auth')
+
+export const ROLES = ['admin', 'solicitante', 'cadastro', 'compras', 'mrp', 'fiscal', 'contabilidade'] as const
+export type RoleKey = (typeof ROLES)[number]
+
+/** Etapas do workflow padrão, na ordem, com o usuário da área de cada uma. */
+export const STAGES: { status: string; role: RoleKey }[] = [
+  { status: 'cadastro', role: 'cadastro' },
+  { status: 'compras', role: 'compras' },
+  { status: 'mrp', role: 'mrp' },
+  { status: 'fiscal', role: 'fiscal' },
+  { status: 'contabilidade', role: 'contabilidade' },
+]
+
+export type TestUser = { id: string; email: string; name: string; roleId: number }
 
 export interface TestState {
-  RUN_ID: number
+  runId: string
   tenantId: number
-  masterToken: string
-  adminEmail: string
-  adminPassword: string
-  adminToken: string
-  operatorEmail: string
-  operatorPassword: string
-  operatorUserId: number
-  operatorRoleId: number
-  /** Adicionados pela suite PDM */
-  pdmId?: number
-  pdmInternalCode?: string
-  /** Adicionados pela suite Request */
+  password: string
+  users: Record<RoleKey, TestUser>
+  /**
+   * Solicitante sem sessão salva: para logout e inativação. O logout do Supabase encerra a sessão
+   * do usuário em todos os lugares e derrubaria a sessão salva que as outras suítes usam.
+   */
+  spare: TestUser
+  pdm: { id: number; code: string; name: string }
+  /** Preenchidos pelas suítes, em ordem (request → governance → database). */
   requestId?: number
-  requestIdApi?: number
-  /** Usuários por role do workflow */
-  comprasUserId?: number
-  comprasEmail?: string
-  comprasPassword?: string
-  comprasRoleId?: number
-  mrpUserId?: number
-  mrpEmail?: string
-  mrpPassword?: string
-  mrpRoleId?: number
-  fiscalUserId?: number
-  fiscalEmail?: string
-  fiscalPassword?: string
-  fiscalRoleId?: number
-  contabilidadeUserId?: number
-  contabilidadeEmail?: string
-  contabilidadePassword?: string
-  contabilidadeRoleId?: number
+  modelo?: string
+  materialId?: number
+  materialCode?: string
 }
 
 export function getState(): TestState {
-  if (!fs.existsSync(STATE_FILE)) {
-    throw new Error(`Estado de teste não encontrado em ${STATE_FILE}. O global-setup deve rodar antes dos testes.`)
-  }
-  return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+  if (!fs.existsSync(STATE_FILE)) throw new Error(`Estado não encontrado em ${STATE_FILE}: o global-setup não rodou.`)
+  return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))
+}
+
+export function saveState(state: TestState) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
+}
+
+export function updateState(patch: Partial<TestState>) {
+  saveState({ ...getState(), ...patch })
+}
+
+export function authFile(role: RoleKey) {
+  return path.join(AUTH_DIR, `${role}.json`)
 }

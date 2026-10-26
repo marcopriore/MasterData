@@ -1,158 +1,62 @@
-import { test, expect } from '@playwright/test'
-import { loginAsAdmin } from '../fixtures/auth'
-import { getState } from '../helpers/state'
-import * as api from '../helpers/api'
+import { expect, test, type Page } from '@playwright/test'
+import { admin } from '../helpers/supabase'
+import { authFile, getState } from '../helpers/state'
+import { expectToast, INACTIVE_MESSAGE, login } from '../helpers/ui'
 
-// ─── Testes via Interface ─────────────────────────────────────────────────────
-test.describe('08 - Gestão de Usuários (UI)', () => {
-  test('Tela Gestão de Usuários carrega corretamente', async ({ page }) => {
-    await loginAsAdmin(page)
+test.use({ storageState: authFile('admin') })
+
+async function fillNewUser(page: Page, name: string, email: string, password: string) {
+  await page.getByRole('button', { name: 'Novo Usuário' }).click()
+  await page.locator('#u-name').fill(name)
+  await page.locator('#u-email').fill(email)
+  await page.locator('#u-pw').fill(password)
+  await page.getByRole('checkbox', { name: 'SOLICITANTE' }).check()
+  await page.getByRole('radio', { name: 'SOLICITANTE' }).check()
+}
+
+test.describe.serial('08 - Gestão de Usuários', () => {
+  test('lista os usuários do tenant', async ({ page }) => {
+    const state = getState()
     await page.goto('/admin/users')
-    await page.waitForLoadState('networkidle')
-
-    await expect(
-      page.getByRole('heading', { name: /Gestão de Usuários/i })
-    ).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText(/Admin|Operador|@/i).first()).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('heading', { name: 'Gestão de Usuários' })).toBeVisible()
+    await expect(page.getByText(state.users.cadastro.email)).toBeVisible()
   })
 
-  test('Usuários do setup estão presentes', async ({ page }) => {
+  test('senha fraca é recusada', async ({ page }) => {
     const state = getState()
-    await loginAsAdmin(page)
     await page.goto('/admin/users')
-    await page.waitForLoadState('networkidle')
-
-    await expect(page.getByText(/Admin E2E|admin\.e2e\./i).first()).toBeVisible({ timeout: 5000 })
-    await expect(page.getByText(/Operador E2E|operador\.e2e\./i).first()).toBeVisible({ timeout: 5000 })
-  })
-})
-
-// ─── Testes via API ───────────────────────────────────────────────────────────
-test.describe('08 - Gestão de Usuários (API)', () => {
-  let createdUserId: number
-  let createdUserEmail: string
-  let createdUserPassword: string
-
-  test('Listar usuários via API', async () => {
-    const state = getState()
-    const users = await api.apiGet('/admin/users', state.adminToken)
-    const list = Array.isArray(users) ? users : (users as { items?: unknown[] }).items ?? (users as { data?: unknown[] }).data ?? []
-    expect(list.length).toBeGreaterThanOrEqual(6)
+    await fillNewUser(page, 'Fraca E2E', `fraca.e2e.${state.runId.toLowerCase()}@example.com`, 'abc12')
+    await page.getByRole('button', { name: 'Criar usuário' }).click()
+    await expectToast(page, 'A senha precisa ter pelo menos 8 caracteres.')
   })
 
-  test('Criar novo usuário', async () => {
+  test('cria usuário, desativa e ele não consegue entrar', async ({ page, browser }) => {
     const state = getState()
-    const email = `user.teste.${state.RUN_ID}@test.com`
-    const password = 'Senha@123456'
-    const res = await api.apiPost(
-      '/admin/users',
-      {
-        name: 'User Teste E2E',
-        email,
-        password,
-        role_id: state.operatorRoleId,
-      },
-      state.adminToken
-    ) as { id: number; name: string; email: string; role_id: number }
-    expect(res.id).toBeDefined()
-    expect(res.name).toBe('User Teste E2E')
-    expect(res.email).toBe(email)
-    expect(res.role_id).toBe(state.operatorRoleId)
-    createdUserId = res.id
-    createdUserEmail = email
-    createdUserPassword = password
-  })
+    const email = `novo.e2e.${state.runId.toLowerCase()}@example.com`
+    await page.goto('/admin/users')
+    await fillNewUser(page, 'Novo E2E', email, state.password)
+    await page.getByRole('button', { name: 'Criar usuário' }).click()
+    await expectToast(page, 'Usuário criado com sucesso.')
 
-  test('Editar nome do usuário', async () => {
-    expect(createdUserId).toBeDefined()
-    const state = getState()
-    await api.apiPatch(
-      `/admin/users/${createdUserId}`,
-      { name: 'User Teste Editado' },
-      state.adminToken
-    )
-    const fetched = await api.apiGet(`/admin/users/${createdUserId}`, state.adminToken) as { name: string }
-    expect(fetched.name).toBe('User Teste Editado')
-  })
+    // A tela grava o nome em maiúsculas.
+    const { data: created } = await admin.from('users').select('id, tenant_id, role_id').eq('name', 'NOVO E2E').eq('tenant_id', state.tenantId).single()
+    expect(created?.tenant_id).toBe(state.tenantId)
+    expect(created?.role_id).toBe(state.users.solicitante.roleId)
+    const { data: groups } = await admin.from('user_role_groups').select('role_id').eq('user_id', created!.id)
+    expect((groups ?? []).map((g) => g.role_id)).toEqual([state.users.solicitante.roleId])
 
-  test('Mudar perfil de acesso do usuário', async () => {
-    expect(createdUserId).toBeDefined()
-    const state = getState()
-    const comprasRoleId = state.comprasRoleId
-    if (!comprasRoleId) {
-      const roles = await api.apiGet('/admin/roles', state.adminToken) as { id: number; name: string }[]
-      const compras = (Array.isArray(roles) ? roles : []).find((r) => (r.name || '').toUpperCase() === 'COMPRAS')
-      if (!compras) {
-        test.skip(true, 'Role COMPRAS não encontrada')
-        return
-      }
-      await api.apiPatch(
-        `/admin/users/${createdUserId}`,
-        { role_id: compras.id },
-        state.adminToken
-      )
-      const fetched = await api.apiGet(`/admin/users/${createdUserId}`, state.adminToken) as { role_id: number }
-      expect(fetched.role_id).toBe(compras.id)
-      return
+    await page.getByPlaceholder('Buscar por nome, e-mail ou perfil…').fill(email)
+    await page.getByRole('row').filter({ hasText: email }).getByTitle('Desativar').click()
+    await expectToast(page, 'Usuário desativado.')
+
+    // Sem a sessão do admin herdada do test.use.
+    const fresh = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    try {
+      const other = await fresh.newPage()
+      await login(other, email, state.password)
+      await expect(other.getByText(INACTIVE_MESSAGE)).toBeVisible()
+    } finally {
+      await fresh.close()
     }
-    await api.apiPatch(
-      `/admin/users/${createdUserId}`,
-      { role_id: comprasRoleId },
-      state.adminToken
-    )
-    const fetched = await api.apiGet(`/admin/users/${createdUserId}`, state.adminToken) as { role_id: number }
-    expect(fetched.role_id).toBe(comprasRoleId)
-  })
-
-  test('Inativar usuário', async () => {
-    expect(createdUserId).toBeDefined()
-    const state = getState()
-    await api.apiPatch(
-      `/admin/users/${createdUserId}`,
-      { is_active: false },
-      state.adminToken
-    )
-    const fetched = await api.apiGet(`/admin/users/${createdUserId}`, state.adminToken) as { is_active: boolean }
-    expect(fetched.is_active).toBe(false)
-  })
-
-  test('Usuário inativo não consegue fazer login', async () => {
-    expect(createdUserEmail).toBeDefined()
-    expect(createdUserPassword).toBeDefined()
-    const res = await fetch(`${api.API_URL}/admin/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: createdUserEmail,
-        password: createdUserPassword,
-      }),
-    })
-    expect([401, 403]).toContain(res.status)
-  })
-
-  test('Criar usuário com email duplicado retorna erro', async () => {
-    const state = getState()
-    const res = await fetch(`${api.API_URL}/admin/users`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${state.adminToken}`,
-      },
-      body: JSON.stringify({
-        name: 'Outro User',
-        email: state.adminEmail,
-        password: 'Senha@123456',
-        role_id: state.operatorRoleId,
-      }),
-    })
-    expect([400, 409]).toContain(res.status)
-  })
-
-  test('Exportar usuários via API', async () => {
-    const state = getState()
-    const res = await fetch(`${api.API_URL}/admin/users/export`, {
-      headers: { Authorization: `Bearer ${state.adminToken}` },
-    })
-    expect(res.status).toBe(200)
   })
 })

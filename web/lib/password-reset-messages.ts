@@ -1,5 +1,5 @@
 /** Textos da redefinição de senha. Sem banco, para testar. */
-import { MIN_PASSWORD_LENGTH, passwordProblem } from '@/lib/password-policy'
+import { MIN_PASSWORD_LENGTH, PASSWORD_RULE_TEXT, passwordProblem } from '@/lib/password-policy'
 
 export { MIN_PASSWORD_LENGTH }
 
@@ -25,7 +25,7 @@ export function translateResetError(message: string): string {
     return 'A nova senha precisa ser diferente da atual.'
   }
   if (m.includes('password should be at least') || m.includes('weak')) {
-    return `A senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres, com letras e números, e não pode ser fácil de adivinhar.`
+    return `A senha precisa ter ${PASSWORD_RULE_TEXT}, e não pode ser fácil de adivinhar.`
   }
   return 'Não foi possível concluir a redefinição. Tente de novo.'
 }

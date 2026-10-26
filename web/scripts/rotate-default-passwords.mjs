@@ -61,7 +61,7 @@ if (!exposed.length || !args.apply) {
 }
 
 for (const u of exposed) {
-  const { error } = await admin.auth.admin.updateUserById(u.id, { password: `${randomBytes(24).toString('base64url')}a1` })
+  const { error } = await admin.auth.admin.updateUserById(u.id, { password: `${randomBytes(24).toString('hex')}Aa1!` })
   if (error) { console.error(`  ${u.email}: ${error.message}`); continue }
   const { error: resetError } = await admin.auth.resetPasswordForEmail(u.email, { redirectTo: `${appUrl}/reset-password` })
   console.log(`  ${u.email}: senha trocada${resetError ? ` (e-mail não saiu: ${resetError.message})` : ', e-mail enviado'}`)

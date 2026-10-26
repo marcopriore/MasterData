@@ -128,3 +128,14 @@ export async function syncUserAccess(params: {
 
   return {}
 }
+
+/**
+ * Usuário inativo fica bloqueado também no Auth: não entra nem renova a sessão.
+ * (No banco, get_user_tenant_id() já devolve NULL para inativo — migration 033.)
+ */
+export async function setAuthAccess(userId: string, active: boolean): Promise<{ error?: string }> {
+  const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    ban_duration: active ? 'none' : '876000h',
+  })
+  return error ? { error: error.message } : {}
+}

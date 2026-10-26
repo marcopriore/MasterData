@@ -1,6 +1,6 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { callerCanManageUsers } from '@/lib/user-access'
+import { callerCanManageUsers, setAuthAccess } from '@/lib/user-access'
 import { randomPassword } from '@/lib/password-policy'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
@@ -192,6 +192,10 @@ export async function POST(request: Request) {
             .eq('id', userId)
           if (updateError) errors.push(updateError.message)
           else {
+            if (updatePayload.is_active !== undefined) {
+              const blocked = await setAuthAccess(userId, updatePayload.is_active)
+              if (blocked.error) errors.push(blocked.error)
+            }
             await supabaseAdmin.from('user_role_groups').delete().eq('user_id', userId)
             await supabaseAdmin.from('user_role_groups').insert({ user_id: userId, role_id: roleId })
             await supabaseAdmin.from('user_permission_grants').delete().eq('user_id', userId)

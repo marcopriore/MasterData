@@ -102,12 +102,29 @@ npm run check     # o mesmo + auditoria de dependências + tipos
 
 `npm test` também roda o gate de segurança (`web/security`). O GitHub Actions roda testes, auditoria, tipos e `next build` a cada push em `main` e em pull request; o build usa valores fictícios para o Supabase porque não conecta no banco.
 
-Os arquivos em `tests/e2e/suites` cobrem autenticação, solicitações, governança, PDM, base de dados, usuários, perfis e dicionário de valores. O helper ainda usa `TEST_API_URL` ou `http://localhost:8000`, resto da API FastAPI. Eles não exercitam o app Next.js atual até essa URL mudar.
+**E2E (Playwright, `tests/e2e`)** roda contra o app de verdade: build de produção em `http://localhost:3100`, que o próprio Playwright sobe, e o banco do `web/.env.local`.
+
+**A cada rodada:**
+1. `global-setup` cria um tenant temporário pelo mesmo caminho do onboarding (`create_tenant_onboarding` + `copy_default_fields`), um usuário por papel (Admin, Solicitante, Cadastro, Compras, MRP, Fiscal, Contabilidade) e um PDM base.
+2. O projeto `setup` faz um login de verdade por papel e salva a sessão.
+3. `global-teardown` apaga tudo.
+
+**O que as suítes cobrem:**
+- **Login:** sessão, senha errada, usuário inativo e sair.
+- **PDM:** texto sem acento, código sugerido, nome repetido.
+- **Nova solicitação:** pelo assistente.
+- **Governança:** fluxo completo pelas 5 etapas, cada uma com o usuário da área, até o material nascer na base; e rejeição com justificativa.
+- **Base de dados:** busca, inclusive com caractere de filtro.
+- **Dicionário, grupos e usuários:** dicionário, grupos e usuários, incluindo senha fraca recusada e conta inativada sem acesso.
 
 ```powershell
 cd C:\Dev\MasterData\tests
-npm run test:e2e
+npm install
+npx playwright install chromium   # só na primeira vez
+npm run test:e2e                  # E2E_KEEP_DATA=1 mantém o tenant para inspeção
 ```
+
+Enquanto o banco for único, a rodada grava em produção, sempre num tenant próprio e apagado no fim.
 
 ## Migrations relevantes
 
@@ -145,3 +162,4 @@ npm run test:e2e
 | 030 | Texto do ERP: funções `erp_text`, `erp_jsonb`, `erp_description` e normalização dos PDMs, materiais, solicitações e dicionário. PDM: recodificação no padrão `PARA001`, nome repetido vira "Nome 2", trava de código (até 10) e nome único por tenant |
 | 031 | Isolamento por tenant: RLS estrita também para o Master, funções fechadas para anônimo, `assign`/`advance`/`reject`/`move`/`resubmit` conferem o tenant, `users` sem gravação pelo navegador, `roles` só com `can_manage_roles`, histórico imutável, notificação e preferência do próprio usuário, `tenant_overview()` e `user_has_permission()`. Ajusta `create_tenant_onboarding` para aceitar a chamada do servidor |
 | 032 | Permissão no banco: `require_permission()` nas funções de aprovar/rejeitar/atender/mover e do dicionário; policies de escrita por permissão (PDM, campos, workflow, dicionário, solicitações, materiais, logs, anexos); gatilhos `guard_material_requests` e `guard_material_database` travam etapa, atendente, autor, status e ERP; log imutável; anexo até 25 MB na pasta da solicitação do tenant; `search_path` fixo em toda função SECURITY DEFINER |
+| 033 | Usuário inativo sem acesso (`get_user_tenant_id` devolve NULL; inativos bloqueados no Auth); `advance_workflow` confere os campos obrigatórios da etapa (`stage_missing_fields`); opções dos campos sem acento; `copy_default_fields()` dá ao tenant novo o dicionário completo com opções |

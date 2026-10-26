@@ -236,7 +236,7 @@ function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose
                 type={showPw ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'create' ? 'Mínimo 8 caracteres, com letras e números' : '••••••••'}
+                placeholder={mode === 'create' ? 'Mín. 8, com minúscula, maiúscula, número e símbolo' : '••••••••'}
                 className="h-10 pr-10"
               />
               <button

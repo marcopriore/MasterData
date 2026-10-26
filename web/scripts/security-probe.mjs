@@ -31,7 +31,7 @@ const opts = { auth: { autoRefreshToken: false, persistSession: false } }
 const admin = createClient(URL_, env.SUPABASE_SERVICE_ROLE_KEY, opts)
 
 const tag = randomBytes(4).toString('hex')
-const password = `${randomBytes(18).toString('base64url')}a1`
+const password = `${randomBytes(18).toString('hex')}Aa1!`
 const results = []
 const created = { tenants: [], authUsers: [] }
 
@@ -177,6 +177,14 @@ async function main() {
   await denied('atendente não forja integração no ERP', () => atend.from('material_database').update({ erp_status: 'integrado_erp', id_erp: 'FAKE' }).eq('id', matA.id).select('id'), () => matErp(matA.id))
   await denied('atendente não troca o atendente direto', () => atend.from('material_requests').update({ assigned_to_id: attendant.id }).eq('id', reqA.id).select('id'),
     async () => (await admin.from('material_requests').select('assigned_to_id').eq('id', reqA.id).single()).data?.assigned_to_id == null)
+
+  console.log('\nUsuário inativado')
+  await must(admin.from('users').update({ is_active: false }).eq('id', requester.id), 'inativar')
+  await denied('inativo não lê solicitações do próprio tenant', () => solic.from('material_requests').select('id').eq('tenant_id', tA))
+  await denied('inativo não lê materiais do próprio tenant', () => solic.from('material_database').select('id').eq('tenant_id', tA))
+  await denied('inativo não abre solicitação', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'Inativo', urgency: 'low', user_id: requester.id }).select('id'),
+    async () => ((await admin.from('material_requests').select('id').eq('tenant_id', tA).eq('requester', 'Inativo')).data ?? []).length === 0)
+  await must(admin.from('users').update({ is_active: true }).eq('id', requester.id), 'reativar')
 
   console.log('\nUso legítimo continua funcionando')
   await allowed('solicitante abre solicitação na primeira etapa', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'Sonda', urgency: 'low', user_id: requester.id }).select('id'))

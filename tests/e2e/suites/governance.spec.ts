@@ -1,156 +1,96 @@
-import { test, expect } from '@playwright/test'
-import { loginAsAdmin, loginAsOperator, logout } from '../fixtures/auth'
-import { getState } from '../helpers/state'
-import * as api from '../helpers/api'
+import { expect, test } from '@playwright/test'
+import { admin, must } from '../helpers/supabase'
+import { getState, STAGES, updateState } from '../helpers/state'
+import { expectToast, fillRequiredStageFields, kanbanCard, pageAs } from '../helpers/ui'
 
-// ─── Testes via Interface (mínimos) ───────────────────────────────────────────
-test.describe('04 - Governança (UI)', () => {
-  test('Tela de Governança carrega corretamente', async ({ page }) => {
-    await loginAsAdmin(page)
-    await page.goto('/governance')
-    await page.waitForLoadState('networkidle')
-    await expect(
-      page.getByRole('heading', { name: /governança|governança de dados/i })
-    ).toBeVisible({ timeout: 5000 })
-    await expect(page.getByText(/solicitações|central de cadastro|compras/i).first()).toBeVisible({
-      timeout: 5000,
+const NEXT: Record<string, string> = {
+  cadastro: 'compras',
+  compras: 'mrp',
+  mrp: 'fiscal',
+  fiscal: 'contabilidade',
+  contabilidade: 'finalizado',
+}
+
+async function statusOf(id: number) {
+  const { data } = await admin.from('material_requests').select('status, assigned_to_id').eq('id', id).single()
+  return data
+}
+
+test.describe.serial('04 - Governança: fluxo completo até o material', () => {
+  for (const stage of STAGES) {
+    test(`${stage.status}: ${stage.role} atende, preenche os campos e aprova`, async ({ browser }) => {
+      const state = getState()
+      const id = state.requestId!
+      expect((await statusOf(id))?.status).toBe(stage.status)
+
+      const { page, close } = await pageAs(browser, stage.role)
+      try {
+        await page.goto('/governance')
+        const card = kanbanCard(page, id)
+        await card.getByRole('button', { name: 'Iniciar Atendimento' }).click()
+        await expect(page.getByRole('button', { name: 'Salvar e Aprovar' })).toBeVisible()
+        expect((await statusOf(id))?.assigned_to_id).toBe(state.users[stage.role].id)
+
+        await fillRequiredStageFields(page)
+        await page.getByRole('button', { name: 'Salvar e Aprovar' }).click()
+        await expectToast(page, 'Dados salvos e solicitação aprovada!')
+        await expect.poll(async () => (await statusOf(id))?.status).toBe(NEXT[stage.status])
+      } finally {
+        await close()
+      }
     })
-  })
+  }
 
-  test('Kanban mostra solicitações existentes', async ({ page }) => {
-    await loginAsAdmin(page)
-    await page.goto('/governance')
-    await page.waitForLoadState('networkidle')
-    await expect(page.getByText(/REQ-/i).first()).toBeVisible({ timeout: 10000 })
-  })
+  test('a última aprovação cria o material na base, pendente de ERP', async () => {
+    const state = getState()
+    const { data } = await admin
+      .from('material_database')
+      .select('id, id_sistema, tenant_id, status, erp_status, pdm_code, description')
+      .eq('request_id', state.requestId!)
+      .single()
+    expect(data?.tenant_id).toBe(state.tenantId)
+    expect(data?.status).toBe('Ativo')
+    expect(data?.pdm_code).toBe(state.pdm.code)
+    expect(data?.id_sistema).toMatch(/^MDM-\d{6}$/)
+    expect(data?.erp_status).toBe('pendente_erp')
+    updateState({ materialId: data!.id, materialCode: data!.id_sistema })
 
-  test('Botão Iniciar Atendimento visível para operador', async ({ page }) => {
-    await loginAsAdmin(page)
-    await logout(page)
-    await loginAsOperator(page)
-    await page.goto('/governance')
-    await page.waitForLoadState('networkidle')
-    const iniciarBtn = page.getByRole('button', { name: /iniciar atendimento/i }).first()
-    await expect(iniciarBtn).toBeVisible({ timeout: 10000 })
-    await page.screenshot({ path: 'tests/e2e/debug-governance-kanban-operador.png', fullPage: true })
+    const { data: history } = await admin.from('request_history').select('event_type').eq('request_id', state.requestId!)
+    expect((history ?? []).filter((h) => h.event_type === 'approved')).toHaveLength(STAGES.length)
   })
 })
 
-// ─── Testes via API (workflow completo) ───────────────────────────────────────
-test.describe('04 - Governança (API)', () => {
-  test('Iniciar atendimento via API (fase cadastro)', async () => {
+test.describe('04 - Governança: rejeição', () => {
+  test('cadastro rejeita com justificativa e a solicitação sai do fluxo', async ({ browser }) => {
     const state = getState()
-    expect(state.requestId).toBeDefined()
-    const operatorToken = await api.getAdminToken(state.operatorEmail, state.operatorPassword)
-    const res = await api.apiPatch(
-      `/api/requests/${state.requestId}/assign`,
-      {},
-      operatorToken
-    )
-    expect(res).toBeDefined()
-    expect(res.assigned_to_id).toBe(state.operatorUserId)
-  })
+    const { data: wf } = await admin.from('workflow_header').select('id').eq('tenant_id', state.tenantId).eq('is_active', true).single()
+    const [req] = await must(admin.from('material_requests').insert({
+      tenant_id: state.tenantId,
+      pdm_id: state.pdm.id,
+      workflow_id: wf!.id,
+      status: 'cadastro',
+      requester: state.users.solicitante.name,
+      urgency: 'low',
+      user_id: state.users.solicitante.id,
+      generated_description: `${state.pdm.name} LAT R${state.runId}`,
+      technical_attributes: { material: 'LATAO', modelo: `R${state.runId}` },
+    }).select('id'), 'solicitação para rejeitar') as { id: number }[]
 
-  test('Aprovar/avançar fase cadastro → compras via API', async () => {
-    const state = getState()
-    expect(state.requestId).toBeDefined()
-    const res = await api.apiPatch(
-      `/api/requests/${state.requestId}/status`,
-      { action: 'approve' },
-      state.adminToken
-    )
-    expect(res).toBeDefined()
-    expect((res.status || '').toLowerCase()).toBe('compras')
-  })
-
-  test('Avançar por todas as fases via API até finalizado', async () => {
-    const state = getState()
-    expect(state.requestId).toBeDefined()
-
-    const list = await api.apiGet('/api/requests', state.adminToken)
-    const requests = Array.isArray(list) ? list : (list as { items?: unknown[] }).items ?? list
-    const current = (requests as { id?: number; status?: string }[]).find(
-      (r: { id?: number }) => r.id === state.requestId
-    )
-    const currentStatus = (current?.status || 'cadastro').toLowerCase()
-
-    if (['finalizado', 'completed'].includes(currentStatus)) {
-      expect(currentStatus).toMatch(/finalizado|completed/)
-      return
+    const { page, close } = await pageAs(browser, 'cadastro')
+    try {
+      await page.goto('/governance')
+      await kanbanCard(page, req.id).getByRole('button', { name: 'Iniciar Atendimento' }).click()
+      await page.getByRole('button', { name: 'Rejeitar' }).click()
+      await page.getByPlaceholder('Informe a justificativa...').fill('Teste E2E: falta desenho técnico')
+      await page.getByRole('button', { name: 'Confirmar Rejeição' }).click()
+      await expectToast(page, 'Solicitação rejeitada com sucesso!')
+      await expect.poll(async () => (await statusOf(req.id))?.status).toBe('Rejected')
+    } finally {
+      await close()
     }
 
-    const phases = ['compras', 'mrp', 'fiscal', 'contabilidade']
-    const startIdx = phases.indexOf(currentStatus)
-    const toRun = startIdx >= 0 ? phases.slice(startIdx) : phases
-
-    for (const phase of toRun) {
-      await test.step(`${phase} → próximo`, async () => {
-        const listNow = await api.apiGet('/api/requests', state.adminToken)
-        const reqs = Array.isArray(listNow) ? listNow : (listNow as { items?: unknown[] }).items ?? listNow
-        const cur = (reqs as { id?: number; status?: string }[]).find((r) => r.id === state.requestId)
-        if (['finalizado', 'completed', 'rejected', 'rejeitado'].includes((cur?.status || '').toLowerCase())) return
-
-        const res = await api.apiPatch(
-          `/api/requests/${state.requestId}/status`,
-          { action: 'approve' },
-          state.adminToken
-        )
-        expect(res).toBeDefined()
-        const next = (res.status || '').toLowerCase()
-        expect(['compras', 'mrp', 'fiscal', 'contabilidade', 'finalizado', 'completed']).toContain(next)
-      })
-    }
-  })
-
-  test('Solicitação chegou a finalizado', async () => {
-    const state = getState()
-    expect(state.requestId).toBeDefined()
-    const list = await api.apiGet('/api/requests', state.adminToken)
-    const requests = Array.isArray(list) ? list : (list as { items?: unknown[] }).items ?? list
-    const found = (requests as { id?: number; status?: string }[]).find(
-      (r: { id?: number }) => r.id === state.requestId
-    )
-    expect(found).toBeDefined()
-    expect(['finalizado', 'completed'].includes((found?.status || '').toLowerCase())).toBe(true)
-  })
-
-  test('Rejeitar solicitação via API', async () => {
-    const state = getState()
-    expect(state.requestIdApi).toBeDefined()
-    await api.apiPatch(
-      `/api/requests/${state.requestIdApi}/reject`,
-      { justification: 'Rejeitado por teste E2E' },
-      state.adminToken
-    )
-    const list = await api.apiGet('/api/requests', state.adminToken)
-    const requests = Array.isArray(list) ? list : (list as { items?: unknown[] }).items ?? list
-    const found = (requests as { id?: number; status?: string }[]).find(
-      (r: { id?: number }) => r.id === state.requestIdApi
-    )
-    expect(found).toBeDefined()
-    expect(['rejected', 'rejeitado'].includes((found?.status || '').toLowerCase())).toBe(true)
-  })
-
-  test('Solicitação finalizada não pode mais avançar', async () => {
-    const state = getState()
-    expect(state.requestId).toBeDefined()
-    const { res } = await api.apiPatchRaw(
-      `/api/requests/${state.requestId}/status`,
-      { action: 'approve' },
-      state.adminToken
-    )
-    expect([400, 422]).toContain(res.status)
-  })
-
-  test('Solicitação rejeitada não pode mais avançar', async () => {
-    const state = getState()
-    expect(state.requestIdApi).toBeDefined()
-    const { res } = await api.apiPatchRaw(
-      `/api/requests/${state.requestIdApi}/status`,
-      { action: 'approve' },
-      state.adminToken
-    )
-    // TODO: backend deveria retornar 400/422
-    expect([200, 400, 404, 422]).toContain(res.status)
+    const { data: history } = await admin.from('request_history').select('event_type, event_data').eq('request_id', req.id).eq('event_type', 'rejected').single()
+    // A tela grava a justificativa em maiúsculas.
+    expect((history?.event_data as { justification?: string })?.justification).toBe('TESTE E2E: FALTA DESENHO TÉCNICO')
   })
 })

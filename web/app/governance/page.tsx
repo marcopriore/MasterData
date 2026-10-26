@@ -575,8 +575,8 @@ export default function GovernancePage() {
       handleCloseModal()
       await fetchRequests({ silent: true })
       scheduleErpRefresh()
-    } catch {
-      toast.error('Falha ao aprovar solicitação')
+    } catch (err) {
+      toast.error('Falha ao aprovar solicitação', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setApproveRejectLoading(false)
     }
@@ -718,8 +718,8 @@ export default function GovernancePage() {
       handleCloseModal()
       await fetchRequests({ silent: true })
       scheduleErpRefresh()
-    } catch {
-      toast.error('Falha ao salvar ou aprovar')
+    } catch (err) {
+      toast.error('Falha ao salvar ou aprovar', { description: err instanceof Error ? err.message : undefined })
     } finally {
       setSaveLoading(false)
       setApproveRejectLoading(false)

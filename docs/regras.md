@@ -36,6 +36,9 @@
   
   Essas mudanças são das funções do banco e do servidor (`/api/database/materials/status` e `/erp`).
 - **Log e histórico:** só recebem registros novos, em nome do próprio usuário. Ninguém altera nem apaga.
+- **Usuário inativo (migration 033):** perde todo acesso. `get_user_tenant_id()` devolve NULL, a RLS não mostra nada e nenhuma permissão vale. Desativar na Gestão de Usuários (ou pela importação) também bloqueia a conta no Supabase Auth, e reativar desbloqueia. O login mostra "Usuário inativo".
+- **Campos obrigatórios da etapa:** `advance_workflow` recusa aprovar sem eles (`stage_missing_fields`), com a mesma regra da tela: área da etapa padrão; `descricao_basica` é gerada.
+- **Dicionário de campos do tenant novo:** o onboarding copia o dicionário completo, com opções, do tenant modelo (`copy_default_fields`). Opções de campo ficam no texto aceito pelo ERP, sem acento.
 - **ERP simulado:** sem integração ativa, a simulação roda no servidor (`lib/erp/simulate.ts`), depois da permissão e da trava de duplicidade.
 - **Rotas com service role** (ignoram a RLS) filtram `tenant_id` pelo tenant em uso e conferem que o id recebido pertence a ele antes de alterar.
 - **Permissões do Master:** tem todas as permissões em qualquer tenant (`allPermissions`), porque o papel dele fica no tenant de origem.
@@ -201,7 +204,7 @@ O gate não promete segurança total. Ele impede que regras já conquistadas se 
   O script de tema recebe o nonce no `layout.tsx`. Script inline novo precisa do nonce.
 - **CSRF:** alteração (POST, PUT, PATCH, DELETE) em `/api` com sessão, vinda de outro site, recebe 403 (`isCrossSiteWrite`, com `Sec-Fetch-Site` ou `Origin`).
 - **Busca:** texto digitado passa por `safeSearchTerm` antes de entrar num filtro `.or()` do PostgREST.
-- **Senha:** mínimo de 8 caracteres, com letras e números (`lib/password-policy.ts`), no perfil, na redefinição, na criação de usuário e no onboarding. Trocar a própria senha exige a atual. Conta criada por importação ou onboarding sem senha nasce com senha aleatória e o usuário cria a dele pelo e-mail. A mesma regra precisa estar no Supabase Auth, que é quem trava de fato.
+- **Senha:** mínimo de 8 caracteres, com letra minúscula, maiúscula, número e símbolo (`lib/password-policy.ts`, igual ao Supabase Auth), no perfil, na redefinição, na criação de usuário e no onboarding. Trocar a própria senha exige a atual. Conta criada por importação ou onboarding sem senha nasce com senha aleatória e o usuário cria a dele pelo e-mail. A mesma regra precisa estar no Supabase Auth, que é quem trava de fato.
 - **Sonda:** `npm run security:probe` cria dois tenants temporários e tenta, pela chave pública:
   - acesso sem login;
   - leitura e alteração entre tenants;

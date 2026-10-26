@@ -82,6 +82,10 @@ export async function POST(request: Request) {
     role_id: adminRole.id,
   })
 
+  // Dicionário de campos completo, com opções (a função do onboarding cria só os 5 básicos).
+  const { error: fieldsError } = await supabaseAdmin.rpc('copy_default_fields', { p_tenant_id: tenantId })
+  if (fieldsError) console.error('[onboarding] copy_default_fields:', fieldsError.message)
+
   let resetSent = false
   if (sendReset) {
     const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin

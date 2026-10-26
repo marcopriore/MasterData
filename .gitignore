@@ -38,3 +38,5 @@ tests/e2e/test-results/
 *.tmp
 
 PDM_EXCEL_FILES_V2/
+
+tests/e2e/.auth/

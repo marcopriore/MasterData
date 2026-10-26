@@ -1657,7 +1657,8 @@ export async function getFieldById(id: number): Promise<FieldDictionary> {
 export async function createField(body: Record<string, unknown>): Promise<FieldDictionary> {
   const supabase = createClient()
   const tenantId = await getCurrentUserTenantId()
-  const { data, error } = await supabase.from('field_dictionary').insert({ ...body, tenant_id: tenantId }).select().single()
+  const row = body.options !== undefined ? { ...body, options: toErpDeep(body.options) } : body
+  const { data, error } = await supabase.from('field_dictionary').insert({ ...row, tenant_id: tenantId }).select().single()
   if (error) handleError(error)
   invalidateApiCache()
   return data
@@ -1665,7 +1666,8 @@ export async function createField(body: Record<string, unknown>): Promise<FieldD
 
 export async function updateField(id: number, body: Record<string, unknown>): Promise<FieldDictionary> {
   const supabase = createClient()
-  const { data, error } = await supabase.from('field_dictionary').update(body).eq('id', id).select().single()
+  const row = body.options !== undefined ? { ...body, options: toErpDeep(body.options) } : body
+  const { data, error } = await supabase.from('field_dictionary').update(row).eq('id', id).select().single()
   if (error) handleError(error)
   invalidateApiCache()
   return data
