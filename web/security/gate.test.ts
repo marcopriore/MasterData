@@ -71,6 +71,8 @@ describe('proxy (middleware)', () => {
     expect(classifyPath('/api/support/webhook')).toBe('api-webhook')
     expect(classifyPath('/api/support/webhook/x')).toBe('api-session')
     expect(classifyPath('/loginx')).toBe('page')
+    expect(classifyPath('/reset-password')).toBe('public')
+    expect(classifyPath('/reset-password/x')).toBe('page')
   })
 
   it('o matcher cobre /admin e /api e deixa só arquivos estáticos de fora', async () => {
@@ -90,6 +92,7 @@ describe('proxy (middleware)', () => {
     expect(safeRedirectTarget('//site-falso.com')).toBe('/')
     expect(safeRedirectTarget('/\\site-falso.com')).toBe('/')
     expect(safeRedirectTarget('/api/admin/users')).toBe('/')
+    expect(safeRedirectTarget('/reset-password')).toBe('/')
     expect(safeRedirectTarget(null)).toBe('/')
   })
 })

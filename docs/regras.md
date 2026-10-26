@@ -13,7 +13,9 @@
 - Supabase Auth. O perfil em `public.users` usa o mesmo UUID de `auth.users`.
 - `web/proxy.ts` (o antigo middleware; o Next 16 mudou o nome) passa por toda página e rota de API, menos arquivos estáticos. A regra de cada caminho está em `web/lib/route-guard.ts`: página sem sessão vai para `/login`; `/api/*` sem sessão recebe 401; `/api/v1` (chave) e `/api/support/webhook` (segredo) se autenticam na própria rota. A permissão de cada tela continua sendo checada na tela e na rota.
 - Depois do login, o retorno (`from`) só aceita página interna. Endereço de outro site volta para `/`.
-- Senha: cada usuário altera a própria (`user.id` tem de bater com o id da rota). Não existe reset administrativo da senha de outra pessoa.
+- Senha: cada usuário altera a própria (`user.id` tem de bater com o id da rota), informando a atual.
+- Redefinição por e-mail (`web/lib/password-reset.ts`), pelo Supabase Auth (`resetPasswordForEmail`). Pode ser pedida no login (**Esqueci minha senha**), no perfil (quem não lembra a atual) e pelo admin em Gestão de Usuários (ícone de chave). Em todos os casos o link vai para o e-mail do próprio usuário; o admin não vê nem define senha de ninguém. O pedido no perfil e o do admin ficam no log do sistema.
+- A tela responde igual para e-mail cadastrado ou não, e o Auth limita a frequência dos pedidos. O link abre `/reset-password` (página pública, `PUBLIC_PAGES` em `route-guard.ts`), que aceita `token_hash` (modelo de e-mail recomendado, vale em qualquer navegador) ou `code` (link padrão, só no navegador que pediu). Depois de salvar, a sessão é encerrada e a pessoa entra de novo com a senha nova. Mínimo de 6 caracteres, igual ao perfil.
 
 ## Permissões
 
@@ -44,7 +46,7 @@ O master atua em qualquer etapa como o responsável dela, sem trocar de perfil: 
 
 Grupos de sistema (ADMIN, SOLICITANTE, CADASTRO, COMPRAS, MRP, FISCAL, CONTABILIDADE, MASTER) não são apagados e o nome não muda. Grupos criados pelo admin podem.
 
-`can_attend` não está no JSON do seed nem do script da Empresa Demo. A migration 008 liga a flag em ADMIN, CADASTRO, COMPRAS, MRP, FISCAL e CONTABILIDADE, e desliga em MASTER e SOLICITANTE — só nos papéis que já existiam quando ela rodou. Para o usuário master a flag não importa: `can()` é sempre verdadeiro para ele. Tenant criado depois, pelo script, nasce sem essa chave até alguém reaplicar o update.
+`can_attend` vale para ADMIN, CADASTRO, COMPRAS, MRP, FISCAL e CONTABILIDADE; MASTER e SOLICITANTE ficam sem. A migration 025 põe a chave em todo papel inserido sem ela (gatilho `trg_roles_default_can_attend`, que cobre o onboarding e o script da Empresa Demo) e corrigiu os papéis criados depois da 008. Papel que já chega com a chave, como os da tela de grupos, mantém o valor escolhido. Para o usuário master a flag não importa: `can()` é sempre verdadeiro para ele.
 
 Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/permissions.ts` e no filtro do `app-sidebar.tsx`. O menu usa só `can()`. Master continua vendo o menu inteiro.
 
@@ -55,6 +57,8 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 - Aprovar vai para o próximo `status_key`. Sem próximo, o status vira concluído.
 - Status final (`completed`, `approved`, `concluído`, `finalizado`, `rejected`) não avança de novo.
 - Só o atendente atual (ou ninguém) pode assumir. Outro usuário recebe erro de conflito.
+- O arraste no kanban não finaliza, não rejeita e não reabre solicitação finalizada ou rejeitada. Essas mudanças só pelas RPCs (`advance_workflow`, `reject_request`), que gravam histórico, avisam e criam o material.
+- Entre etapas intermediárias, o arraste passa por `move_request_stage` (migration 026): valida que a etapa é do workflow, libera o atendente e grava `stage_change` no histórico com etapa de origem, destino e atendente anterior. Não gera aviso.
 - Ao entrar em finalizado, nasce o material na base, com descrições preenchidas a partir do PDM.
 
 ## Descrição do material
@@ -65,6 +69,18 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 - Tudo em maiúsculas, separado por espaço, começando pelo nome do PDM.
 - O limite padrão é 40, em `tenants.max_description_length` e também em `users.max_description_length`. A descrição detalhada fica em coluna própria.
 - Antes de criar, `checkDuplicateRequest` compara os atributos que entram na descrição com materiais do mesmo `pdm_code` e com solicitações abertas do mesmo PDM.
+
+## Duplicidade e trava do ERP
+
+A regra fica em `web/lib/material-duplicates.ts` e vale igual para o selo **DUP** da base, para a checagem da solicitação e para a trava do servidor (`web/lib/erp/duplicate-guard.ts`). A marcação não é gravada: é calculada na hora, dentro do tenant.
+
+- **Base:** dois materiais são duplicados quando têm a mesma descrição detalhada (sem diferenciar maiúsculas) ou, sem detalhada, a mesma descrição curta no mesmo PDM.
+- **Solicitação:** os mesmos atributos que entram na descrição, no mesmo PDM, que outro material ou outra solicitação aberta.
+- Material **Obsoleto** não conta para nenhum dos dois lados. Bloqueado conta.
+- Material marcado como duplicado **não é criado nem alterado no ERP**, por nenhum caminho: botão no detalhe, lote na base, conclusão da última etapa e simulação sem integração ativa. A chamada volta como ignorada com os códigos duplicados e grava `erp_blocked_duplicate` no log do sistema.
+- **Eliminar no ERP continua liberado** para duplicado: eliminar um dos itens é uma das formas de resolver.
+- A marcação some sozinha quando a descrição ou os atributos mudam, ou quando o outro item fica Obsoleto. A partir daí o material sincroniza normalmente.
+- Na governança, a solicitação finalizada cujo material ficou travado (ou em erro, pendente ou sem material) continua em Finalizado, mas o cartão fica vermelho até o material chegar ao ERP. A trava é a mesma do servidor, consultada por `GET /api/requests/erp-status`.
 
 ## Dicionário de valores
 

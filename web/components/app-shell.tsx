@@ -9,7 +9,7 @@ import { usePathname } from 'next/navigation'
 import { AppSidebar } from '@/components/app-sidebar'
 import { Topbar } from '@/components/topbar'
 
-const SIDEBAR_HIDDEN_PATHS = ['/login']
+const SIDEBAR_HIDDEN_PATHS = ['/login', '/reset-password']
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()

@@ -6,6 +6,8 @@ import { useUser } from '@/contexts/user-context'
 import { Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { safeRedirectTarget } from '@/lib/route-guard'
+import { requestPasswordReset } from '@/lib/password-reset'
+import { RESET_SENT_MESSAGE } from '@/lib/password-reset-messages'
 
 function translateAuthError(message: string): string {
   if (message.includes('Invalid login credentials')) return 'Credenciais inválidas.'
@@ -23,10 +25,30 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [forgotMode, setForgotMode] = useState(searchParams.get('forgot') === '1')
+  const [notice, setNotice] = useState<string | null>(
+    searchParams.get('reset') === 'ok' ? 'Senha alterada. Entre com a nova senha.' : null
+  )
+
+  async function handleForgot(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setNotice(null)
+    setLoading(true)
+    const result = await requestPasswordReset(email)
+    setLoading(false)
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    setNotice(RESET_SENT_MESSAGE)
+    setForgotMode(false)
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    setNotice(null)
 
     if (!email.trim() || !password) {
       setError('Preencha o e-mail e a senha.')
@@ -79,8 +101,19 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {notice && (
+              <p className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-xs text-green-800">
+                {notice}
+              </p>
+            )}
+
             {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <form onSubmit={forgotMode ? handleForgot : handleSubmit} className="space-y-4" noValidate>
+              {forgotMode && (
+                <p className="text-sm text-slate-600">
+                  Informe o e-mail de acesso. Enviaremos um link para criar uma nova senha.
+                </p>
+              )}
               {/* E-mail */}
               <div className="space-y-1.5">
                 <label
@@ -109,6 +142,7 @@ export default function LoginPage() {
               </div>
 
               {/* Senha */}
+              {!forgotMode && (
               <div className="space-y-1.5">
                 <label
                   htmlFor="password"
@@ -147,6 +181,7 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Error message */}
               {error && (
@@ -170,11 +205,25 @@ export default function LoginPage() {
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
                     <Loader2 className="size-4 animate-spin" />
-                    Entrando…
+                    {forgotMode ? 'Enviando…' : 'Entrando…'}
                   </span>
+                ) : forgotMode ? (
+                  'Enviar link'
                 ) : (
                   'Entrar'
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotMode((v) => !v)
+                  setError(null)
+                  setNotice(null)
+                }}
+                className="block w-full text-center text-xs font-medium text-slate-500 hover:text-[#0F1C38]"
+              >
+                {forgotMode ? 'Voltar para o login' : 'Esqueci minha senha'}
               </button>
             </form>
           </div>

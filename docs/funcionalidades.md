@@ -6,7 +6,8 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 
 | Rota | Função |
 |------|--------|
-| `/login` | Login Supabase. Middleware devolve quem já está autenticado para a home. |
+| `/login` | Login Supabase. Middleware devolve quem já está autenticado para a home. **Esqueci minha senha** pede o link de redefinição. |
+| `/reset-password` | Página pública do link de redefinição: valida o link e grava a nova senha. |
 | `/` | Dashboard: atalhos, contagens e atividades recentes. |
 | `/activity` | Lista completa das atividades do usuário. |
 | `/request` | Nova solicitação em 5 passos. |
@@ -17,7 +18,7 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/admin-pdm` | Lista de todos os PDMs, 25 por página: busca por nome ou código, filtro de situação (ativo/inativo) e de uso (com/sem materiais), colunas Código, Nome, Materiais e Situação, ordenáveis. Filtros e página ficam na URL. Exportar, importação em massa e Novo PDM no cabeçalho. |
 | `/admin-pdm/[id]` e `/admin-pdm/novo` | Detalhe do PDM: dados, atributos, dicionário de valores, editar, salvar e clonar. Voltar retorna à lista com a mesma busca e página. |
 | `/support` | Chamados AxisDesk da empresa: abrir, acompanhar, responder, aprovar, reprovar ou cancelar. |
-| `/settings/profile` | Perfil, senha própria e preferências de notificação. |
+| `/settings/profile` | Perfil, senha própria (ou link de redefinição por e-mail) e preferências de notificação. |
 | `/settings/workflow` | Fluxos e etapas (ordem com drag-and-drop). |
 | `/admin/users` | Usuários do tenant: criar, editar, ativar, import/export. |
 | `/admin/roles` | Perfis e as 16 permissões. |
@@ -46,11 +47,15 @@ Anexos vão para o bucket `request-attachments`, no caminho `{tenant_id}/{reques
 ## Governança
 
 - Quadro por `status_key` do workflow ativo.
+- Arrastar o cartão entre etapas intermediárias chama a RPC `move_request_stage`: troca a coluna, libera o atendente e grava no histórico "Movida de X para Y pelo kanban", sem alterar dados. Arrastar para a última etapa ou para Rejeitadas, ou tirar de lá, é bloqueado na tela (`web/lib/kanban-move.ts`) e na RPC: finalizar exige **Aprovar** (cria o material e chama o ERP) e rejeitar exige **Rejeitar** com justificativa.
+- `/governance?req=ID` abre a solicitação no modal, trocando de workflow se preciso. É o destino do e-mail e do sino; o link antigo `/governance/request/ID` redireciona para cá.
+- `/governance?status=chave` filtra pela etapa; é o destino do clique no gráfico de status da tela inicial. O filtro aparece como etiqueta removível ao lado do total.
 - Iniciar atendimento chama a RPC `assign_request` (um atendente por vez).
 - Aprovar chama `advance_workflow`, limpa o atendente e segue para a próxima etapa.
 - Rejeitar chama `reject_request` com motivo.
 - Cada ação grava `request_history`.
 - Na última etapa, a RPC cria o registro em `material_database` ligado à solicitação.
+- Solicitação finalizada mostra a situação do material no ERP (`GET /api/requests/erp-status`, regra em `web/lib/request-erp-state.ts`). O cartão fica **vermelho** quando o material não chegou ao ERP: duplicado (ERP bloqueado), erro do ERP, pendente ou finalizada sem material na base. Integrado mostra o código do ERP em verde. No modal, o aviso traz o motivo, **Sincronizar com ERP** (pendente ou erro, para quem tem `can_standardize`) e **Abrir na Base de Dados**. Duplicado não tem botão de sincronizar: a correção é na base.
 
 Fluxo padrão da Empresa Demo: Central de Cadastro → Compras → MRP → Fiscal → Contabilidade → Finalizado.
 
@@ -78,7 +83,7 @@ A base é o cadastro mestre local, com código interno (`id_sistema`), código E
 
 **Sincronizar com ERP**, no detalhe ou em lote (`action: sincronizar`), roteia: Ativo sem `id_erp` → criar; Ativo com `id_erp` → alterar; Obsoleto com `id_erp` → eliminar. O modal do lote resume criação/alteração/eliminação e pede confirmação forte quando há DELETE. Sem integração ativa, a tela simula create/update e a eliminação local. No detalhe, **Eliminar no ERP** continua disponível para material Ativo/Bloqueado com `id_erp`. Ao concluir a última etapa, a solicitação chama `POST /api/requests/[id]/erp` e a criação no ERP dispara sozinha. Criação ou alteração por API externa na base continua pendente até sincronizar.
 
-Duplicata de material (`getDuplicateMaterials`) compara descrição detalhada, ou descrição curta mais `pdm_code`. Não usa similaridade fuzzy. A busca por valores parecidos fica no dicionário de valores.
+Duplicata de material (`getDuplicateMaterials`) compara descrição detalhada, ou descrição curta mais `pdm_code`, só dentro do tenant e ignorando material Obsoleto. Não usa similaridade fuzzy. A busca por valores parecidos fica no dicionário de valores. Material com selo **DUP** não cria nem altera no ERP; no lote aparece como "Ignorar (duplicado de …)" e no detalhe o botão de sincronizar fica travado com o aviso. Regra completa em `regras.md`, seção Duplicidade e trava do ERP.
 
 ## Administração
 
@@ -108,7 +113,9 @@ Tabela `notifications`, sino no topo e preferências por evento (criada, atendim
 | `PUT/PATCH/DELETE .../erp-connections/[connectionId]` | Modificar, ativar ou desativar, excluir |
 | `POST /api/database/materials/erp` | `sincronizar` (roteia create/update/delete), `integrar` ou `eliminar` — até 100 (`can_standardize`) |
 | `POST /api/database/materials/status` | Altera status; Obsoleto+`id_erp` → `pendente_erp` (`can_standardize`) |
+| `GET /api/database/materials/[id]/duplicates` | Se o material está travado por duplicidade e com quais códigos (`can_view_database`) |
 | `POST /api/requests/[id]/erp` | Criação no ERP do material de uma solicitação finalizada (`can_approve`) |
+| `GET /api/requests/erp-status?ids=` | Situação no ERP do material de até 200 solicitações, com a trava de duplicidade |
 | `GET/POST /api/admin/tenants/[id]/api-clients` e `DELETE .../[clientId]` | Listar, gerar e revogar chaves de API do tenant |
 | `POST /api/notifications/request` | Sino e e-mail depois de uma ação recente na solicitação |
 | `GET/POST /api/support/tickets` | Listar e abrir chamados no AxisDesk |

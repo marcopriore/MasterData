@@ -4,17 +4,14 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 ## Produto
 
-- **Reset de senha por administrador.** A rota de senha só aceita o próprio usuário, e exige a senha atual quando ela é enviada. Um admin não redefine a senha de outra conta pela aplicação. Hoje isso fica no painel do Supabase ou num script com service role.
+- **Tela "Minhas Solicitações".** Cada usuário precisa de uma tela com as próprias solicitações: as que abriu, em que etapa estão, quem está atendendo, o que foi rejeitado e por quê, e o material gerado (com a situação no ERP). É diferente da tela inicial, que é um painel resumido, e da governança, que é a fila de trabalho das áreas. Ainda a definir: se inclui as solicitações que o usuário atendeu, os filtros, e se o solicitante pode cancelar ou responder a uma rejeição. O link "Ver todas" da tela inicial já aponta o SOLICITANTE para `/requests`, que hoje não existe; essa tela deve ocupar esse endereço.
+- **E-mail de redefinição de senha.** O link sai pelo e-mail do Supabase Auth. O SMTP padrão do Supabase só entrega para membros da equipe do projeto e tem limite baixo; em produção é preciso o SMTP próprio (Resend) e o modelo de e-mail com `token_hash`, descritos em `deploy-producao.md`.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
 - **Domínio público do PRO-MAT.** Roteiro em [deploy-producao.md](./deploy-producao.md) (Vercel + subdomínio no registro.br). Depois do go-live, a URL do webhook no AxisDesk fica `https://<app>/api/support/webhook`, com o mesmo `AXISDESK_WEBHOOK_SECRET`.
 - **Banco único.** Produção e desenvolvimento usam o mesmo projeto Supabase. `npm run dev` e os scripts de seed gravam em produção até existir um projeto de desenvolvimento (passo descrito no fim de `deploy-producao.md`).
 - **Integração ERP contra um ERP real.** A chamada existe e foi testada contra um servidor falso. Falta validar com o endpoint do cliente: nomes do cabeçalho (`internalGroup` para grupo de mercadoria é suposição), formato da resposta e mensagens de erro. A simulação continua enquanto o tenant não tiver integração ativa.
-- **Arrastar para Finalizado no kanban.** `moveRequestToStatus` não cria o material nem dispara o ERP. Só a aprovação pela RPC faz isso.
-- **Lote só com Pendente ERP.** A seleção em lote na base ignora material em `erro_erp`; a nova tentativa é pelo detalhe.
+- **Aviso no arraste.** Mover entre etapas intermediárias grava histórico (migration 026), mas não avisa a área da nova etapa, como a aprovação faz.
 - **Documentação para quem não tem login.** A documentação fica dentro do PRO-MAT. Um integrador externo recebe o OpenAPI baixado da tela; publicar uma página aberta depende do domínio público.
-- **Limite de chamadas por chave.** As APIs de material não têm rate limit. Entra no gate de segurança.
-- **Detalhe da governança.** Em `/governance/request/[id]`, iniciar, aprovar e rejeitar não chamam `assign_request`, `advance_workflow` nem `reject_request`. O kanban em `/governance` é quem persiste. A página de detalhe precisa usar as mesmas RPCs ou deixar de oferecer essas ações.
-- **`can_attend` no tenant novo.** O script da Empresa Demo e o onboarding não gravam essa flag. Quem não passou pela migration 008 não vê “Iniciar atendimento” como os papéis antigos.
 - **Conector de notificação em tempo real.** A migration 006 habilita Realtime; o sino ainda consulta a API. Vale confirmar se o polling continua sendo o comportamento desejado.
 - **Segurança, próximos degraus.** Content-Security-Policy (precisa de nonce por causa dos scripts do Next), limite de tentativas de login, limite por IP nas chamadas sem chave, e trocar `xlsx` pela versão do CDN da SheetJS ou por `exceljs` (exceção da auditoria vence em 31/01/2027).
 
@@ -36,6 +33,4 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 ## Ideias já modeladas e ainda abertas
 
-- Envio ao ERP na padronização, gravando `id_erp` ou `erp_error_message`.
-- Reset de senha administrativo com auditoria em `system_logs`, sem devolver a senha no log.
 - Retirar ou esconder `/products` e `/teste` quando não forem mais úteis.

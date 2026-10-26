@@ -5,6 +5,15 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { isSystemRoleName, seesCurrentPhaseFields } from '@/lib/permissions'
+import {
+  attrsMatch,
+  countsForDuplicate,
+  descriptionAttrKeys,
+  groupMaterialDuplicates,
+  pickDescriptionAttrs,
+  type DuplicateCandidate,
+} from '@/lib/material-duplicates'
+import type { RequestErpInfo } from '@/lib/request-erp-state'
 
 // ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
 
@@ -66,7 +75,8 @@ async function getCurrentUserTenantId(): Promise<number> {
 
 export type DashboardStats = {
   total_requests: number
-  by_status: { name: string; value: number }[]
+  /** key é o status da solicitação (status_key da etapa), usado no filtro da governança */
+  by_status: { name: string; value: number; key: string }[]
   by_urgency: { name: string; value: number }[]
   recent_activities: {
     id: number
@@ -94,6 +104,13 @@ const STATUS_LABELS: Record<string, string> = {
   finalizado: 'Finalizado',
   rejected: 'Rejeitado',
   pending: 'Pendente',
+}
+
+/** Nome da etapa para um status de solicitação; sem nome conhecido, o próprio status. */
+export function requestStatusLabel(status: string): string {
+  const key = status.trim().toLowerCase()
+  if (key === 'rejeitado') return STATUS_LABELS.rejected
+  return STATUS_LABELS[key] ?? status
 }
 
 const URGENCY_LABELS: Record<string, string> = {
@@ -141,10 +158,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     }
   }
 
-  const byStatus: Record<string, number> = {}
+  const byStatus: Record<string, { value: number; key: string }> = {}
   filtered.forEach((r) => {
-    const label = STATUS_LABELS[(r.status ?? '').toLowerCase()] ?? (r.status ?? 'Outro')
-    byStatus[label] = (byStatus[label] ?? 0) + 1
+    const key = (r.status ?? '').toLowerCase()
+    const label = STATUS_LABELS[key] ?? (r.status ?? 'Outro')
+    byStatus[label] = { value: (byStatus[label]?.value ?? 0) + 1, key }
   })
 
   const byUrgency: Record<string, number> = {}
@@ -169,7 +187,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
   return {
     total_requests: filtered.length,
-    by_status: Object.entries(byStatus).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+    by_status: Object.entries(byStatus).map(([name, s]) => ({ name, value: s.value, key: s.key })).sort((a, b) => b.value - a.value),
     by_urgency: Object.entries(byUrgency).map(([name, value]) => ({ name, value })),
     recent_activities: recent,
     pdm_count: pdmCount ?? 0,
@@ -569,40 +587,6 @@ function queueRequestErp(requestId: number, status: unknown) {
   void fetch(`/api/requests/${requestId}/erp`, { method: 'POST' }).catch(() => {})
 }
 
-function normalizeAttrs(data: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(data ?? {})) {
-    if (v === null || v === undefined) continue
-
-    let s: string
-    if (typeof v === 'object' && v !== null && !Array.isArray(v) && 'value' in v) {
-      const o = v as { value?: unknown; unit?: unknown }
-      const val = o.value != null ? String(o.value) : ''
-      const unit = o.unit != null ? String(o.unit) : ''
-      s = `${val}${unit}`.toLowerCase().trim()
-    } else if (typeof v === 'string') {
-      s = v.toLowerCase().trim()
-    } else if (typeof v === 'number') {
-      s = String(v).toLowerCase().trim()
-    } else {
-      s = String(v).trim().toLowerCase()
-    }
-
-    if (s === '') continue
-    out[k] = s
-  }
-  return out
-}
-
-function normalizedAttrsMatch(a: Record<string, string>, b: Record<string, string>): boolean {
-  const keysA = Object.keys(a)
-  if (keysA.length !== Object.keys(b).length) return false
-  for (const k of keysA) {
-    if (a[k] !== b[k]) return false
-  }
-  return true
-}
-
 const DUPLICATE_CHECK_NEGATIVE: {
   isDuplicate: false
   existingCode: null
@@ -630,41 +614,24 @@ export async function checkDuplicateRequest(params: {
 
     if (pdmErr) throw pdmErr
 
-    const pdmAttrs = (pdmRow?.attributes ?? []) as Array<{ id?: string; includeInDescription?: boolean }>
-    const descriptionKeys = pdmAttrs
-      .filter((a) => a.includeInDescription === true)
-      .map((a) => a.id)
-      .filter((id): id is string => Boolean(id))
-
+    const descriptionKeys = descriptionAttrKeys(pdmRow?.attributes)
     if (descriptionKeys.length === 0) return { ...DUPLICATE_CHECK_NEGATIVE }
 
-    function filterDescriptionAttrs(attrs: Record<string, unknown>): Record<string, string> {
-      const src = attrs ?? {}
-      const filtered: Record<string, unknown> = {}
-      for (const k of descriptionKeys) {
-        if (Object.prototype.hasOwnProperty.call(src, k)) {
-          filtered[k] = src[k]
-        }
-      }
-      return normalizeAttrs(filtered)
-    }
-
-    const target = filterDescriptionAttrs(params.formData)
+    const target = pickDescriptionAttrs(params.formData, descriptionKeys)
 
     const pdmCode = pdmRow?.internal_code
     if (!pdmCode) return { ...DUPLICATE_CHECK_NEGATIVE }
 
     const { data: materials, error: matErr } = await supabase
       .from('material_database')
-      .select('id, id_sistema, technical_attributes')
+      .select('id, id_sistema, status, technical_attributes')
       .eq('pdm_code', pdmCode)
 
     if (matErr) throw matErr
 
     for (const row of materials ?? []) {
-      const rowFiltered = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
-      const rowNorm = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
-      if (normalizedAttrsMatch(target, rowNorm)) {
+      if (!countsForDuplicate(row)) continue
+      if (attrsMatch(target, pickDescriptionAttrs(row.technical_attributes, descriptionKeys))) {
         const code = row.id_sistema != null ? String(row.id_sistema) : null
         return {
           isDuplicate: true,
@@ -684,8 +651,7 @@ export async function checkDuplicateRequest(params: {
     if (reqErr) throw reqErr
 
     for (const row of openRequests ?? []) {
-      const rowNorm = filterDescriptionAttrs((row.technical_attributes ?? {}) as Record<string, unknown>)
-      if (normalizedAttrsMatch(target, rowNorm)) {
+      if (attrsMatch(target, pickDescriptionAttrs(row.technical_attributes, descriptionKeys))) {
         return {
           isDuplicate: true,
           existingCode: `REQ-${String(row.id).padStart(4, '0')}`,
@@ -745,10 +711,17 @@ export async function rejectRequest(id: number, reason?: string): Promise<ApiReq
   return data as ApiRequest
 }
 
+/** Arraste entre etapas intermediárias. A RPC valida a etapa e grava o movimento no histórico. */
 export async function moveRequestToStatus(id: number, statusKey: string): Promise<ApiRequest> {
   const supabase = createClient()
-  const { data, error } = await supabase.from('material_requests').update({ status: statusKey, assigned_to_id: null, assigned_at: null }).eq('id', id).select().single()
-  if (error) handleError(error)
+  const { data, error } = await supabase.rpc('move_request_stage', { p_request_id: id, p_status_key: statusKey })
+  if (error) throw new Error(error.message)
+  void logAction({
+    category: 'requests',
+    action: 'request_moved',
+    description: 'Solicitação movida no kanban',
+    event_data: { request_id: id, para: statusKey },
+  })
   return data as ApiRequest
 }
 
@@ -992,49 +965,24 @@ export async function getMaterials(params: {
 }
 
 /** Map of duplicated material IDs -> other duplicated materials' id_sistema codes (same description + pdm_code). */
-export async function getDuplicateMaterials(): Promise<Map<number, string[]>> {
+export async function getDuplicateMaterials(tenantId?: number): Promise<Map<number, string[]>> {
   try {
     const supabase = createClient()
-    const { data, error } = await supabase
-      .from('material_database')
-      .select('id, id_sistema, description, detailed_description, pdm_code')
-    if (error) throw error
-
-    const rows = data ?? []
-    const byKey = new Map<string, Array<{ id: number; id_sistema: string }>>()
-
-    for (const row of rows as Array<{
-      id: number
-      id_sistema?: string | null
-      description?: string | null
-      detailed_description?: string | null
-      pdm_code?: string | null
-    }>) {
-      const detailedRaw = row.detailed_description
-      const detailed = typeof detailedRaw === 'string' ? detailedRaw.trim() : ''
-      const key =
-        detailed !== ''
-          ? detailed.toLowerCase()
-          : `${(row.description ?? '').toLowerCase()}\0${row.pdm_code ?? ''}`
-      const code = row.id_sistema ?? 'MDM-?'
-      const list = byKey.get(key)
-      const item = { id: row.id, id_sistema: code }
-      if (list) list.push(item)
-      else byKey.set(key, [item])
+    const PAGE = 1000
+    const rows: DuplicateCandidate[] = []
+    for (let from = 0; ; from += PAGE) {
+      let query = supabase
+        .from('material_database')
+        .select('id, id_sistema, description, detailed_description, pdm_code, status')
+        .order('id')
+        .range(from, from + PAGE - 1)
+      if (tenantId) query = query.eq('tenant_id', tenantId)
+      const { data, error } = await query
+      if (error) throw error
+      rows.push(...((data ?? []) as DuplicateCandidate[]))
+      if (!data || data.length < PAGE) break
     }
-
-    const map = new Map<number, string[]>()
-    for (const group of byKey.values()) {
-      if (group.length < 2) continue
-      for (const row of group) {
-        const others = group
-          .filter((x) => x.id !== row.id)
-          .map((x) => (x.id_sistema ?? 'MDM-?'))
-        map.set(row.id, others)
-      }
-    }
-
-    return map
+    return groupMaterialDuplicates(rows)
   } catch (e) {
     console.error('getDuplicateMaterials', e)
     return new Map()
@@ -1157,6 +1105,26 @@ type ErpActionResult = {
   message?: string
   reason?: string
   plan?: 'criar' | 'alterar' | 'eliminar' | 'skip'
+  duplicateOf?: string[]
+}
+
+/** Situação no ERP do material de cada solicitação (finalizada), calculada no servidor. */
+export async function getRequestsErpStatus(requestIds: number[]): Promise<RequestErpInfo[]> {
+  if (requestIds.length === 0) return []
+  const res = await fetch(`/api/requests/erp-status?ids=${requestIds.join(',')}`)
+  const payload = await res.json().catch(() => ({})) as { items?: RequestErpInfo[]; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Falha ao consultar a situação no ERP')
+  return payload.items ?? []
+}
+
+/** Mesma regra da trava do ERP, calculada no servidor. */
+export async function getMaterialDuplicateBlock(
+  materialId: number
+): Promise<{ duplicate: boolean; codes: string[]; reason: string | null }> {
+  const res = await fetch(`/api/database/materials/${materialId}/duplicates`)
+  const payload = await res.json().catch(() => ({})) as { duplicate?: boolean; codes?: string[]; reason?: string | null; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Falha ao verificar duplicidade')
+  return { duplicate: payload.duplicate === true, codes: payload.codes ?? [], reason: payload.reason ?? null }
 }
 
 async function postErpAction(
@@ -1224,7 +1192,7 @@ export type ErpSyncBatchResult = {
   created: number[]
   updated: number[]
   eliminated: number[]
-  skipped: { id: number; reason: string }[]
+  skipped: { id: number; reason: string; duplicateOf?: string[] }[]
   failed: { id: number; message: string; plan?: string }[]
   total: number
 }
@@ -1238,7 +1206,7 @@ export async function erpSyncMaterials(materialIds: number[]): Promise<ErpSyncBa
   const created: number[] = []
   const updated: number[] = []
   const eliminated: number[] = []
-  const skipped: { id: number; reason: string }[] = []
+  const skipped: { id: number; reason: string; duplicateOf?: string[] }[] = []
   const failed: { id: number; message: string; plan?: string }[] = []
 
   const mockCreateUpdate = results.filter((r) => r.result === 'mock' && (r.plan === 'criar' || r.plan === 'alterar'))
@@ -1268,7 +1236,7 @@ export async function erpSyncMaterials(materialIds: number[]): Promise<ErpSyncBa
     } else if (r.result === 'eliminated') {
       eliminated.push(r.id)
     } else if (r.result === 'skipped') {
-      skipped.push({ id: r.id, reason: r.reason ?? 'ignorado' })
+      skipped.push({ id: r.id, reason: r.reason ?? 'ignorado', duplicateOf: r.duplicateOf })
     } else if (r.result === 'failed') {
       failed.push({ id: r.id, message: r.message ?? 'falha', plan: r.plan })
     }

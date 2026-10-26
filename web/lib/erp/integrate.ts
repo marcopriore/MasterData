@@ -2,10 +2,11 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { buildErpDeletePayload, buildErpPayload, type DictionaryField } from './payload'
 import { callErp } from './client'
 import { classifyErpSyncAction } from './sync-action'
+import { findDuplicateBlock } from './duplicate-guard'
 
 export type IntegrateOutcome =
   | { result: 'mock' }
-  | { result: 'skipped'; reason: string }
+  | { result: 'skipped'; reason: string; duplicateOf?: string[] }
   | { result: 'integrated'; idErp: string }
   | { result: 'failed'; message: string }
 
@@ -17,7 +18,7 @@ export type EliminateOutcome =
 
 export type SyncOutcome =
   | { result: 'mock'; plan: 'criar' | 'alterar' | 'eliminar' }
-  | { result: 'skipped'; reason: string; plan: 'skip' | 'criar' | 'alterar' | 'eliminar' }
+  | { result: 'skipped'; reason: string; plan: 'skip' | 'criar' | 'alterar' | 'eliminar'; duplicateOf?: string[] }
   | { result: 'integrated'; idErp: string; plan: 'criar' | 'alterar' }
   | { result: 'eliminated'; plan: 'eliminar' }
   | { result: 'failed'; message: string; plan: 'criar' | 'alterar' | 'eliminar' }
@@ -78,6 +79,17 @@ export async function integrateMaterial(tenantId: number, materialId: number, us
   }
 
   const operation = material.id_erp ? 'alterar_material' : 'criar_material'
+
+  // Antes do teste de integração ativa: a simulação no navegador também não pode passar por cima da trava.
+  const duplicate = await findDuplicateBlock(tenantId, material)
+  if (duplicate) {
+    await audit(tenantId, userId, 'erp_blocked_duplicate', 'Integração ERP barrada por duplicidade', {
+      material_id: materialId,
+      operacao: operation,
+      duplicado_de: duplicate.codes,
+    })
+    return { result: 'skipped', reason: duplicate.reason, duplicateOf: duplicate.codes }
+  }
   const { data: conn } = await supabaseAdmin
     .from('tenant_erp_connections')
     .select('id')
@@ -201,7 +213,7 @@ export async function syncMaterial(tenantId: number, materialId: number, userId:
   const out = await integrateMaterial(tenantId, materialId, userId)
   if (out.result === 'integrated') return { result: 'integrated', idErp: out.idErp, plan: plan.action }
   if (out.result === 'mock') return { result: 'mock', plan: plan.action }
-  if (out.result === 'skipped') return { result: 'skipped', reason: out.reason, plan: plan.action }
+  if (out.result === 'skipped') return { result: 'skipped', reason: out.reason, plan: plan.action, duplicateOf: out.duplicateOf }
   return { result: 'failed', message: out.message, plan: plan.action }
 }
 

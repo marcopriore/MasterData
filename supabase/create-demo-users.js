@@ -55,6 +55,9 @@ const ROLES = [
   { name: 'MASTER', role_type: 'sistema', permissions: { can_submit_request: true, can_approve: true, can_reject: true, can_edit_pdm: true, can_view_pdm: true, can_view_logs: true, can_bulk_import: true, can_standardize: true, can_manage_roles: true, can_manage_users: true, can_manage_fields: true, can_manage_value_dictionary: true, can_view_database: true, can_edit_workflows: true, can_view_workflows: true } },
 ]
 
+/** Papéis que iniciam atendimento na governança (mesma lista da migration 025). */
+const ATTEND_ROLES = ['ADMIN', 'CADASTRO', 'COMPRAS', 'MRP', 'FISCAL', 'CONTABILIDADE']
+
 const WORKFLOW_STEPS = [
   { step_name: 'Central de Cadastro', status_key: 'cadastro', order: 1 },
   { step_name: 'Compras', status_key: 'compras', order: 2 },
@@ -106,7 +109,7 @@ async function main() {
         tenant_id: tenantId,
         name: r.name,
         role_type: r.role_type,
-        permissions: r.permissions,
+        permissions: { can_attend: ATTEND_ROLES.includes(r.name), ...r.permissions },
       })
       if (error) {
         console.error(`Erro ao criar role ${r.name}:`, error.message)

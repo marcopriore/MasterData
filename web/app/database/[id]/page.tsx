@@ -11,6 +11,7 @@ import {
   updateMaterialStandardize,
   erpSyncMaterial,
   erpEliminateMaterial,
+  getMaterialDuplicateBlock,
   getFieldDictionary,
   logAction,
 } from '@/lib/supabase-api'
@@ -266,6 +267,7 @@ export default function DatabaseDetailPage() {
   const [savingAttrs, setSavingAttrs] = useState(false)
   const [isIntegrating, setIsIntegrating] = useState(false)
   const [isEliminating, setIsEliminating] = useState(false)
+  const [duplicateBlock, setDuplicateBlock] = useState<{ codes: string[]; reason: string | null } | null>(null)
   const [fieldsByView, setFieldsByView] = useState<Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>>>({})
   const [fieldsByViewOptions, setFieldsByViewOptions] = useState<Record<string, string[]>>({})
   const measurementUnits = useMeasurementUnits()
@@ -470,6 +472,19 @@ export default function DatabaseDetailPage() {
       .finally(() => setLoading(false))
   }, [id, pathname])
 
+
+  const materialId = material?.id
+  const materialDesc = material?.description
+  const materialDetailed = material?.detailed_description
+  const materialStatus = material?.status
+  useEffect(() => {
+    if (!materialId) return
+    let cancelled = false
+    getMaterialDuplicateBlock(materialId)
+      .then((res) => { if (!cancelled) setDuplicateBlock(res.duplicate ? { codes: res.codes, reason: res.reason } : null) })
+      .catch(() => { if (!cancelled) setDuplicateBlock(null) })
+    return () => { cancelled = true }
+  }, [materialId, materialDesc, materialDetailed, materialStatus])
 
   useEffect(() => {
     if (material?.pdm_code) {
@@ -719,6 +734,12 @@ export default function DatabaseDetailPage() {
               </span>
             )}
           </div>
+          {duplicateBlock && material.status !== 'Obsoleto' && (
+            <div className="mt-3 max-w-2xl rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+              <span className="font-semibold">Duplicado de {duplicateBlock.codes.join(', ')}.</span>{' '}
+              Este material não cria nem altera no ERP enquanto estiver marcado. Corrija a descrição ou deixe o outro item Obsoleto.
+            </div>
+          )}
         </div>
         {showActionBar && (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -727,10 +748,15 @@ export default function DatabaseDetailPage() {
                 <button
                   type="button"
                   disabled={
-                    (material.status !== 'Obsoleto' && isDescriptionOverLimit) ||
+                    (material.status !== 'Obsoleto' && (isDescriptionOverLimit || duplicateBlock != null)) ||
                     isIntegrating ||
                     material.erp_status === 'integrando' ||
                     material.status === 'Bloqueado'
+                  }
+                  title={
+                    duplicateBlock && material.status !== 'Obsoleto'
+                      ? `Duplicado de ${duplicateBlock.codes.join(', ')}`
+                      : undefined
                   }
                   onClick={handleIntegrate}
                   className="px-4 py-2 text-sm rounded-lg bg-[#0F1C38] dark:bg-[#C69A46] text-white font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"

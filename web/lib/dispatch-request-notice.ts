@@ -116,7 +116,7 @@ export async function dispatchRequestNotice(input: {
     stage: String(history.stage ?? ''),
     reason: reasonFromHistory(history.event_data),
   })
-  const link = `${input.appOrigin.replace(/\/$/, '')}/governance/request/${input.requestId}`
+  const link = `${input.appOrigin.replace(/\/$/, '')}/governance?req=${input.requestId}`
 
   const inApp = fresh.filter((item) => item.inApp)
   if (inApp.length > 0) {

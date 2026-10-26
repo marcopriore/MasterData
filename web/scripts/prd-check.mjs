@@ -143,6 +143,18 @@ async function checkSupabase(env) {
     else ok(`migration ${migration}: ${table}.${column}`)
   }
 
+  const { count: rolesWithoutAttend, error: rolesErr } = await admin
+    .from('roles')
+    .select('id', { count: 'exact', head: true })
+    .is('permissions->can_attend', null)
+  if (rolesErr) fail(`migration 025: não consultou papéis (${rolesErr.message})`)
+  else if (rolesWithoutAttend) fail(`migration 025: ${rolesWithoutAttend} papel(éis) sem can_attend — rode supabase/migrations/025_can_attend_default.sql`)
+  else ok('migration 025: todo papel tem can_attend')
+
+  const { error: moveErr } = await admin.rpc('move_request_stage', { p_request_id: -1, p_status_key: '-' })
+  if (moveErr && /não encontrada/i.test(moveErr.message)) ok('migration 026: move_request_stage')
+  else fail(`migration 026: move_request_stage não responde como esperado (${moveErr?.message ?? 'sem erro'}) — rode supabase/migrations/026_move_request_stage.sql`)
+
   const { data: bucket, error: bucketErr } = await admin.storage.getBucket('request-attachments')
   if (bucketErr || !bucket) fail('bucket request-attachments não existe (migration 006)')
   else if (bucket.public) fail('bucket request-attachments está público; deveria ser privado')

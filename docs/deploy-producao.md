@@ -77,7 +77,7 @@ O script lê `.env.production.local`, valida formato das variáveis, confere se 
 No painel do projeto:
 
 1. **Região.** Project Settings → General. Anote a região (ex.: South America (São Paulo) = `sa-east-1`). Ela define a região da Vercel na etapa 4.
-2. **Migrations.** Todas de `001` a `024` precisam estar aplicadas. O `prd:check` confere as principais. A `024` só cria índices; se não tiver certeza, rode o conteúdo de `supabase/migrations/024_api_rate_limit_index.sql` no SQL Editor (usa `IF NOT EXISTS`).
+2. **Migrations.** Todas de `001` a `026` precisam estar aplicadas. O `prd:check` confere as principais. As `024` a `026` podem rodar de novo sem efeito colateral (índices, gatilho e função); se não tiver certeza, rode o conteúdo delas no SQL Editor.
 3. **Endereços de autenticação.** Authentication → URL Configuration:
    - Site URL: `https://APP`
    - Redirect URLs: `https://APP/**` e, enquanto o banco for compartilhado com o desenvolvimento, `http://localhost:3000/**`
@@ -154,6 +154,27 @@ Opcional. Sem isso, o sino funciona e o e-mail não sai.
 
 Conferir: abra uma solicitação de teste; quem tem o aviso de e-mail ligado no perfil recebe a mensagem, com link para `https://APP`.
 
+**E-mail de redefinição de senha.** Esse e-mail é enviado pelo Supabase Auth, não pelo sistema. O SMTP padrão do Supabase só entrega para os membros da equipe do projeto, então, sem este passo, "Esqueci minha senha" não chega para os usuários.
+
+6. Supabase → Authentication → **Emails → SMTP Settings** → ligue **Enable Custom SMTP**:
+   - Host `smtp.resend.com`, porta `465`, usuário `resend`, senha: uma chave do Resend com *Sending access*
+   - Sender email `noreply@DOMINIO`, sender name `PRO-MAT`
+7. Authentication → **Emails → Templates → Reset Password**. Troque o assunto e o corpo para o link com `token_hash`, que abre em qualquer navegador (o link padrão só funciona no navegador que pediu):
+
+   Assunto: `PRO-MAT — redefinição de senha`
+
+   ```html
+   <h2>Redefinição de senha</h2>
+   <p>Recebemos um pedido para criar uma nova senha no PRO-MAT.</p>
+   <p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery">Criar nova senha</a></p>
+   <p>Se não foi você, ignore este e-mail. Sua senha atual continua valendo.</p>
+   ```
+
+   `{{ .RedirectTo }}` é o `/reset-password` do endereço em que o pedido foi feito, por isso o mesmo modelo vale para produção e para `localhost` (os dois precisam estar nos Redirect URLs da etapa 3).
+8. Authentication → **Rate Limits**: o envio de e-mail do Auth tem limite por hora. O padrão serve para começar; aumente se houver muitos pedidos.
+
+Conferir: na tela de login, **Esqueci minha senha** com o seu e-mail. O link abre `https://APP/reset-password`, a nova senha é salva e o login volta com o aviso de senha alterada.
+
 ## Etapa 8 — Suporte AxisDesk
 
 1. No AxisDesk, em Configurações → Integrações → PRO-MAT:
@@ -179,6 +200,7 @@ A seção **3. Site no ar** confere DNS, redirecionamento de http para https, ca
 Teste manual, com o master e com um usuário comum:
 
 - [ ] Login e logout
+- [ ] Esqueci minha senha: o e-mail chega, o link abre a tela de nova senha e o login aceita a senha nova
 - [ ] Master troca de tenant e volta
 - [ ] Gestão PDM: lista, abrir um PDM, salvar
 - [ ] Nova solicitação, iniciar atendimento, aprovar até finalizar
@@ -202,7 +224,7 @@ Teste manual, com o master e com um usuário comum:
 ## Próximo degrau recomendado: banco de desenvolvimento
 
 1. Crie um projeto Supabase novo (ex.: `pro-mat-dev`) na mesma região.
-2. Aplique as migrations em ordem, de `001` a `024`, no SQL Editor; depois `supabase/seed.sql`.
+2. Aplique as migrations em ordem, de `001` a `026`, no SQL Editor; depois `supabase/seed.sql`.
 3. Aponte o `web/.env.local` para ele e rode `npm run create-demo-users` e `supabase/seed_demo.sql` lá.
 4. Na Vercel, cadastre as variáveis desse banco com escopo **Preview** e volte o Ignored Build Step para o automático; cada pull request ganha um endereço de teste próprio.
 5. Em produção, remova `http://localhost:3000/**` dos Redirect URLs.

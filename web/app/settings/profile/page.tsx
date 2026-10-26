@@ -11,7 +11,10 @@ import {
   updateUserApi,
   updateMyPassword,
   updateMyPreferences,
+  logAction,
 } from '@/lib/supabase-api'
+import { requestPasswordReset } from '@/lib/password-reset'
+import { RESET_SENT_MESSAGE } from '@/lib/password-reset-messages'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -287,6 +290,24 @@ export default function ProfilePage() {
     }
   }
 
+  const [sendingReset, setSendingReset] = useState(false)
+  const handleSendResetLink = async () => {
+    if (!user?.email) return
+    setSendingReset(true)
+    const result = await requestPasswordReset(user.email)
+    setSendingReset(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    void logAction({
+      category: 'auth',
+      action: 'password_reset_requested',
+      description: 'Pediu link de redefinição de senha pelo perfil',
+    })
+    toast.success(`Link enviado para ${user.email}`, { description: RESET_SENT_MESSAGE })
+  }
+
   const handleSavePreferences = async (
     nextTheme: 'light' | 'dark',
     nextLang: 'pt' | 'en'
@@ -500,7 +521,15 @@ export default function ProfilePage() {
                   )}
                 </div>
               </div>
-              <div className="flex justify-end pt-1">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSendResetLink}
+                  disabled={sendingReset}
+                  className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                >
+                  {sendingReset ? 'Enviando link…' : 'Não lembra a senha atual? Receber link de redefinição por e-mail'}
+                </button>
                 <Button
                   onClick={handleSavePassword}
                   disabled={

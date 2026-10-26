@@ -33,7 +33,7 @@ import {
 
 type DashboardStats = {
   total_requests: number
-  by_status: { name: string; value: number }[]
+  by_status: { name: string; value: number; key: string }[]
   by_urgency: { name: string; value: number }[]
   recent_activities: {
     id: number
@@ -202,7 +202,8 @@ export default function DashboardPage() {
   }, [ready, pathname])
 
   function handleSliceClick(entry: { name: string }) {
-    router.push(`/governance?status=${encodeURIComponent(entry.name)}`)
+    const key = stats?.by_status.find((s) => s.name === entry.name)?.key
+    router.push(key ? `/governance?status=${encodeURIComponent(key)}` : '/governance')
   }
 
   const displayName = stats?.user_name?.split(' ')[0] || user?.name?.split(' ')[0] || 'Usuário'

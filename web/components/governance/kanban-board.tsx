@@ -20,6 +20,8 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
+import type { RequestErpState } from "@/lib/request-erp-state"
+import { kanbanMoveBlock } from "@/lib/kanban-move"
 import { getWorkflowConfig, assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -75,6 +77,7 @@ function SortableCard({
   showActionButtons,
   currentUserId,
   onIniciarAtendimentoClick,
+  erpState,
 }: {
   request: MaterialRequest
   allValidStatuses: Set<string>
@@ -83,6 +86,7 @@ function SortableCard({
   showActionButtons?: boolean
   currentUserId?: string | number | null
   onIniciarAtendimentoClick?: (request: MaterialRequest) => void
+  erpState?: RequestErpState
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: request.id })
@@ -105,6 +109,7 @@ function SortableCard({
         showActionButtons={showActionButtons}
         currentUserId={currentUserId}
         onIniciarAtendimentoClick={onIniciarAtendimentoClick ? () => onIniciarAtendimentoClick(request) : undefined}
+        erpState={erpState}
       />
     </div>
   )
@@ -125,6 +130,8 @@ interface KanbanBoardProps {
   /** Para filtro de colunas: roles operacionais/etapa veem apenas sua coluna */
   currentUserRoleName?: string | null
   currentUserRoleType?: string | null
+  /** Situação no ERP por id da solicitação (só finalizadas) */
+  erpStates?: Record<string, RequestErpState>
 }
 
 const ROLE_TO_STATUS: Record<string, string> = {
@@ -146,6 +153,7 @@ export function KanbanBoard({
   currentUserId = null,
   currentUserRoleName = null,
   currentUserRoleType = null,
+  erpStates = {},
 }: KanbanBoardProps) {
   const [columns, setColumns] = useState<KanbanColumn[]>([])
   const [columnsLoading, setColumnsLoading] = useState(true)
@@ -252,6 +260,13 @@ export function KanbanBoard({
       : localRequests.find((r) => r.id === over.id)?.status ?? null
 
     if (!targetColumnId || targetColumnId === draggedCard.status) return
+
+    const lastStepKey = columns.length > 0 ? columns[columns.length - 1].id : null
+    const blocked = kanbanMoveBlock(draggedCard.status ?? '', targetColumnId, lastStepKey)
+    if (blocked) {
+      toast.error("Movimento não permitido", { description: blocked })
+      return
+    }
 
     // ── Optimistic update ─────────────────────────────────────────────────────
     setLocalRequests((prev) =>
@@ -376,6 +391,7 @@ export function KanbanBoard({
                           showActionButtons={showActionButtons}
                           currentUserId={currentUserId}
                           onIniciarAtendimentoClick={showActionButtons ? handleIniciarAtendimento : undefined}
+                          erpState={erpStates[req.id]}
                         />
                       ))
                     )}

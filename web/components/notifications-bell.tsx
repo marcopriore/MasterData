@@ -89,7 +89,7 @@ export function NotificationsBell() {
       return
     }
     if (n.request_id != null) {
-      router.push('/governance')
+      router.push(`/governance?req=${n.request_id}`)
     }
   }
 

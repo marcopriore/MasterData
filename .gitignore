@@ -36,3 +36,5 @@ tests/e2e/test-results/
 # Temporários
 ~$*
 *.tmp
+
+PDM_EXCEL_FILES_V2/

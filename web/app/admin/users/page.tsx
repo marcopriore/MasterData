@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, FormEvent } from 'react'
 import { usePathname } from 'next/navigation'
-import { getUsersApi, createUserApi, updateUserApi, getRoles, getTenants, downloadFile, uploadUsersImport } from '@/lib/supabase-api'
+import { getUsersApi, createUserApi, updateUserApi, getRoles, getTenants, downloadFile, uploadUsersImport, logAction } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { keysCoveredByGroups, PERMISSION_GROUPS } from '@/lib/permissions'
 import { toast, Toaster } from 'sonner'
@@ -30,7 +30,9 @@ import {
   CheckCircle2,
   XCircle,
   Lock,
+  KeyRound,
 } from 'lucide-react'
+import { requestPasswordReset } from '@/lib/password-reset'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -378,6 +380,26 @@ export default function UsersPage() {
   const [editTarget, setEditTarget] = useState<User | null>(null)
 
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [resettingId, setResettingId] = useState<string | null>(null)
+
+  /** O admin não vê nem define a senha: o link vai para o e-mail do próprio usuário. */
+  const sendResetLink = async (u: User) => {
+    if (!window.confirm(`Enviar link de redefinição de senha para ${u.email}?`)) return
+    setResettingId(u.id)
+    const result = await requestPasswordReset(u.email)
+    setResettingId(null)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    void logAction({
+      category: 'users',
+      action: 'password_reset_sent',
+      description: `Link de redefinição de senha enviado para ${u.email}`,
+      event_data: { user_id: u.id },
+    })
+    toast.success(`Link de redefinição enviado para ${u.email}`)
+  }
 
   const [showUserImportModal, setShowUserImportModal] = useState(false)
   const [userImportStep, setUserImportStep] = useState(1)
@@ -700,6 +722,18 @@ export default function UsersPage() {
                               title="Editar"
                             >
                               <Pencil className="size-3.5" />
+                            </button>
+                            <button
+                              onClick={() => sendResetLink(u)}
+                              disabled={resettingId === u.id || !u.is_active}
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F1C38] transition-colors disabled:opacity-50"
+                              title={u.is_active ? 'Enviar link de redefinição de senha' : 'Usuário inativo'}
+                            >
+                              {resettingId === u.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <KeyRound className="size-3.5" />
+                              )}
                             </button>
                             <button
                               onClick={() => toggleActive(u)}

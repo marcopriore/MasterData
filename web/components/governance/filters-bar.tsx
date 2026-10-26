@@ -36,6 +36,9 @@ interface FiltersBarProps {
   onViewChange: (view: "kanban" | "list") => void
   resultCount: number
   pdms?: PdmOption[]
+  /** Etapa filtrada vinda do gráfico da tela inicial */
+  stageLabel?: string | null
+  onClearStage?: () => void
 }
 
 export function FiltersBar({
@@ -49,13 +52,16 @@ export function FiltersBar({
   onViewChange,
   resultCount,
   pdms = [],
+  stageLabel = null,
+  onClearStage,
 }: FiltersBarProps) {
-  const hasFilters = search || category !== "all" || dateRange !== "all"
+  const hasFilters = search || category !== "all" || dateRange !== "all" || Boolean(stageLabel)
 
   const clearFilters = () => {
     onSearchChange("")
     onCategoryChange("all")
     onDateRangeChange("all")
+    if (stageLabel) onClearStage?.()
   }
 
   return (
@@ -135,10 +141,22 @@ export function FiltersBar({
 
       {/* Active filters summary */}
       <div className="flex items-center justify-between">
-        <p className="text-xs uppercase text-muted-foreground">
-          <span className="font-semibold text-[#0F1C38] dark:text-foreground">{resultCount}</span>{" "}
-          solicitaç{resultCount !== 1 ? "ões" : "ão"} encontrada{resultCount !== 1 ? "s" : ""}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs uppercase text-muted-foreground">
+            <span className="font-semibold text-[#0F1C38] dark:text-foreground">{resultCount}</span>{" "}
+            solicitaç{resultCount !== 1 ? "ões" : "ão"} encontrada{resultCount !== 1 ? "s" : ""}
+          </p>
+          {stageLabel && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">
+              Etapa: {stageLabel}
+              {onClearStage && (
+                <button type="button" onClick={onClearStage} aria-label="Remover filtro de etapa" className="hover:text-foreground">
+                  <X className="size-3" />
+                </button>
+              )}
+            </span>
+          )}
+        </div>
         {hasFilters && (
           <Button
             variant="ghost"

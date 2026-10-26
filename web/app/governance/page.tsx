@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   getGovernanceStats,
   getWorkflows,
@@ -16,9 +16,13 @@ import {
   rejectRequest,
   getRequestHistory,
   getRequestById,
+  getRequestsErpStatus,
+  erpSyncMaterial,
+  requestStatusLabel,
   type MyField,
   type FieldLabelItem,
 } from '@/lib/supabase-api'
+import { canSyncFromRequest, requestErpState, type RequestErpInfo, type RequestErpState } from '@/lib/request-erp-state'
 import { KanbanBoard } from '@/components/governance/kanban-board'
 import { ListView } from '@/components/governance/list-view'
 import { FiltersBar } from '@/components/governance/filters-bar'
@@ -36,7 +40,7 @@ import {
 } from '@/components/ui/dialog'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
-import { AlertTriangle, ChevronLeft, FilePlus, Check, X, Save, Loader2 } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, FilePlus, Check, X, Save, Loader2, RefreshCw, ExternalLink } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
 import { formatAttrValue } from '@/lib/format-attr-value'
@@ -142,13 +146,20 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
   }
 }
 
+const REJECTED_STATUSES = ['rejected', 'rejeitado']
+
 function filterRequests(
   requests: MaterialRequest[],
   search: string,
   category: string,
-  dateRange: string
+  dateRange: string,
+  stage: string | null
 ): MaterialRequest[] {
   let filtered = [...requests]
+  if (stage) {
+    const wanted = REJECTED_STATUSES.includes(stage) ? REJECTED_STATUSES : [stage]
+    filtered = filtered.filter((r) => wanted.includes((r.status ?? '').toLowerCase()))
+  }
   const q = search.trim().toLowerCase()
   if (q) {
     filtered = filtered.filter(
@@ -187,6 +198,8 @@ function filterRequests(
 
 export default function GovernancePage() {
   const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, ready, can } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
@@ -290,6 +303,53 @@ export default function GovernancePage() {
     }
   }, [ready, selectedWorkflowId, fetchRequests, pathname])
 
+  const [erpInfo, setErpInfo] = useState<Map<number, RequestErpInfo>>(new Map())
+  const [erpSyncing, setErpSyncing] = useState(false)
+
+  const fetchErpStatus = useCallback(async (list: ApiRequest[]) => {
+    const finalized = list
+      .filter((r) => ['finalizado', 'completed', 'concluído', 'concluido'].includes((r.status ?? '').toLowerCase()))
+      .map((r) => r.id)
+    if (finalized.length === 0) {
+      setErpInfo(new Map())
+      return
+    }
+    try {
+      const items = await getRequestsErpStatus(finalized)
+      setErpInfo(new Map(items.map((item) => [item.request_id, item])))
+    } catch {
+      setErpInfo(new Map())
+    }
+  }, [])
+
+  const requestsRef = useRef<ApiRequest[]>([])
+
+  useEffect(() => {
+    requestsRef.current = requests
+    void fetchErpStatus(requests)
+  }, [requests, fetchErpStatus])
+
+  /** A chamada ao ERP da última etapa roda em segundo plano; reconsulta depois que ela tem tempo de voltar. */
+  const scheduleErpRefresh = useCallback(() => {
+    window.setTimeout(() => { void fetchErpStatus(requestsRef.current) }, 4000)
+  }, [fetchErpStatus])
+
+  const anyIntegrating = useMemo(
+    () => [...erpInfo.values()].some((info) => info.material?.erp_status === 'integrando'),
+    [erpInfo]
+  )
+  useEffect(() => {
+    if (!anyIntegrating) return
+    const timer = window.setTimeout(() => { void fetchErpStatus(requestsRef.current) }, 3000)
+    return () => window.clearTimeout(timer)
+  }, [anyIntegrating, erpInfo, fetchErpStatus])
+
+  const erpStates = useMemo(() => {
+    const out: Record<string, RequestErpState> = {}
+    for (const [id, info] of erpInfo) out[String(id)] = requestErpState(info)
+    return out
+  }, [erpInfo])
+
   /** Master atua em qualquer etapa como o responsável dela; can() já é true para Master. */
   const showActionButtons = can('can_attend')
 
@@ -298,9 +358,21 @@ export default function GovernancePage() {
     [requests]
   )
 
+  /** ?status=chave vem do gráfico da tela inicial. */
+  const [stageFilter, setStageFilter] = useState<string | null>(null)
+  const statusParam = searchParams.get('status')
+  useEffect(() => {
+    const key = statusParam?.trim().toLowerCase()
+    if (key) setStageFilter(key)
+  }, [statusParam])
+  const clearStageFilter = () => {
+    setStageFilter(null)
+    router.replace('/governance', { scroll: false })
+  }
+
   const filteredRequests = useMemo(
-    () => filterRequests(materialRequests, search, category, dateRange),
-    [materialRequests, search, category, dateRange]
+    () => filterRequests(materialRequests, search, category, dateRange, stageFilter),
+    [materialRequests, search, category, dateRange, stageFilter]
   )
 
   const lastInitializedRequestIdRef = useRef<number | null>(null)
@@ -310,6 +382,48 @@ export default function GovernancePage() {
     setSelectedRequest(req ?? null)
     setDetailsOpen(true)
   }
+
+  /** ?req=ID vem do e-mail, do sino e do link antigo /governance/request/ID. */
+  const [linkedRequestId, setLinkedRequestId] = useState<number | null>(null)
+  const linkedWorkflowTried = useRef(false)
+  const reqParam = searchParams.get('req')
+  useEffect(() => {
+    const id = Number(reqParam)
+    if (Number.isInteger(id) && id > 0) {
+      linkedWorkflowTried.current = false
+      setLinkedRequestId(id)
+    }
+  }, [reqParam])
+
+  useEffect(() => {
+    if (linkedRequestId == null || loading || selectedWorkflowId == null) return
+    const clearLink = () => {
+      setLinkedRequestId(null)
+      linkedWorkflowTried.current = false
+      router.replace('/governance', { scroll: false })
+    }
+    const found = requests.find((r) => r.id === linkedRequestId)
+    if (found) {
+      setSelectedRequest(found)
+      setDetailsOpen(true)
+      clearLink()
+      return
+    }
+    if (linkedWorkflowTried.current) {
+      toast.error(`Solicitação REQ-${String(linkedRequestId).padStart(4, '0')} não encontrada.`)
+      clearLink()
+      return
+    }
+    linkedWorkflowTried.current = true
+    void getRequestById(linkedRequestId).then((req) => {
+      if (req && req.workflow_id && req.workflow_id !== selectedWorkflowId) {
+        setSelectedWorkflowId(req.workflow_id)
+      } else {
+        toast.error(`Solicitação REQ-${String(linkedRequestId).padStart(4, '0')} não encontrada.`)
+        clearLink()
+      }
+    })
+  }, [linkedRequestId, loading, requests, selectedWorkflowId, router])
 
   const handleAssignSuccess = useCallback(
     (requestId: string) => {
@@ -344,6 +458,25 @@ export default function GovernancePage() {
 
   const FINAL_STATUSES = ['completed', 'finalizado', 'rejected', 'rejeitado']
   const isSelectedFinal = FINAL_STATUSES.includes((selectedRequest?.status ?? '').toLowerCase())
+
+  const selectedErpInfo = selectedRequest ? erpInfo.get(selectedRequest.id) ?? null : null
+  const selectedErpState = selectedErpInfo ? requestErpState(selectedErpInfo) : null
+
+  const handleSyncFromRequest = async () => {
+    const materialId = selectedErpInfo?.material?.id
+    if (!materialId) return
+    setErpSyncing(true)
+    try {
+      const res = await erpSyncMaterial(materialId)
+      if (res.success) toast.success(`Material sincronizado com o ERP${res.erp_code ? ` (${res.erp_code})` : ''}.`)
+      else toast.error(('error' in res ? res.error : null) ?? 'Não foi possível sincronizar com o ERP.')
+    } catch (err) {
+      toast.error((err as Error)?.message ?? 'Falha ao sincronizar com o ERP')
+    } finally {
+      setErpSyncing(false)
+      await fetchErpStatus(requests)
+    }
+  }
 
   const hasTechnicalAttributes =
     selectedRequest?.technical_attributes &&
@@ -441,6 +574,7 @@ export default function GovernancePage() {
       toast.success('Solicitação aprovada com sucesso!')
       handleCloseModal()
       await fetchRequests({ silent: true })
+      scheduleErpRefresh()
     } catch {
       toast.error('Falha ao aprovar solicitação')
     } finally {
@@ -582,6 +716,7 @@ export default function GovernancePage() {
       toast.success('Dados salvos e solicitação aprovada!')
       handleCloseModal()
       await fetchRequests({ silent: true })
+      scheduleErpRefresh()
     } catch {
       toast.error('Falha ao salvar ou aprovar')
     } finally {
@@ -690,6 +825,8 @@ export default function GovernancePage() {
               onViewChange={setView}
               resultCount={filteredRequests.length}
               pdms={pdms}
+              stageLabel={stageFilter ? requestStatusLabel(stageFilter) : null}
+              onClearStage={clearStageFilter}
             />
 
             <div className="mt-6 overflow-x-auto pb-2">
@@ -708,11 +845,13 @@ export default function GovernancePage() {
                   currentUserId={user?.id ?? null}
                   currentUserRoleName={user?.role_name ?? null}
                   currentUserRoleType={user?.role_type ?? null}
+                  erpStates={erpStates}
                 />
               ) : (
                 <ListView
                   requests={filteredRequests}
                   onViewDetails={handleViewDetails}
+                  erpStates={erpStates}
                 />
               )}
             </div>
@@ -763,6 +902,47 @@ export default function GovernancePage() {
                     description={(canEditTechnicalAttributes ? generatedDescription : selectedRequest.generated_description) || ''}
                     maxLength={user?.max_description_length ?? 40}
                   />
+                </div>
+              )}
+
+              {isSelectedFinal && selectedErpState && (
+                <div
+                  className={
+                    selectedErpState.tone === 'alert'
+                      ? 'rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200'
+                      : 'rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 dark:border-zinc-700/50 dark:bg-muted/20 dark:text-foreground'
+                  }
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80 mb-1">Situação no ERP</p>
+                  <p className="text-sm font-semibold">
+                    {selectedErpState.tone === 'alert' && <AlertTriangle className="mr-1.5 inline size-4 -mt-0.5" />}
+                    {selectedErpState.label}
+                    {selectedErpInfo?.material?.id_sistema && (
+                      <span className="ml-2 font-mono text-xs font-normal opacity-80">{selectedErpInfo.material.id_sistema}</span>
+                    )}
+                  </p>
+                  {selectedErpState.tone === 'alert' && <p className="mt-1 text-sm">{selectedErpState.detail}</p>}
+                  {selectedErpState.tone === 'alert' && selectedErpInfo?.material && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {can('can_standardize') && canSyncFromRequest(selectedErpState) && (
+                        <Button
+                          size="sm"
+                          onClick={handleSyncFromRequest}
+                          disabled={erpSyncing}
+                          className="gap-1.5 bg-red-600 text-white hover:bg-red-700"
+                        >
+                          {erpSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                          Sincronizar com ERP
+                        </Button>
+                      )}
+                      <Link href={`/database/${selectedErpInfo.material.id}`}>
+                        <Button size="sm" variant="outline" className="gap-1.5">
+                          <ExternalLink className="size-3.5" />
+                          Abrir na Base de Dados
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
                 </div>
               )}
 

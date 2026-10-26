@@ -137,3 +137,5 @@ npm run test:e2e
 | 022 | várias integrações com o ERP por tenant (`tenant_erp_connections`); migra a 021 e remove a tabela antiga |
 | 023 | campo do código do material na resposta do ERP (`response_code_field`) |
 | 024 | índices para o limite de chamadas das APIs de material |
+| 025 | `can_attend` em todo papel novo (gatilho em `roles`) e nos papéis criados depois da 008 |
+| 026 | `move_request_stage`: arraste entre etapas intermediárias com histórico |

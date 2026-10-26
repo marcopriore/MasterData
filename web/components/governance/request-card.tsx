@@ -12,7 +12,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import type { RequestErpState } from "@/lib/request-erp-state"
 import {
+  AlertTriangle,
   Calendar,
   ClipboardEdit,
   Clock,
@@ -120,6 +122,34 @@ interface RequestCardProps {
   /** Current user id — used for assign / own-attendance logic */
   currentUserId?: string | number | null
   onIniciarAtendimentoClick?: () => void
+  /** Situação no ERP do material, só para solicitação finalizada */
+  erpState?: RequestErpState
+}
+
+function ErpStateBadge({ state }: { state: RequestErpState }) {
+  if (state.tone === "alert") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded border border-red-300 bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:border-red-800 dark:bg-red-900/40 dark:text-red-300"
+        title={state.detail}
+      >
+        <AlertTriangle className="size-3" />
+        {state.label}
+      </span>
+    )
+  }
+  if (state.tone === "ok") {
+    return (
+      <span className="inline-flex rounded border border-green-200 bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-800 dark:border-green-900 dark:bg-green-900/30 dark:text-green-400">
+        {state.label}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+      {state.label}
+    </span>
+  )
 }
 
 function ListPriorityBadge({ urgency }: { urgency: "low" | "medium" | "high" }) {
@@ -201,7 +231,9 @@ export function RequestCard({
   showActionButtons = false,
   currentUserId = null,
   onIniciarAtendimentoClick,
+  erpState,
 }: RequestCardProps) {
+  const erpAlert = erpState?.tone === "alert"
   const needsAction =
     request.status === "pending_fiscal" || request.status === "pending_mrp"
   const totalProgress = Math.round(
@@ -259,7 +291,12 @@ export function RequestCard({
 
   if (variant === "list") {
     return (
-      <div className="group flex items-center gap-4 rounded-lg border border-slate-200/60 !bg-white px-4 py-3 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] transition-all hover:border-primary/20 hover:shadow-sm dark:!bg-card dark:border-zinc-400/40 dark:shadow-none">
+      <div
+        className={cn(
+          "group flex items-center gap-4 rounded-lg border border-slate-200/60 !bg-white px-4 py-3 shadow-[0_2px_8px_rgba(0,0,0,0.06),0_4px_6px_-1px_rgba(0,0,0,0.04)] transition-all hover:border-primary/20 hover:shadow-sm dark:!bg-card dark:border-zinc-400/40 dark:shadow-none",
+          erpAlert && "border-l-4 !border-l-red-500 !bg-red-50 dark:!bg-red-950/30"
+        )}
+      >
         <div className="size-2.5 shrink-0" />
 
         {/* Request ID + Material */}
@@ -336,6 +373,7 @@ export function RequestCard({
 
         {/* Status + Action */}
         <div className="flex items-center gap-2 shrink-0">
+          {erpState && <ErpStateBadge state={erpState} />}
           <Badge variant="outline" className={cn("text-[10px]", statusColor)}>
             {request.statusLabel}
           </Badge>
@@ -381,9 +419,14 @@ export function RequestCard({
     <Card
       className={cn(
         "group shadow-sm hover:shadow-md transition-all cursor-pointer",
-        isAssignedToOther && "opacity-60 border-slate-300 dark:border-zinc-600"
+        isAssignedToOther && !erpAlert && "opacity-60 border-slate-300 dark:border-zinc-600",
+        erpAlert && "border-2"
       )}
-      style={{ backgroundColor: 'var(--kanban-card-bg)', borderColor: 'var(--kanban-col-border)' }}
+      style={
+        erpAlert
+          ? { backgroundColor: 'rgba(239, 68, 68, 0.08)', borderColor: '#ef4444' }
+          : { backgroundColor: 'var(--kanban-card-bg)', borderColor: 'var(--kanban-col-border)' }
+      }
       onClick={() => onViewDetails?.(request.id)}
     >
       <CardContent className="p-3 space-y-2.5">
@@ -411,6 +454,8 @@ export function RequestCard({
         <p className="text-[11px] font-mono leading-relaxed line-clamp-2 break-words" style={{ color: 'var(--kanban-card-sub)' }}>
           {descriptionText}
         </p>
+
+        {erpState && <ErpStateBadge state={erpState} />}
 
         <Separator style={{ backgroundColor: 'var(--kanban-card-separator)' }} />
 

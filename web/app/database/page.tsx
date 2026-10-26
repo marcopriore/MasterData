@@ -11,7 +11,7 @@ import {
   downloadFile,
   uploadMaterialsImport,
 } from '@/lib/supabase-api'
-import { classifyErpSyncAction, summarizeErpSyncPlans } from '@/lib/erp/sync-action'
+import { classifyErpSyncAction, summarizeErpSyncPlans, type ErpSyncPlan } from '@/lib/erp/sync-action'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -139,6 +139,7 @@ export default function DatabasePage() {
   const isDark = resolvedTheme === 'dark'
   const { user, can } = useUser()
   const maxLength = user?.max_description_length ?? 40
+  const tenantId = user?.tenant_id
   const [items, setItems] = useState<MaterialItem[]>([])
   const [duplicateIds, setDuplicateIds] = useState<Map<number, string[]>>(new Map())
   const [total, setTotal] = useState(0)
@@ -295,14 +296,14 @@ export default function DatabasePage() {
       .then((data) => {
         setItems((data.items ?? []) as MaterialItem[])
         setTotal(data.total ?? 0)
-        getDuplicateMaterials().then(setDuplicateIds).catch(() => {})
+        getDuplicateMaterials(tenantId).then(setDuplicateIds).catch(() => {})
       })
       .catch(() => {
         setItems([])
         setTotal(0)
       })
       .finally(() => setLoading(false))
-  }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
+  }, [page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo, tenantId])
 
   useEffect(() => {
     const load = async () => {
@@ -323,7 +324,7 @@ export default function DatabasePage() {
         ])
         setItems((matsRes.items ?? []) as MaterialItem[])
         setTotal(matsRes.total ?? 0)
-        getDuplicateMaterials().then(setDuplicateIds).catch(() => {})
+        getDuplicateMaterials(tenantId).then(setDuplicateIds).catch(() => {})
         setPdms((pdmList ?? []).map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code })))
       } catch {
         setItems([])
@@ -334,7 +335,7 @@ export default function DatabasePage() {
       }
     }
     load()
-  }, [pathname, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo])
+  }, [pathname, page, limit, appliedSearch, appliedStatus, appliedPdm, appliedErpFilter, appliedDateFrom, appliedDateTo, tenantId])
 
   const handleFilter = () => {
     setAppliedSearch(search.trim())
@@ -368,8 +369,18 @@ export default function DatabasePage() {
   const selectableIdsOnPage = items.filter((r) => r.erp_status !== 'integrando').map((r) => r.id)
   const allSelectableSelected =
     selectableIdsOnPage.length > 0 && selectableIdsOnPage.every((id) => selectedIds.includes(id))
-  const isSyncEligible = (row: MaterialItem) => {
+  /** Plano do ERP com a trava de duplicidade: duplicado não cria nem altera; eliminar continua liberado. */
+  const syncPlanFor = (row: MaterialItem): ErpSyncPlan => {
     const plan = classifyErpSyncAction(row)
+    if ((plan.action === 'criar' || plan.action === 'alterar') && duplicateIds.has(row.id)) {
+      const others = duplicateIds.get(row.id) ?? []
+      return { action: 'skip', reason: `duplicado de ${others.join(', ') || 'outro material'}` }
+    }
+    return plan
+  }
+
+  const isSyncEligible = (row: MaterialItem) => {
+    const plan = syncPlanFor(row)
     if (plan.action === 'skip') return false
     if (plan.action === 'eliminar') return row.erp_status === 'pendente_erp' || row.erp_status === 'erro_erp'
     return (
@@ -385,7 +396,7 @@ export default function DatabasePage() {
 
   const selectedSyncPlans = selectedSyncIds.map((id) => {
     const row = items.find((r) => r.id === id)!
-    return classifyErpSyncAction(row)
+    return syncPlanFor(row)
   })
   const syncSummary = summarizeErpSyncPlans(selectedSyncPlans)
 
@@ -458,15 +469,22 @@ export default function DatabasePage() {
       return m ? isSyncEligible(m) : false
     })
     const removed = selectedIds.length - eligible.length
+    const duplicated = selectedIds.filter((id) => {
+      const m = items.find((r) => r.id === id)
+      return m ? syncPlanFor(m).action === 'skip' && duplicateIds.has(m.id) : false
+    }).length
+    const duplicateNote = duplicated
+      ? ` ${duplicated} marcado(s) como duplicado (DUP): corrija a descrição ou deixe o outro item Obsoleto.`
+      : ''
     if (eligible.length === 0) {
       toast.error(
-        'Nenhum item elegível: precisa estar Pendente/Erro ERP. Bloqueado não sincroniza; Obsoleto sem código ERP é só local; criação/alteração exige descrição no limite.'
+        `Nenhum item elegível: precisa estar Pendente/Erro ERP. Bloqueado não sincroniza; Obsoleto sem código ERP é só local; criação/alteração exige descrição no limite e sem duplicidade.${duplicateNote}`
       )
       return
     }
     if (removed > 0) {
       setSelectedIds(eligible)
-      toast.message(`${removed} item(s) fora da sincronização. Mantidos ${eligible.length}.`)
+      toast.message(`${removed} item(s) fora da sincronização. Mantidos ${eligible.length}.${duplicateNote}`)
     }
     setErpModalError(null)
     setShowErpModal(true)
@@ -481,7 +499,7 @@ export default function DatabasePage() {
     const overLimitCreateUpdate = selectedIds.filter((id) => {
       const m = items.find((r) => r.id === id)
       if (!m) return false
-      const plan = classifyErpSyncAction(m)
+      const plan = syncPlanFor(m)
       if (plan.action === 'eliminar' || plan.action === 'skip') return false
       return (m.description?.length ?? 0) > maxLength
     })
@@ -506,7 +524,13 @@ export default function DatabasePage() {
       if (res.failed.length) {
         toast.error(`${res.failed.length} com erro do ERP. Veja a mensagem no detalhe de cada material.`)
       }
-      if (res.skipped.length) toast.message(`${res.skipped.length} não sincronizados.`)
+      const blockedDup = res.skipped.filter((s) => s.duplicateOf?.length)
+      if (blockedDup.length) {
+        toast.error(`${blockedDup.length} barrado(s) por duplicidade: ${blockedDup.map((s) => s.reason).slice(0, 3).join(' · ')}`)
+      }
+      const otherSkipped = res.skipped.length - blockedDup.length
+      if (otherSkipped) toast.message(`${otherSkipped} não sincronizados.`)
+      getDuplicateMaterials(tenantId).then(setDuplicateIds).catch(() => {})
     } catch (err) {
       setErpModalError((err as Error)?.message ?? 'Falha ao sincronizar materiais')
     } finally {
@@ -835,9 +859,9 @@ export default function DatabasePage() {
                             {row.id_sistema ?? '—'}
                             {duplicateIds.has(row.id) && (() => {
                               const others = duplicateIds.get(row.id) ?? []
-                              const tooltipText = others.length > 0
+                              const tooltipText = `${others.length > 0
                                 ? `Duplicado com: ${others.join(', ')}`
-                                : 'Material duplicado — mesma descrição e PDM'
+                                : 'Material duplicado — mesma descrição e PDM'}. Não cria nem altera no ERP enquanto estiver marcado.`
                               return (
                                 <span
                                   title={tooltipText}
@@ -1059,7 +1083,7 @@ export default function DatabasePage() {
                 {selectedIds.map((id) => {
                   const m = items.find((r) => r.id === id)
                   if (!m) return null
-                  const plan = classifyErpSyncAction(m)
+                  const plan = syncPlanFor(m)
                   const planLabel =
                     plan.action === 'criar'
                       ? 'Criar'

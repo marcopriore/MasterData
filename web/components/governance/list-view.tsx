@@ -1,14 +1,17 @@
 "use client"
 
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
+import type { RequestErpState } from "@/lib/request-erp-state"
 
 interface ListViewProps {
   requests: MaterialRequest[]
   onCompleteData?: (id: string) => void
   onViewDetails?: (id: string) => void
+  /** Situação no ERP por id da solicitação (só finalizadas) */
+  erpStates?: Record<string, RequestErpState>
 }
 
-export function ListView({ requests, onCompleteData, onViewDetails }: ListViewProps) {
+export function ListView({ requests, onCompleteData, onViewDetails, erpStates = {} }: ListViewProps) {
   if (requests.length === 0) {
     return <EmptyColumn message="Nenhuma requisicao encontrada com os filtros atuais." />
   }
@@ -35,6 +38,7 @@ export function ListView({ requests, onCompleteData, onViewDetails }: ListViewPr
           variant="list"
           onCompleteData={onCompleteData}
           onViewDetails={onViewDetails}
+          erpState={erpStates[req.id]}
         />
       ))}
     </div>
