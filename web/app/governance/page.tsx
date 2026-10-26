@@ -203,7 +203,7 @@ export default function GovernancePage() {
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, ready, can } = useUser()
+  const { user, ready, can, isAdmin } = useUser()
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [pdms, setPdms] = useState<Array<{ id: number; name: string; internal_code: string; is_active: boolean }>>([])
@@ -838,6 +838,7 @@ export default function GovernancePage() {
                   currentUserId={user?.id ?? null}
                   currentUserRoleName={user?.role_name ?? null}
                   currentUserRoleType={user?.role_type ?? null}
+                  canManageAllStages={!!user?.is_master || isAdmin}
                   erpStates={erpStates}
                 />
               ) : (

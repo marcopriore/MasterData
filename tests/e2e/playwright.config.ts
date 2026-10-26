@@ -39,6 +39,7 @@ export default defineConfig({
     { name: 'database', testMatch: 'database.spec.ts', dependencies: ['governance'] },
     { name: 'value-dictionary', testMatch: 'value-dictionary.spec.ts', dependencies: ['setup'] },
     { name: 'roles', testMatch: 'roles.spec.ts', dependencies: ['setup'] },
+    { name: 'fields', testMatch: 'fields.spec.ts', dependencies: ['setup'] },
     { name: 'users', testMatch: 'users.spec.ts', dependencies: ['auth', 'governance'] },
   ],
   reporter: [['list'], ['html', { outputFolder: 'report', open: 'never' }]],

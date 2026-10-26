@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams, usePathname } from 'next/navigation'
+import { erpViewLabel } from '@/lib/erp-views'
 import {
   getMaterialById,
   getPdms,
@@ -436,14 +437,7 @@ export default function DatabaseDetailPage() {
         setGeneratedDesc(String(mat.description ?? ''))
         const byView: Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>> = {}
         for (const f of fields) {
-          const rawView = (f.erp_view as string) || 'Outros'
-          const viewMap: Record<string, string> = {
-            'dados_basicos': 'Dados Básicos',
-            'dados basicos': 'Dados Básicos',
-            'classificação fiscal': 'Fiscal',
-            'classificacao fiscal': 'Fiscal',
-          }
-          const view = viewMap[rawView.toLowerCase()] ?? rawView
+          const view = erpViewLabel(f.erp_view as string)
           if (!byView[view]) byView[view] = []
           byView[view].push({
             field_name: f.field_name as string,

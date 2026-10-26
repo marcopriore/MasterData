@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, FormEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, FormEvent } from 'react'
 import { usePathname } from 'next/navigation'
 import {
   getFieldDictionaryAll,
@@ -11,6 +11,7 @@ import {
   logAction,
 } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
+import { ERP_VIEWS as ERP_VIEW_LIST, erpViewCode, erpViewLabel } from '@/lib/erp-views'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,15 +50,7 @@ type FieldDictionary = {
 
 type Role = { id: number; name: string }
 
-const ERP_VIEWS = [
-  { value: '', label: 'Todos' },
-  { value: 'dados_basicos', label: 'Dados Básicos' },
-  { value: 'fiscal', label: 'Fiscal' },
-  { value: 'compras', label: 'Compras' },
-  { value: 'mrp', label: 'MRP' },
-  { value: 'contabilidade', label: 'Contabilidade' },
-  { value: 'vendas', label: 'Vendas' },
-] as const
+const ERP_VIEWS = [{ value: '', label: 'Todos' }, ...ERP_VIEW_LIST] as const
 
 const ERP_VIEW_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   dados_basicos: { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' },
@@ -147,7 +140,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
   const [fieldLabel, setFieldLabel] = useState(initial?.field_label ?? '')
   const [fieldName, setFieldName] = useState(initial?.field_name ?? '')
   const [erpField, setErpField] = useState(initial?.erp_field ?? '')
-  const [erpView, setErpView] = useState(initial?.erp_view ?? 'dados_basicos')
+  const [erpView, setErpView] = useState(erpViewCode(initial?.erp_view) || 'dados_basicos')
   const [erpBlock, setErpBlock] = useState(initial?.erp_block ?? '')
   const [fieldType, setFieldType] = useState(initial?.field_type ?? 'text')
   const [responsibleRole, setResponsibleRole] = useState(initial?.responsible_role ?? '')
@@ -426,10 +419,7 @@ export default function FieldsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [f, r] = await Promise.all([
-        getFieldDictionaryAll(erpViewFilter || undefined),
-        getRoles(),
-      ])
+      const [f, r] = await Promise.all([getFieldDictionaryAll(), getRoles()])
       setFields(f as FieldDictionary[])
       setRoles(r)
     } catch (err) {
@@ -438,7 +428,13 @@ export default function FieldsPage() {
     } finally {
       setLoading(false)
     }
-  }, [erpViewFilter])
+  }, [])
+
+  // Filtro na tela, pelo código da visão (aceita rótulo antigo gravado, ex. "Dados Básicos").
+  const visibleFields = useMemo(
+    () => (erpViewFilter ? fields.filter((f) => erpViewCode(f.erp_view) === erpViewFilter) : fields),
+    [fields, erpViewFilter]
+  )
 
   useEffect(() => {
     fetchData()
@@ -548,7 +544,7 @@ export default function FieldsPage() {
             <Loader2 className="size-5 animate-spin mr-2" />
             Carregando campos…
           </div>
-        ) : fields.length === 0 ? (
+        ) : visibleFields.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
             <BookOpen className="size-8 opacity-30" />
             <p className="text-sm">
@@ -573,8 +569,8 @@ export default function FieldsPage() {
                 </tr>
               </thead>
               <tbody>
-                {fields.map((f) => {
-                  const viewStyle = ERP_VIEW_COLORS[f.erp_view] ?? {
+                {visibleFields.map((f) => {
+                  const viewStyle = ERP_VIEW_COLORS[erpViewCode(f.erp_view)] ?? {
                     bg: '#F8FAFC',
                     text: '#475569',
                     border: '#E2E8F0',
@@ -614,7 +610,7 @@ export default function FieldsPage() {
                             borderColor: viewStyle.border,
                           }}
                         >
-                          {ERP_VIEWS.find((v) => v.value === f.erp_view)?.label ?? f.erp_view}
+                          {erpViewLabel(f.erp_view)}
                         </span>
                       </td>
                       <td className="px-5 py-3.5">

@@ -78,6 +78,7 @@ function SortableCard({
   currentUserId,
   onIniciarAtendimentoClick,
   erpState,
+  canDrag,
 }: {
   request: MaterialRequest
   allValidStatuses: Set<string>
@@ -87,9 +88,10 @@ function SortableCard({
   currentUserId?: string | number | null
   onIniciarAtendimentoClick?: (request: MaterialRequest) => void
   erpState?: RequestErpState
+  canDrag: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: request.id })
+    useSortable({ id: request.id, disabled: !canDrag })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -99,7 +101,8 @@ function SortableCard({
   }
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    // Sem arraste, sem os atributos do dnd-kit: aria-disabled no cartão desabilitaria os botões de dentro.
+    <div ref={setNodeRef} style={style} {...(canDrag ? attributes : {})} {...(canDrag ? listeners : {})}>
       <RequestCard
         request={request}
         variant="kanban"
@@ -130,6 +133,8 @@ interface KanbanBoardProps {
   /** Para filtro de colunas: roles operacionais/etapa veem apenas sua coluna */
   currentUserRoleName?: string | null
   currentUserRoleType?: string | null
+  /** ADMIN e Master: veem todas as colunas e arrastam entre etapas (o banco também trava, migration 034). */
+  canManageAllStages?: boolean
   /** Situação no ERP por id da solicitação (só finalizadas) */
   erpStates?: Record<string, RequestErpState>
 }
@@ -153,6 +158,7 @@ export function KanbanBoard({
   currentUserId = null,
   currentUserRoleName = null,
   currentUserRoleType = null,
+  canManageAllStages = false,
   erpStates = {},
 }: KanbanBoardProps) {
   const [columns, setColumns] = useState<KanbanColumn[]>([])
@@ -307,6 +313,7 @@ export function KanbanBoard({
 
   // ADMIN e MASTER veem todas as colunas. Roles operacionais/etapa veem apenas a coluna correspondente.
   const showAllColumns =
+    canManageAllStages ||
     currentUserRoleName === "ADMIN" ||
     currentUserRoleName === "MASTER" ||
     currentUserRoleType === "sistema"
@@ -379,7 +386,7 @@ export function KanbanBoard({
                     }}
                   >
                     {items.length === 0 ? (
-                      <EmptyColumn message="Arraste um card aqui" />
+                      <EmptyColumn message={canManageAllStages ? "Arraste um card aqui" : "Nenhuma solicitação nesta etapa"} />
                     ) : (
                       items.map((req) => (
                         <SortableCard
@@ -392,6 +399,7 @@ export function KanbanBoard({
                           currentUserId={currentUserId}
                           onIniciarAtendimentoClick={showActionButtons ? handleIniciarAtendimento : undefined}
                           erpState={erpStates[req.id]}
+                          canDrag={canManageAllStages}
                         />
                       ))
                     )}

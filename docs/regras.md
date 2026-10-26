@@ -95,9 +95,12 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 - Aprovar vai para o próximo `status_key`. Sem próximo, o status vira concluído.
 - Status final (`completed`, `approved`, `concluído`, `finalizado`, `rejected`) não avança de novo.
 - Só o atendente atual (ou ninguém) pode assumir. Outro usuário recebe erro de conflito.
+- **Cada área só na própria etapa (migration 034):** atender, salvar os campos, aprovar e rejeitar só quem tem como papel de etapa (`users.role_id`) a área da etapa atual. A área tem o nome da etapa em maiúsculas: `cadastro` → CADASTRO, `compras` → COMPRAS. ADMIN (papel ou grupo) e Master atuam em qualquer etapa. Regra no banco (`can_act_on_stage`); na tela, cada área vê só a coluna dela no kanban.
+- Arrastar o cartão entre etapas é só do ADMIN e do Master. A área aprova ou rejeita a própria etapa; arrastando, pularia as etapas das outras.
+- Solicitação finalizada ou já rejeitada não pode ser rejeitada.
 - Rejeitada pode ser **corrigida e reenviada** (`resubmit_request`, migration 028) por quem abriu, por quem está no grupo ADMIN do tenant ou pelo Master. A mesma solicitação (mesmo REQ) recebe PDM, atributos, descrição, urgência e justificativa corrigidos e volta para a primeira etapa ativa do workflow, sem atendente. O histórico grava `resubmitted` com a descrição e os atributos anteriores; a área da primeira etapa é avisada como numa solicitação nova. Antes de reenviar, a checagem de duplicidade roda de novo.
 - O arraste no kanban não finaliza, não rejeita e não reabre solicitação finalizada ou rejeitada. Essas mudanças só pelas RPCs (`advance_workflow`, `reject_request`), que gravam histórico, avisam e criam o material.
-- Entre etapas intermediárias, o arraste passa por `move_request_stage` (migration 026): valida que a etapa é do workflow, libera o atendente e grava `stage_change` no histórico com etapa de origem, destino e atendente anterior. Não gera aviso.
+- Entre etapas intermediárias, o arraste (ADMIN e Master) passa por `move_request_stage` (migration 026): valida que a etapa é do workflow, libera o atendente e grava `stage_change` no histórico com etapa de origem, destino e atendente anterior. Não gera aviso.
 - Ao entrar em finalizado, nasce o material na base, com descrições preenchidas a partir do PDM.
 
 ## Descrição do material

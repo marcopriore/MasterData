@@ -17,6 +17,18 @@ async function statusOf(id: number) {
 }
 
 test.describe.serial('04 - Governança: fluxo completo até o material', () => {
+  test('outra área não atende a etapa de Cadastro', async ({ browser }) => {
+    const state = getState()
+    const { page, close } = await pageAs(browser, 'compras')
+    try {
+      await page.goto('/governance')
+      await expect(page.getByText(/SOLICITA/i).first()).toBeVisible()
+      await expect(kanbanCard(page, state.requestId!)).toHaveCount(0)
+    } finally {
+      await close()
+    }
+  })
+
   for (const stage of STAGES) {
     test(`${stage.status}: ${stage.role} atende, preenche os campos e aprova`, async ({ browser }) => {
       const state = getState()

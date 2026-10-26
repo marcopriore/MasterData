@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { getMaterialById, getFieldDictionary, getPdms, getPdmById } from '@/lib/supabase-api'
 import { formatAttrValue } from '@/lib/format-attr-value'
+import { erpViewLabel } from '@/lib/erp-views'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -109,7 +110,7 @@ export function PhaseSearch({
       .then((fields) => {
         const byView: FieldByView = {}
         for (const f of fields) {
-          const view = (f.erp_view as string) || 'Outros'
+          const view = erpViewLabel(f.erp_view as string)
           if (!byView[view]) byView[view] = []
           byView[view].push({
             field_name: f.field_name as string,

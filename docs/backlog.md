@@ -20,7 +20,7 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
   
   O passo a passo da separação está no fim de `deploy-producao.md`.
 - **Integração ERP contra um ERP real.** A chamada existe e foi testada contra um servidor falso. Falta validar com o endpoint do cliente: nomes do cabeçalho (`internalGroup` para grupo de mercadoria é suposição), formato da resposta e mensagens de erro. A simulação continua enquanto o tenant não tiver integração ativa.
-- **Aprovar só na etapa do próprio papel.** Desde a 032, aprovar exige `can_approve` e rejeitar `can_reject`. Ainda não se confere se a etapa atual é da área do usuário: um aprovador de Compras aprova uma solicitação que está em Fiscal, se a abrir. A tela também não trava isso hoje. Definir a regra (área da etapa, ou ADMIN e Master em qualquer etapa) antes de travar no banco.
+- **Etapa de workflow personalizado.** Desde a 034, a área de cada etapa é o papel com o nome da etapa (`qualidade` → QUALIDADE). Workflow com etapa nova precisa de um papel com esse nome para alguém, além do ADMIN, atender.
 - **Ajustes do Supabase Auth em produção.**
   - Cadastro público desligado.
   - Senha mínima 8 com minúscula, maiúscula, número e símbolo (feito em 26/10/2026), e leaked password protection.

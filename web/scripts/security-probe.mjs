@@ -77,8 +77,9 @@ async function makeTenant(name) {
   return t.id
 }
 
-async function makeUser(tenantId, label, permissions) {
-  const [role] = await must(admin.from('roles').insert({ tenant_id: tenantId, name: `SONDA_${label}`, role_type: 'operacional', permissions }).select('id'), 'role')
+/** roleName = nome do papel de etapa (a área); sem ele, um papel sem área. */
+async function makeUser(tenantId, label, permissions, roleName = `SONDA_${label}`) {
+  const [role] = await must(admin.from('roles').insert({ tenant_id: tenantId, name: roleName, role_type: 'operacional', permissions }).select('id'), 'role')
   const email = `sonda-${tag}-${label.toLowerCase()}@example.com`
   const { user } = await must(admin.auth.admin.createUser({ email, password, email_confirm: true, app_metadata: { tenant_id: tenantId } }), 'auth user')
   created.authUsers.push(user.id)
@@ -122,7 +123,8 @@ async function main() {
   const flowA = await makeFlow(tA)
   const flowB = await makeFlow(tB)
   const requester = await makeUser(tA, 'SOLIC', { can_submit_request: true, can_view_database: true, can_attend: false })
-  const attendant = await makeUser(tA, 'ATEND', { can_attend: true, can_approve: true, can_reject: true, can_view_database: true })
+  const attendant = await makeUser(tA, 'ATEND', { can_attend: true, can_approve: true, can_reject: true, can_view_database: true }, 'CADASTRO')
+  const otherArea = await makeUser(tA, 'COMPR', { can_attend: true, can_approve: true, can_reject: true, can_view_database: true }, 'COMPRAS')
   const adminB = await makeUser(tB, 'ADMB', { can_manage_roles: true, can_manage_users: true, can_view_logs: true, can_attend: true, can_approve: true, can_reject: true })
 
   const [reqB] = await must(admin.from('material_requests').insert({ tenant_id: tB, pdm_id: flowB.pdmId, workflow_id: flowB.workflowId, status: 'cadastro', requester: 'B', urgency: 'low', user_id: adminB.id }).select('id, status'), 'solicitação B')
@@ -134,6 +136,7 @@ async function main() {
   const anon = createClient(URL_, ANON, opts)
   const solic = await signIn(requester.email)
   const atend = await signIn(attendant.email)
+  const compras = await signIn(otherArea.email)
 
   const reqStatus = async (id, expected) => (await admin.from('material_requests').select('status, assigned_to_id').eq('id', id).single()).data?.status === expected
   const matErp = async (id) => {
@@ -177,6 +180,15 @@ async function main() {
   await denied('atendente não forja integração no ERP', () => atend.from('material_database').update({ erp_status: 'integrado_erp', id_erp: 'FAKE' }).eq('id', matA.id).select('id'), () => matErp(matA.id))
   await denied('atendente não troca o atendente direto', () => atend.from('material_requests').update({ assigned_to_id: attendant.id }).eq('id', reqA.id).select('id'),
     async () => (await admin.from('material_requests').select('assigned_to_id').eq('id', reqA.id).single()).data?.assigned_to_id == null)
+
+  console.log('\nCada área só na própria etapa (solicitação em Cadastro)')
+  await denied('Compras não atende etapa de Cadastro', () => compras.rpc('assign_request', { p_request_id: reqA.id }),
+    async () => (await admin.from('material_requests').select('assigned_to_id').eq('id', reqA.id).single()).data?.assigned_to_id == null)
+  await denied('Compras não aprova etapa de Cadastro', () => compras.rpc('advance_workflow', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
+  await denied('Compras não rejeita etapa de Cadastro', () => compras.rpc('reject_request', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
+  await denied('Compras não altera campos da etapa de Cadastro', () => compras.from('material_requests').update({ generated_description: 'HACK' }).eq('id', reqA.id).select('id'),
+    async () => (await admin.from('material_requests').select('generated_description').eq('id', reqA.id).single()).data?.generated_description !== 'HACK')
+  await denied('área não arrasta entre etapas (só Admin)', () => atend.rpc('move_request_stage', { p_request_id: reqA.id, p_status_key: 'x' }), () => reqStatus(reqA.id, 'cadastro'))
 
   console.log('\nUsuário inativado')
   await must(admin.from('users').update({ is_active: false }).eq('id', requester.id), 'inativar')

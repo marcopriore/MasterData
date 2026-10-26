@@ -77,7 +77,7 @@ O script lê `.env.production.local`, valida formato das variáveis, confere se 
 No painel do projeto:
 
 1. **Região.** Project Settings → General. Anote a região (ex.: South America (São Paulo) = `sa-east-1`). Ela define a região da Vercel na etapa 4.
-2. **Migrations.** Todas de `001` a `033` precisam estar aplicadas. O `prd:check` confere as principais. Depois de aplicar, rode `npm run security:probe` (dentro de `web`): ele tenta os ataques conhecidos com usuários temporários e precisa terminar sem falha. As `024` a `032` podem rodar de novo sem efeito colateral (índices, gatilho, funções, reescrita das policies e normalização de texto, que não muda o que já está no padrão); se não tiver certeza, rode o conteúdo delas no SQL Editor.
+2. **Migrations.** Todas de `001` a `034` precisam estar aplicadas. O `prd:check` confere as principais. Depois de aplicar, rode `npm run security:probe` (dentro de `web`): ele tenta os ataques conhecidos com usuários temporários e precisa terminar sem falha. As `024` a `034` podem rodar de novo sem efeito colateral (índices, gatilho, funções, reescrita das policies e normalização de texto, que não muda o que já está no padrão); se não tiver certeza, rode o conteúdo delas no SQL Editor.
    - **Chaves de assinatura do JWT:** em Project Settings → JWT Keys, migre para as chaves assimétricas (ECC/RSA) se o projeto ainda usa o segredo HS256 legado. Com elas, o `proxy` valida a sessão no próprio servidor em vez de consultar o Auth a cada página e chamada de API.
 3. **Endereços de autenticação.** Authentication → URL Configuration:
    - Site URL: `https://APP`
@@ -236,7 +236,7 @@ Teste manual, com o master e com um usuário comum:
 ## Próximo degrau recomendado: banco de desenvolvimento
 
 1. Crie um projeto Supabase novo (ex.: `pro-mat-dev`) na mesma região.
-2. Aplique as migrations em ordem, de `001` a `033`, no SQL Editor; depois `supabase/seed.sql`.
+2. Aplique as migrations em ordem, de `001` a `034`, no SQL Editor; depois `supabase/seed.sql`.
 3. Aponte o `web/.env.local` para ele e rode `npm run create-demo-users` e `supabase/seed_demo.sql` lá.
 4. Na Vercel, cadastre as variáveis desse banco com escopo **Preview** e volte o Ignored Build Step para o automático; cada pull request ganha um endereço de teste próprio.
 5. Em produção, remova `http://localhost:3000/**` dos Redirect URLs.
