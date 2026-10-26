@@ -2,6 +2,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
+import { toErpDeep } from '@/lib/erp-text'
 
 const HEADERS = [
   'operacao', 'codigo_material', 'descricao', 'pdm_code', 'status',
@@ -169,7 +170,7 @@ export async function POST(request: Request) {
 
   for (const r of rows) {
     if (r.status === 'error') continue
-    const d = r.data as Record<string, unknown>
+    const d = toErpDeep(r.data as Record<string, unknown>)
     if (r.operacao === 'C') {
       const { error } = await supabaseAdmin.from('material_database').insert({
         tenant_id: effectiveTenantId,

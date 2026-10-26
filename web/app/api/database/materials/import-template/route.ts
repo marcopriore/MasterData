@@ -11,7 +11,7 @@ const TEMPLATE_HEADERS = [
 ]
 
 const EXAMPLE_ROW = [
-  'C', '', 'ROLAMENTO ESFERAS 6205 25MM', 'PDM-ROL-001', 'Ativo',
+  'C', '', 'ROLAMENTO ESFERAS 6205 25MM', 'ROLA001', 'Ativo',
   'UN', 'Rolamento', '', '', 0.25, 0.23, 'KG', '', '', 14, 10, 100, 45.9, '', 'BRL',
   '8482.10.10', '6102', '0 - Nacional',
 ]

@@ -1,4 +1,5 @@
 /** JSON enviado ao ERP (formato erp_json_v1) e leitura da resposta. Sem dependência de servidor. */
+import { toErpDeep } from '@/lib/erp-text'
 
 type Json = Record<string, unknown>
 
@@ -67,7 +68,8 @@ export function buildErpPayload(material: Json, fields: DictionaryField[] = []):
     }
   }
 
-  return compact({
+  // Trava final: mesmo dado antigo com acento no banco sai no padrão do ERP.
+  return toErpDeep(compact({
     productId: material.id_erp ?? undefined,
     contentID: material.id_sistema,
     ...header,
@@ -77,7 +79,7 @@ export function buildErpPayload(material: Json, fields: DictionaryField[] = []):
     characteristics,
     site: Object.keys(site).length ? site : undefined,
     sales: list(material.sales),
-  })
+  }))
 }
 
 /** Corpo da eliminação: só os códigos. */

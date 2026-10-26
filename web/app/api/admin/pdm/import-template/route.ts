@@ -3,11 +3,11 @@ import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
 const PDM_HEADERS = ['operacao', 'pdm_code', 'nome', 'descricao', 'ativo']
-const PDM_EXAMPLE = ['C', 'PDM-EX-001', 'Exemplo PDM', 'Descrição do PDM', 'Sim']
+const PDM_EXAMPLE = ['C', 'EXEM001', 'Exemplo PDM', 'Descricao do PDM', 'Sim']
 
 const ATTR_HEADERS = ['operacao', 'pdm_code', 'atributo_key', 'label', 'tipo', 'obrigatorio', 'ordem', 'opcoes']
-const ATTR_EXAMPLE_1 = ['C', 'PDM-EX-001', 'diametro', 'Diâmetro', 'text', 'Sim', 1, '']
-const ATTR_EXAMPLE_2 = ['C', 'PDM-EX-001', 'material_base', 'Material Base', 'select', 'Não', 2, 'Aço;Alumínio;Inox']
+const ATTR_EXAMPLE_1 = ['C', 'EXEM001', 'diametro', 'Diametro', 'text', 'Sim', 1, '']
+const ATTR_EXAMPLE_2 = ['C', 'EXEM001', 'material_base', 'Material Base', 'select', 'Não', 2, 'Aco;Aluminio;Inox']
 
 export async function GET() {
   const supabase = await createServerSupabaseClient()

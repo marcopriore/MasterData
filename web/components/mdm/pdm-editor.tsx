@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { createPdm, getPdmById, getPdmMaterialsCount, logAction, updatePdm } from "@/lib/supabase-api"
+import { createPdm, getPdmById, getPdmMaterialsCount, getPdms, logAction, updatePdm } from "@/lib/supabase-api"
+import { toErpDeep, toErpPdmAttributes, toErpText } from "@/lib/erp-text"
+import { normalizePdmCode, PDM_CODE_MAX, pdmCodeProblem, pdmNameKey, suggestPdmCode } from "@/lib/pdm-code"
 
 type RawAttribute = {
   id?: string
@@ -93,7 +95,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
       .then(async (full) => {
         if (cancelled) return
         setPdmName(full.name)
-        setPdmCode((full.internal_code ?? "").slice(0, 7))
+        setPdmCode(full.internal_code ?? "")
         setPdmActive(full.is_active ?? true)
         setAttributes(toAttributes(full.attributes ?? []))
         const count = await getPdmMaterialsCount(full.internal_code ?? "")
@@ -110,23 +112,46 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   }, [])
 
   const handleUpdateValues = useCallback((attrId: string, values: { value: string; abbreviation: string }[]) => {
-    setAttributes((prev) => prev.map((a) => (a.id === attrId ? { ...a, allowedValues: values } : a)))
+    const clean = toErpDeep(values)
+    setAttributes((prev) => prev.map((a) => (a.id === attrId ? { ...a, allowedValues: clean } : a)))
   }, [])
 
+  const handleAttributesChange = useCallback((next: Attribute[]) => {
+    setAttributes(toErpPdmAttributes(next))
+  }, [])
+
+  /** Código e nome únicos no tenant; código vazio recebe a sugestão no padrão (PARA001). */
+  const resolveCodeAndName = async (name: string, code: string, selfId: number | null) => {
+    const others = (await getPdms()).filter((p) => p.id !== selfId)
+    const finalCode = code || suggestPdmCode(name, others.map((p) => p.internal_code))
+    const problem = pdmCodeProblem(finalCode)
+    if (problem) throw new Error(problem)
+    if (others.some((p) => p.internal_code === finalCode)) throw new Error(`Já existe um PDM com o código ${finalCode}.`)
+    const clash = others.find((p) => pdmNameKey(p.name) === pdmNameKey(name))
+    if (clash) throw new Error(`Já existe um PDM com o nome "${clash.name}" (${clash.internal_code}).`)
+    return finalCode
+  }
+
   const handleSave = async () => {
-    const payload = {
-      name: pdmName,
-      internal_code: pdmCode.slice(0, 7),
-      is_active: pdmActive,
-      attributes: attributesPayload(attributes),
+    if (!pdmName.trim()) {
+      toast.error("Nome obrigatório", { description: "Informe o nome do PDM." })
+      return
     }
     try {
+      const finalCode = await resolveCodeAndName(pdmName, pdmCode, pdmId)
+      if (finalCode !== pdmCode) setPdmCode(finalCode)
+      const payload = {
+        name: pdmName.trim(),
+        internal_code: finalCode,
+        is_active: pdmActive,
+        attributes: attributesPayload(attributes),
+      }
       const saved = pdmId != null ? await updatePdm(pdmId, payload) : await createPdm(payload)
       void logAction({
         category: "pdm",
         action: isNew ? "pdm_created" : "pdm_updated",
         description: `PDM "${pdmName}" ${isNew ? "criado" : "atualizado"}`,
-        event_data: isNew ? { internal_code: pdmCode } : { id: pdmId, internal_code: pdmCode },
+        event_data: isNew ? { internal_code: finalCode } : { id: pdmId, internal_code: finalCode },
       })
       toast.success("Estrutura salva com sucesso!", { description: `PDM "${pdmName}" foi salvo.` })
       setIsEditMode(false)
@@ -137,7 +162,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   }
 
   const handleOpenCloneModal = () => {
-    setCloneName(`Cópia de ${pdmName}`)
+    setCloneName(toErpText(`COPIA DE ${pdmName}`))
     setCloneCode("")
     setCloneModalOpen(true)
   }
@@ -147,19 +172,12 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
       toast.error("Nome obrigatório", { description: "Informe o nome do PDM." })
       return
     }
-    if (!cloneCode.trim()) {
-      toast.error("Código obrigatório", { description: "Informe o código interno (máx. 7 caracteres)." })
-      return
-    }
-    if (cloneCode.length > 7) {
-      toast.error("Código inválido", { description: "O código interno deve ter no máximo 7 caracteres." })
-      return
-    }
     setCloneLoading(true)
     try {
+      const finalCode = await resolveCodeAndName(cloneName, cloneCode, null)
       const saved: PDMTemplate = await createPdm({
         name: cloneName.trim(),
-        internal_code: cloneCode.trim().slice(0, 7),
+        internal_code: finalCode,
         is_active: true,
         attributes: attributesPayload(attributes).map((a, i) => ({ ...a, id: `attr-${Date.now()}-${i}` })),
       }) as PDMTemplate
@@ -167,7 +185,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
         category: "pdm",
         action: "pdm_cloned",
         description: `PDM "${cloneName.trim()}" clonado`,
-        event_data: { source_name: pdmName, internal_code: cloneCode.trim().slice(0, 7) },
+        event_data: { source_name: pdmName, internal_code: finalCode },
       })
       toast.success("PDM clonado!", { description: `"${saved.name}" foi criado com sucesso.` })
       setCloneModalOpen(false)
@@ -228,7 +246,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
           name={pdmName}
           code={pdmCode}
           isActive={pdmActive}
-          onNameChange={setPdmName}
+          onNameChange={(value) => setPdmName(toErpText(value))}
           onCodeChange={setPdmCode}
           onActiveChange={setPdmActive}
           selectedPdmId={pdmId}
@@ -242,7 +260,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col py-5">
         <AttributesTable
           attributes={attributes}
-          onAttributesChange={setAttributes}
+          onAttributesChange={handleAttributesChange}
           onOpenValueDictionary={handleOpenValueDictionary}
           selectedPdmId={pdmId}
           isOpen={isAttributesOpen}
@@ -276,7 +294,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
               <Input
                 id="clone-name"
                 value={cloneName}
-                onChange={(e) => setCloneName(e.target.value.toUpperCase())}
+                onChange={(e) => setCloneName(toErpText(e.target.value.toUpperCase()))}
                 placeholder="Ex: Bearing Ball Radial"
                 className="min-h-[40px] border-slate-200 bg-white text-sm uppercase text-slate-900 placeholder:text-slate-400 focus-visible:ring-[#0F1C38] focus-visible:ring-offset-0 dark:border-slate-300 dark:bg-white"
               />
@@ -287,12 +305,12 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
                 id="clone-code"
                 type="text"
                 value={cloneCode}
-                onChange={(e) => setCloneCode(e.target.value.toUpperCase().slice(0, 7))}
-                placeholder="Ex: MEC001"
-                maxLength={7}
+                onChange={(e) => setCloneCode(normalizePdmCode(e.target.value))}
+                placeholder="Vazio: sugestão automática (ex.: PARA002)"
+                maxLength={PDM_CODE_MAX}
                 className="font-mono min-h-[40px] border-slate-200 bg-white text-sm uppercase text-slate-900 placeholder:text-slate-400 focus-visible:ring-[#0F1C38] focus-visible:ring-offset-0 dark:border-slate-300 dark:bg-white"
               />
-              <p className="text-[11px] text-slate-500">Máximo 7 caracteres</p>
+              <p className="text-[11px] text-slate-500">Até {PDM_CODE_MAX} caracteres</p>
             </div>
           </div>
           <DialogFooter className="gap-2 pt-2">

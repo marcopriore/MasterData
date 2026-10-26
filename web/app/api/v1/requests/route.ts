@@ -3,6 +3,7 @@ import { dispatchRequestNotice } from '@/lib/dispatch-request-notice'
 import { parseRequestInput } from '@/lib/material-api/payload'
 import { requestCode } from '@/lib/request-notices'
 import { apiError, findPdm, handleApiCall, readJson } from '@/lib/material-api/server'
+import { toErpDeep, toErpText } from '@/lib/erp-text'
 
 export const runtime = 'nodejs'
 
@@ -49,8 +50,8 @@ export async function POST(request: Request) {
         cost_center: input.costCenter,
         urgency: input.urgency,
         justification: input.justification,
-        generated_description: input.description,
-        technical_attributes: Object.keys(input.attributes).length ? input.attributes : null,
+        generated_description: input.description != null ? toErpText(input.description) : input.description,
+        technical_attributes: Object.keys(input.attributes).length ? toErpDeep(input.attributes) : null,
         user_id: null,
         origin: 'externo',
         api_client_id: client.id,

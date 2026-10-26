@@ -61,6 +61,15 @@ describe('JSON do ERP', () => {
     ])
   })
 
+  it('nenhum texto sai com acento ou caractere especial, mesmo vindo assim do banco', () => {
+    const accented = buildErpPayload(
+      { ...material, description: 'MOTOR ELÉTRICO ½CV', technical_attributes: { icms: 'ISENÇÃO' } },
+      fields
+    )
+    expect(accented.descriptions).toEqual({ language: 'pt', name: 'MOTOR ELETRICO 1/2CV' })
+    expect(accented.formatTaxICMS).toBe('ISENCAO')
+  })
+
   it('alteração e eliminação levam o código do ERP', () => {
     expect(buildErpPayload({ ...material, id_erp: '91' }).productId).toBe('91')
     expect(buildErpDeletePayload({ ...material, id_erp: '91' })).toEqual({ productId: '91', contentID: 'MDM-000123' })

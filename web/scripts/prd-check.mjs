@@ -160,6 +160,7 @@ async function checkSupabase(env) {
     ['027', 'material_duplicate_candidates', { p_ids: [] }],
     ['028', 'resubmit_request', { p_request_id: -1, p_pdm_id: -1, p_technical_attributes: {}, p_generated_description: '' }],
     ['029', 'report_material_base', {}],
+    ['030', 'erp_text', { p: 'teste' }],
   ]
   for (const [migration, fn, params] of rpcs) {
     const { error: rpcErr } = await admin.rpc(fn, params)
@@ -169,6 +170,14 @@ async function checkSupabase(env) {
     } else {
       ok(`migration ${migration}: ${fn}`)
     }
+  }
+
+  const { data: pdmCodes, error: pdmCodesErr } = await admin.from('pdm_templates').select('internal_code')
+  if (pdmCodesErr) fail(`não leu pdm_templates: ${pdmCodesErr.message}`)
+  else {
+    const bad = (pdmCodes ?? []).filter((p) => !/^[A-Z0-9_-]{1,10}$/.test(p.internal_code ?? ''))
+    if (bad.length) fail(`${bad.length} PDM(s) com código fora do padrão (máx. 10) — rode supabase/migrations/030_erp_text_and_pdm_code.sql`)
+    else ok('códigos de PDM no padrão (até 10 caracteres)')
   }
 
   const { data: bucket, error: bucketErr } = await admin.storage.getBucket('request-attachments')

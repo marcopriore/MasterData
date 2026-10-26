@@ -7,6 +7,7 @@ import { Eye, FileText, Package, Hash } from "lucide-react"
 import type { PDMTemplate, Attribute } from "@/app/requests/new/page"
 import type { AttrValue } from "@/components/request/phase-specs"
 import { formatAttrValue } from "@/lib/format-attr-value"
+import { toErpText } from "@/lib/erp-text"
 import { cn } from "@/lib/utils"
 
 interface RequestSummaryProps {
@@ -38,7 +39,8 @@ export function RequestSummary({
   // Build description preview using abbreviations from LOV or raw value
   const generatePreview = () => {
     if (!pdm) return "Selecione um PDM..."
-    const parts: string[] = [pdm.name.toUpperCase()]
+    // Colchetes marcam atributo ainda vazio; só aparecem na prévia, não vão para a descrição gravada.
+    const parts: string[] = [toErpText(pdm.name.toUpperCase())]
     attributes
       .filter((a) => a.includeInDescription)
       .forEach((attr) => {
@@ -49,12 +51,12 @@ export function RequestSummary({
         }
         if (typeof val === "object" && val !== null && "value" in val) {
           const v = val as { value: string; unit?: string }
-          parts.push(`${v.value || ""}${v.unit || ""}`.toUpperCase().trim())
+          parts.push(toErpText(`${v.value || ""}${v.unit || ""}`.toUpperCase().trim()))
           return
         }
         const strVal = String(val)
         const lov = attr.allowedValues?.find((av) => av.value === strVal)
-        parts.push((lov?.abbreviation || strVal).toUpperCase())
+        parts.push(toErpText((lov?.abbreviation || strVal).toUpperCase()))
       })
     return parts.join(" ")
   }

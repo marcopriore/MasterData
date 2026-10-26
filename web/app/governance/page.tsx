@@ -42,6 +42,7 @@ import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import { AlertTriangle, ChevronLeft, Check, X, Save, Loader2, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react'
 import { isRejectedStatus } from '@/lib/my-requests'
+import { toErpText } from '@/lib/erp-text'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
 import { formatAttrValue } from '@/lib/format-attr-value'
@@ -496,10 +497,7 @@ export default function GovernancePage() {
       const attr = pdmAttrs[attrId]
       if (!attr?.includeInDescription) continue
       const raw = attributeValues[attrId]
-      if (!raw) {
-        parts.push(`[${attr.abbreviation ?? attrId}]`)
-        continue
-      }
+      if (!raw) continue
       if (typeof raw === 'object' && raw !== null && 'value' in raw) {
         const v = raw as { value?: string; unit?: string }
         parts.push(`${v.value ?? ''}${v.unit ?? ''}`.toUpperCase().trim())
@@ -510,7 +508,7 @@ export default function GovernancePage() {
       const abbr = lov?.abbreviation ?? strVal
       parts.push(abbr.toUpperCase())
     }
-    return parts.join(' ')
+    return toErpText(parts.join(' '))
   }, [selectedRequest?.pdm_name, selectedRequest?.pdm_attributes, selectedRequest?.generated_description, attributeValues])
 
   useEffect(() => {
@@ -637,7 +635,8 @@ export default function GovernancePage() {
     })
   }
 
-  function handleFieldChange(fieldName: string, rawValue: string, fieldType?: string) {
+  function handleFieldChange(fieldName: string, typedValue: string, fieldType?: string) {
+    const rawValue = toErpText(typedValue)
     let finalValue: string | { value: string; unit: string } = rawValue
     if (fieldType !== 'select' && fieldType !== 'date') {
       const maskFn = FIELD_MASKS[fieldName.toLowerCase()]
@@ -648,7 +647,7 @@ export default function GovernancePage() {
   }
 
   function handleNumericUnitChange(fieldName: string, value: string, unit: string) {
-    setAttributeValues((prev) => ({ ...prev, [fieldName]: { value, unit } }))
+    setAttributeValues((prev) => ({ ...prev, [fieldName]: { value: toErpText(value), unit } }))
     clearInvalidField(fieldName)
   }
 

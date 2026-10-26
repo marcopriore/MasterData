@@ -2,6 +2,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
+import { toErpPdmAttributes, toErpText } from '@/lib/erp-text'
+import { normalizePdmCode, PDM_CODE_MAX, pdmNameKey, suggestPdmCode } from '@/lib/pdm-code'
 
 const VALID_PDM_OPS = ['C', 'E']
 const VALID_ATTR_OPS = ['C', 'E', 'D']
@@ -66,10 +68,12 @@ type AttrRowResult = {
 
 function parsePdmSheet(
   ws: XLSX.WorkSheet,
-  pdmCodesInDb: Set<string>
+  pdmCodesInDb: Set<string>,
+  nameByCodeInDb: Map<string, string>
 ): { rows: PdmRowResult[]; codesCreated: Set<string>; _error?: string } {
   const data = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 })
   const codesCreated = new Set<string>()
+  const namesTaken = new Map<string, string>([...nameByCodeInDb].map(([code, name]) => [pdmNameKey(name), code]))
   const rows: PdmRowResult[] = []
   if (!data.length) return { rows, codesCreated }
   const headers = (data[0] ?? []).map((h) => String(h ?? '').trim().toLowerCase())
@@ -95,13 +99,29 @@ function parsePdmSheet(
     const row = (data[r] ?? []) as string[]
     if (row.every((c) => !String(c ?? '').trim())) continue
     const op = get(row, 'operacao').toUpperCase().slice(0, 1)
-    const pdmCode = get(row, 'pdm_code')
-    const nome = get(row, 'nome')
+    const rawCode = get(row, 'pdm_code')
+    let pdmCode = normalizePdmCode(rawCode)
+    const nome = toErpText(get(row, 'nome'))
     const ativoRaw = get(row, 'ativo')
     const errors: string[] = []
     const warnings: string[] = []
     if (!VALID_PDM_OPS.includes(op)) {
       errors.push("operacao deve ser 'C' (Criar) ou 'E' (Editar)")
+    }
+    if (rawCode.length > PDM_CODE_MAX) errors.push(`pdm_code '${rawCode}' passa de ${PDM_CODE_MAX} caracteres`)
+    else if (rawCode && pdmCode !== rawCode) warnings.push(`pdm_code será gravado como '${pdmCode}'`)
+    if (op === 'C') {
+      if (!pdmCode && nome) {
+        pdmCode = suggestPdmCode(nome, [...pdmCodesInDb, ...codesCreated])
+        warnings.push(`pdm_code vazio: será usado '${pdmCode}'`)
+      } else if (pdmCode && (pdmCodesInDb.has(pdmCode) || codesCreated.has(pdmCode))) {
+        errors.push(`pdm_code '${pdmCode}' já existe; use operacao=E para editar`)
+      }
+    }
+    if (nome) {
+      const owner = namesTaken.get(pdmNameKey(nome))
+      if (owner && owner !== pdmCode) errors.push(`já existe PDM com o nome '${nome}' (${owner})`)
+      else if (!errors.length) namesTaken.set(pdmNameKey(nome), pdmCode)
     }
     if (op === 'E' && !pdmCode) errors.push('pdm_code é obrigatório para operacao E (Editar)')
     if (op === 'E' && pdmCode && !pdmCodesInDb.has(pdmCode)) {
@@ -157,7 +177,7 @@ function parseAttrSheet(
     const row = (data[r] ?? []) as string[]
     if (row.every((c) => !String(c ?? '').trim())) continue
     const op = get(row, 'operacao').toUpperCase().slice(0, 1)
-    const pdmCode = get(row, 'pdm_code')
+    const pdmCode = normalizePdmCode(get(row, 'pdm_code'))
     const atributoKey = get(row, 'atributo_key')
     const tipoRaw = get(row, 'tipo').toLowerCase()
     const obrigRaw = get(row, 'obrigatorio')
@@ -255,9 +275,10 @@ export async function POST(request: Request) {
 
   const { data: existingPdms } = await supabaseAdmin
     .from('pdm_templates')
-    .select('id, internal_code, attributes')
+    .select('id, internal_code, name, attributes')
     .eq('tenant_id', effectiveTenantId)
   const pdmCodesInDb = new Set((existingPdms ?? []).map((p) => (p.internal_code as string) ?? '').filter(Boolean))
+  const nameByCodeInDb = new Map((existingPdms ?? []).map((p) => [String(p.internal_code ?? ''), String(p.name ?? '')]))
 
   const existingAttrKeys = new Set<string>()
   for (const p of existingPdms ?? []) {
@@ -269,7 +290,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const pdmResult = parsePdmSheet(wsPdm, pdmCodesInDb)
+  const pdmResult = parsePdmSheet(wsPdm, pdmCodesInDb, nameByCodeInDb)
   if ('_error' in pdmResult) {
     return NextResponse.json({ _error: (pdmResult as { _error: string })._error }, { status: 400 })
   }
@@ -336,7 +357,7 @@ export async function POST(request: Request) {
     const d = row.data
     const op = row.operacao
     const pdmCode = String(d.pdm_code ?? '').trim()
-    const nome = String(d.nome ?? pdmCode).trim()
+    const nome = toErpText(String(d.nome ?? pdmCode).trim())
     const ativoStr = String(d.ativo ?? 'Sim').trim().toLowerCase()
     const isActive = ['sim', 's', '1', 'true', 'yes'].includes(ativoStr)
 
@@ -453,7 +474,7 @@ export async function POST(request: Request) {
       attrsByKey[key] = attrs.length - 1
     }
 
-    await supabaseAdmin.from('pdm_templates').update({ attributes: attrs }).eq('id', pdm.id)
+    await supabaseAdmin.from('pdm_templates').update({ attributes: toErpPdmAttributes(attrs) }).eq('id', pdm.id)
   }
 
   return NextResponse.json({

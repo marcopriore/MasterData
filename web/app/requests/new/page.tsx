@@ -15,6 +15,7 @@ import {
   resubmitRequest,
 } from '@/lib/supabase-api'
 import { isRejectedStatus } from '@/lib/my-requests'
+import { toErpDeep, toErpText } from '@/lib/erp-text'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Stepper, type StepItem } from '@/components/request/stepper'
@@ -220,7 +221,8 @@ function NewMaterialRequestForm() {
 
   const measurementUnits = useMeasurementUnits()
 
-  const handleAttrChange = useCallback((attrId: string, value: string | { value: string; unit: string }) => {
+  const handleAttrChange = useCallback((attrId: string, rawValue: string | { value: string; unit: string }) => {
+    const value = toErpDeep(rawValue)
     setFormData((prev) => ({ ...prev, [attrId]: value }))
     const filled = typeof value === "string" ? value.trim() : (value?.value ?? "").trim()
     if (filled) {
@@ -292,16 +294,16 @@ function NewMaterialRequestForm() {
               .filter((a) => a.includeInDescription)
               .map((a) => {
                 const val = formData[a.id]
-                if (!val) return `[${a.abbreviation}]`
+                if (!val) return ''
                 if (typeof val === "object" && val !== null && "value" in val) {
                   const v = val as { value: string; unit?: string }
-                  return `${v.value || ""}${v.unit || ""}`.toUpperCase().trim() || `[${a.abbreviation}]`
+                  return `${v.value || ""}${v.unit || ""}`.toUpperCase().trim()
                 }
                 const strVal = String(val)
                 const lov = a.allowedValues?.find((av) => av.value === strVal)
                 return (lov?.abbreviation || strVal).toUpperCase()
               }),
-          ].join(" ")
+          ].filter(Boolean).join(" ")
         : ""
 
       const payload = {
@@ -655,21 +657,22 @@ function getAttrDisplayValue(val: unknown): string {
 
 function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costCenter, urgency, justificativa, files, descriptionNote }: ReviewPhaseProps) {
   // Build description preview
+  // Revisão final: mostra exatamente a descrição que será gravada (sem acento, sem atributo vazio)
   const preview = pdm
-    ? [pdm.name.toUpperCase(), ...attributes.filter(a => a.includeInDescription).map(a => {
+    ? toErpText([pdm.name.toUpperCase(), ...attributes.filter(a => a.includeInDescription).map(a => {
         const raw = formData[a.id]
-        if (!raw) return `[${a.abbreviation}]`
+        if (!raw) return ''
 
         if (typeof raw === "object" && raw !== null && "value" in raw) {
           const numeric = raw as { value: string; unit: string }
-          if (!numeric.value) return `[${a.abbreviation}]`
+          if (!numeric.value) return ''
           return `${numeric.value}${numeric.unit || ""}`.toUpperCase()
         }
 
         const val = raw as string
         const lov = a.allowedValues?.find((av: { value: string; abbreviation?: string }) => av.value === val)
-        return val ? (lov?.abbreviation || val).toUpperCase() : `[${a.abbreviation}]`
-      })].join(' ')
+        return val ? (lov?.abbreviation || val).toUpperCase() : ''
+      })].filter(Boolean).join(' '))
     : '—'
 
   return (

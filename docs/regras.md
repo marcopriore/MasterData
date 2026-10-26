@@ -71,6 +71,21 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 - Tudo em maiúsculas, separado por espaço, começando pelo nome do PDM.
 - O limite padrão é 40, em `tenants.max_description_length` e também em `users.max_description_length`. A descrição detalhada fica em coluna própria.
 - Antes de criar, `checkDuplicateRequest` compara os atributos que entram na descrição com materiais do mesmo `pdm_code` e com solicitações abertas do mesmo PDM.
+- Atributo sem valor fica fora da descrição gravada. O marcador `[ABREV]` só aparece na prévia do resumo.
+
+## Texto aceito pelo ERP
+
+- Todo texto que vai para o material sai sem acento, sem `ç` e sem caractere especial. A regra está em `lib/erp-text.ts` (`toErpText`) e espelhada no banco (`erp_text`, migration 030).
+- Troca: letra acentuada vira a letra simples, `ç` vira `c`, `º`/`ª` viram O/A, `°` some, `½` vira `1/2`, aspas e travessões tipográficos viram `"`, `'` e `-`. O resto fora da lista (letras, números, espaço, quebra de linha e `. , - / ( ) % + * # " ' : ; = & _ @`) é removido.
+- Normaliza na digitação: nome do PDM, atributos e valores permitidos, campos da solicitação, governança e edição do material. Também ao salvar (API do cliente) e nas rotas de servidor: importação de materiais e PDMs, API v1.
+- Trava final: `buildErpPayload` normaliza tudo antes de enviar ao ERP, então nada com acento chega lá mesmo que algum caminho escape.
+
+## Código e nome do PDM
+
+- Código interno: até 10 caracteres, letras maiúsculas, números, `-` e `_` (`ck_pdm_internal_code_format`). Padrão: 4 letras do nome (sem DE, DA, PARA etc.) + 3 dígitos, ex.: `PARA001` (`lib/pdm-code.ts`). Código vazio recebe a sugestão ao salvar, clonar ou importar.
+- Código e nome não se repetem no tenant (nome sem diferença de maiúsculas e espaços, `uq_pdm_templates_tenant_name`).
+- Trocar código ou nome do PDM atualiza `pdm_code` e `pdm_name` dos materiais ligados.
+- A migration 030 recodificou os PDMs fora do padrão (materiais acompanham) e renomeou o nome repetido mais recente para "Nome 2".
 
 ## Duplicidade e trava do ERP
 

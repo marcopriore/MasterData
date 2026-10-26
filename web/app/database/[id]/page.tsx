@@ -24,6 +24,7 @@ import { ChevronLeft, Loader2 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useTheme } from 'next-themes'
 import { maskNCM, maskCFOP } from '@/lib/masks'
+import { toErpText } from '@/lib/erp-text'
 import { DescriptionLengthIndicator } from '@/components/ui/description-length-indicator'
 
 type MaterialDetail = {
@@ -302,10 +303,7 @@ export default function DatabaseDetailPage() {
       sorted.forEach((attr) => {
         if (!attr.includeInDescription) return
         const val = attrs[attr.id]
-        if (!val) {
-          parts.push(`[${attr.abbreviation || attr.id}]`)
-          return
-        }
+        if (!val) return
         if (typeof val === 'object' && val !== null && 'value' in val) {
           const v = val as { value: string; unit?: string }
           parts.push(`${v.value || ''}${v.unit || ''}`.toUpperCase().trim())
@@ -319,7 +317,7 @@ export default function DatabaseDetailPage() {
         const abbr = typeof lov === 'object' && lov !== null && 'abbreviation' in lov ? (lov as { abbreviation?: string }).abbreviation : null
         parts.push((abbr || strVal).toUpperCase())
       })
-      return parts.join(' ')
+      return toErpText(parts.join(' '))
     },
     []
   )
@@ -492,7 +490,8 @@ export default function DatabaseDetailPage() {
     }
   }, [material?.pdm_code, fetchPdmTemplate])
 
-  const handleUpdate = (key: string, value: string | number | null) => {
+  const handleUpdate = (key: string, rawValue: string | number | null) => {
+    const value = typeof rawValue === 'string' ? toErpText(rawValue) : rawValue
     setFormData((prev) => ({ ...prev, [key]: value }))
     setIsDirty(true)
   }
@@ -969,7 +968,7 @@ export default function DatabaseDetailPage() {
                           unit={numericUnit}
                           units={measurementUnits}
                           onChange={(val, unit) => {
-                            const newVals = { ...attrValues, [attr.id]: { value: val, unit } }
+                            const newVals = { ...attrValues, [attr.id]: { value: toErpText(val), unit } }
                             setAttrValues(newVals)
                             setGeneratedDesc(generateDescription(material.pdm_name || '', newVals, pdmTemplate))
                           }}
@@ -1000,7 +999,7 @@ export default function DatabaseDetailPage() {
                         value={typeof rawVal === 'string' ? rawVal : numericVal}
                         placeholder={`Informe ${label.toLowerCase()}...`}
                         onChange={(e) => {
-                          const newVals = { ...attrValues, [attr.id]: e.target.value.toUpperCase() }
+                          const newVals = { ...attrValues, [attr.id]: toErpText(e.target.value.toUpperCase()) }
                           setAttrValues(newVals)
                           setGeneratedDesc(
                             generateDescription(material.pdm_name || '', newVals, pdmTemplate)

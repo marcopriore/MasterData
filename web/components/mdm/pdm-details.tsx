@@ -7,6 +7,8 @@ import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FileText, ChevronDown, ChevronUp } from "lucide-react"
 import type { Attribute } from "./attributes-table"
+import { toErpText } from "@/lib/erp-text"
+import { normalizePdmCode, PDM_CODE_MAX } from "@/lib/pdm-code"
 
 interface PdmDetailsProps {
   name: string
@@ -83,7 +85,7 @@ export function PdmDetails({
             <Input
               id="pdm-name"
               value={name}
-              onChange={(e) => onNameChange(e.target.value.toUpperCase())}
+              onChange={(e) => onNameChange(toErpText(e.target.value.toUpperCase()))}
               placeholder="Ex: Bearing Ball Radial"
               disabled={readOnly}
               className={cn("bg-background uppercase", readOnly && "cursor-not-allowed bg-slate-100 dark:bg-slate-800/50")}
@@ -97,14 +99,14 @@ export function PdmDetails({
               id="pdm-code"
               type="text"
               value={code}
-              onChange={(e) => onCodeChange(e.target.value.toUpperCase().slice(0, 7))}
-              placeholder="Ex: MEC001"
-              maxLength={7}
+              onChange={(e) => onCodeChange(normalizePdmCode(e.target.value))}
+              placeholder="Ex: PARA001"
+              maxLength={PDM_CODE_MAX}
               disabled={readOnly}
               className={cn("font-mono bg-background uppercase", readOnly && "cursor-not-allowed bg-slate-100 dark:bg-slate-800/50")}
             />
             <p className="text-xs text-muted-foreground">
-              Máximo 7 caracteres
+              Até {PDM_CODE_MAX} caracteres (letras, números, - e _). Vazio: o sistema sugere ao salvar.
             </p>
           </div>
           <div className="flex flex-col justify-end gap-2 pb-1">

@@ -142,3 +142,4 @@ npm run test:e2e
 | 027 | Desempenho: RLS com `(SELECT …)` (função calculada uma vez por consulta, não por linha), índices de lista/filtro/busca, `pdm_material_counts` e `material_duplicate_candidates` |
 | 028 | `resubmit_request`: rejeitada corrigida volta para a primeira etapa (quem abriu, Admin ou Master) |
 | 029 | Relatórios: `report_request_flow`, `report_productivity`, `report_material_base` e permissão `can_view_reports` (ADMIN e MASTER, também em papel novo) |
+| 030 | Texto do ERP: funções `erp_text`, `erp_jsonb`, `erp_description` e normalização dos PDMs, materiais, solicitações e dicionário. PDM: recodificação no padrão `PARA001`, nome repetido vira "Nome 2", trava de código (até 10) e nome único por tenant |

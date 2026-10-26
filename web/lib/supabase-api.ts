@@ -14,6 +14,7 @@ import {
   type DuplicateCandidate,
 } from '@/lib/material-duplicates'
 import type { RequestErpInfo } from '@/lib/request-erp-state'
+import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
 import { isRejectedStatus, type MyRequestRow } from '@/lib/my-requests'
 import {
   toNullableNumber,
@@ -240,8 +241,10 @@ const PDM_LIST_COLS = 'id, name, internal_code, is_active'
 
 export async function getPdms(): Promise<PDMTemplate[]> {
   const supabase = createClient()
+  // Master enxerga todos os tenants pela RLS; a lista é sempre do tenant em uso.
+  const tenantId = await getCurrentUserTenantId()
   const [pdmsRes, countsRes] = await Promise.all([
-    supabase.from('pdm_templates').select(PDM_LIST_COLS).order('name'),
+    supabase.from('pdm_templates').select(PDM_LIST_COLS).eq('tenant_id', tenantId).order('name'),
     supabase.rpc('pdm_material_counts'),
   ])
   const { data: pdms, error } = pdmsRes
@@ -265,9 +268,11 @@ export async function getPdms(): Promise<PDMTemplate[]> {
 export async function getPdmMaterialsCount(internalCode: string): Promise<number> {
   if (!internalCode) return 0
   const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
   const { count, error } = await supabase
     .from('material_database')
     .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
     .eq('pdm_code', internalCode)
   if (error) return 0
   return count ?? 0
@@ -288,15 +293,49 @@ export async function createPdm(payload: {
 }): Promise<PDMTemplate> {
   const supabase = createClient()
   const tenantId = await getCurrentUserTenantId()
-  const { data, error } = await supabase.from('pdm_templates').insert({ ...payload, tenant_id: tenantId }).select().single()
-  if (error) handleError(error)
+  const row = {
+    ...payload,
+    name: toErpText(payload.name),
+    ...(payload.attributes ? { attributes: toErpPdmAttributes(payload.attributes) } : {}),
+    tenant_id: tenantId,
+  }
+  const { data, error } = await supabase.from('pdm_templates').insert(row).select().single()
+  if (error) pdmDbError(error)
   return data
 }
 
-export async function updatePdm(id: number, payload: Partial<PDMTemplate>): Promise<PDMTemplate> {
+function pdmDbError(error: { code?: string; message?: string }): never {
+  const msg = error.message ?? ''
+  if (error.code === '23505' && msg.includes('uq_pdm_templates_tenant_name')) {
+    throw new Error('Já existe um PDM com esse nome.')
+  }
+  if (error.code === '23505') throw new Error('Já existe um PDM com esse código interno.')
+  if (error.code === '23514' && msg.includes('ck_pdm_internal_code_format')) {
+    throw new Error('Código interno inválido: até 10 caracteres, apenas letras, números, - e _.')
+  }
+  throw new Error(msg || 'Erro ao salvar PDM.')
+}
+
+export async function updatePdm(id: number, rawPayload: Partial<PDMTemplate>): Promise<PDMTemplate> {
   const supabase = createClient()
+  const payload: Partial<PDMTemplate> = {
+    ...rawPayload,
+    ...(typeof rawPayload.name === 'string' ? { name: toErpText(rawPayload.name) } : {}),
+    ...(rawPayload.attributes ? { attributes: toErpPdmAttributes(rawPayload.attributes) } : {}),
+  }
+  const { data: before } = await supabase
+    .from('pdm_templates').select('tenant_id, internal_code, name').eq('id', id).maybeSingle()
   const { data, error } = await supabase.from('pdm_templates').update(payload).eq('id', id).select().single()
-  if (error) handleError(error)
+  if (error) pdmDbError(error)
+  if (before && (before.internal_code !== data.internal_code || before.name !== data.name)) {
+    // material_database guarda código e nome do PDM por valor
+    const { error: matErr } = await supabase
+      .from('material_database')
+      .update({ pdm_code: data.internal_code, pdm_name: data.name })
+      .eq('tenant_id', before.tenant_id)
+      .eq('pdm_code', before.internal_code)
+    if (matErr) console.error('[updatePdm] propagate code/name to materials failed:', matErr)
+  }
   if (payload.attributes && data?.internal_code) {
     try {
       await regenerateMaterialDescriptions(
@@ -349,7 +388,7 @@ export async function regenerateMaterialDescriptions(
   ): string => {
     const raw = technical[attr.id]
     const display = extractDisplay(raw)
-    if (!display) return `[${attr.abbreviation ?? ''}]`
+    if (!display) return ''
     if (attr.allowedValues && attr.allowedValues.length > 0) {
       const match = attr.allowedValues.find((av) => av.value === display)
       if (match?.abbreviation && match.abbreviation.trim() !== '') return match.abbreviation
@@ -364,9 +403,11 @@ export async function regenerateMaterialDescriptions(
 
   try {
     const supabase = createClient()
+    const tenantId = await getCurrentUserTenantId()
     const { data: materials, error: fetchErr } = await supabase
       .from('material_database')
       .select('id, technical_attributes')
+      .eq('tenant_id', tenantId)
       .eq('pdm_code', pdmInternalCode)
     if (fetchErr) {
       console.error('regenerateMaterialDescriptions', fetchErr)
@@ -386,8 +427,11 @@ export async function regenerateMaterialDescriptions(
           ? (row.technical_attributes as Record<string, unknown>)
           : {}
       const parts: string[] = [pdmName.toUpperCase()]
-      for (const attr of forShort) parts.push(shortSegment(attr, technical))
-      const novaDesc = parts.join(' ')
+      for (const attr of forShort) {
+        const segment = shortSegment(attr, technical)
+        if (segment) parts.push(segment)
+      }
+      const novaDesc = toErpText(parts.join(' '))
       const detailedDesc = buildDetailedDescription(pdmName, detailedAttrs, technical)
       const { error: upErr } = await supabase
         .from('material_database')
@@ -667,8 +711,8 @@ export async function createRequest(body: {
     cost_center: body.cost_center ?? null,
     urgency: body.urgency ?? 'low',
     justification: body.justificativa ?? null,
-    generated_description: body.generated_description ?? null,
-    technical_attributes: body.values ?? null,
+    generated_description: body.generated_description != null ? toErpText(body.generated_description) : null,
+    technical_attributes: body.values ? toErpDeep(body.values) : null,
     user_id: user?.id ?? null,
   }
 
@@ -734,7 +778,7 @@ export async function checkDuplicateRequest(params: {
 
     const { data: pdmRow, error: pdmErr } = await supabase
       .from('pdm_templates')
-      .select('internal_code, attributes')
+      .select('tenant_id, internal_code, attributes')
       .eq('id', params.pdm_id)
       .single()
 
@@ -751,6 +795,7 @@ export async function checkDuplicateRequest(params: {
     const { data: materials, error: matErr } = await supabase
       .from('material_database')
       .select('id, id_sistema, status, technical_attributes')
+      .eq('tenant_id', pdmRow.tenant_id)
       .eq('pdm_code', pdmCode)
 
     if (matErr) throw matErr
@@ -838,8 +883,8 @@ export async function resubmitRequest(
   const { data, error } = await supabase.rpc('resubmit_request', {
     p_request_id: id,
     p_pdm_id: body.pdm_id,
-    p_technical_attributes: body.values,
-    p_generated_description: body.generated_description,
+    p_technical_attributes: toErpDeep(body.values),
+    p_generated_description: toErpText(body.generated_description),
     p_urgency: body.urgency ?? null,
     p_justification: body.justificativa ?? null,
   })
@@ -890,9 +935,13 @@ function toStr(v: unknown): string {
 
 export async function updateRequestAttributes(
   id: number,
-  attributes: Record<string, string>,
-  options?: { generated_description?: string }
+  rawAttributes: Record<string, string>,
+  rawOptions?: { generated_description?: string }
 ): Promise<ApiRequest> {
+  const attributes = toErpDeep(rawAttributes)
+  const options = rawOptions?.generated_description !== undefined
+    ? { generated_description: toErpText(rawOptions.generated_description) }
+    : rawOptions
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const { data: req } = await supabase.from('material_requests').select('technical_attributes, tenant_id').eq('id', id).single()
@@ -1166,7 +1215,7 @@ export async function updateMaterialStandardize(id: number, body: Record<string,
   const { data, error } = await supabase
     .from('material_database')
     .update({
-      ...body,
+      ...toErpDeep(body),
       standardized_at: new Date().toISOString(),
       erp_status: 'pendente_erp',
       standardized_by: user?.id ?? null,
@@ -1203,14 +1252,15 @@ function buildDetailedDescription(
     }
     if (val) lines.push(`${label}: ${val}`)
   }
-  return lines.join('\n')
+  return toErpText(lines.join('\n'))
 }
 
-export async function updateMaterialAttributes(id: number, body: Record<string, unknown>): Promise<MaterialDetail> {
+export async function updateMaterialAttributes(id: number, rawBody: Record<string, unknown>): Promise<MaterialDetail> {
+  const body = toErpDeep(rawBody)
   const supabase = createClient()
   const { data: matRow } = await supabase
     .from('material_database')
-    .select('technical_attributes, pdm_code, pdm_name')
+    .select('tenant_id, technical_attributes, pdm_code, pdm_name')
     .eq('id', id)
     .single()
   const attrs = body.technical_attributes ?? body
@@ -1222,14 +1272,15 @@ export async function updateMaterialAttributes(id: number, body: Record<string, 
   if (body.pdm_code !== undefined) updates.pdm_code = body.pdm_code
   if (body.pdm_name !== undefined) updates.pdm_name = body.pdm_name
 
-  const mat = matRow as { pdm_code?: string | null; pdm_name?: string | null } | null
+  const mat = matRow as { tenant_id?: number; pdm_code?: string | null; pdm_name?: string | null } | null
   const pdmCode = (body.pdm_code !== undefined ? body.pdm_code : mat?.pdm_code) as string | null | undefined
-  if (pdmCode) {
+  if (pdmCode && mat?.tenant_id != null) {
     const { data: pdmRow } = await supabase
       .from('pdm_templates')
       .select('name, attributes')
+      .eq('tenant_id', mat.tenant_id)
       .eq('internal_code', pdmCode)
-      .single()
+      .maybeSingle()
     if (pdmRow) {
       const pdmNameFallback =
         body.pdm_name !== undefined ? body.pdm_name : mat?.pdm_name
@@ -1636,8 +1687,9 @@ export async function getValueDictionary(search?: string): Promise<ValueDictiona
 
 export async function updateValueDictionaryEntry(
   id: number,
-  body: { value?: string; abbreviation?: string }
+  rawBody: { value?: string; abbreviation?: string }
 ): Promise<{ id: number; value: string; abbreviation: string }> {
+  const body = toErpDeep(rawBody)
   const supabase = createClient()
   const { data, error } = await supabase.from('value_dictionary').update({ ...body, updated_at: new Date().toISOString() }).eq('id', id).select().single()
   if (error) handleError(error)
@@ -2468,8 +2520,8 @@ export async function propagateValueToPdms(
   const supabase = createClient()
   const { data, error } = await supabase.rpc('propagate_value_to_pdms', {
     p_old_value: oldValue,
-    p_new_value: newValue,
-    p_new_abbreviation: newAbbreviation
+    p_new_value: toErpText(newValue),
+    p_new_abbreviation: toErpText(newAbbreviation)
   })
   if (error) handleError(error)
   return { updated_pdms: (data?.updated_pdms as number) ?? 0 }
@@ -2483,7 +2535,7 @@ export async function propagateValueToMaterials(
   const supabase = createClient()
   const { data, error } = await supabase.rpc('propagate_value_to_requests_and_materials', {
     p_old_value: oldValue,
-    p_new_value: newValue
+    p_new_value: toErpText(newValue)
   })
   if (error) handleError(error)
   return {

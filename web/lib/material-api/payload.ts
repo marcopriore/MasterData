@@ -1,4 +1,5 @@
 /** Contrato JSON das APIs de material (/api/v1). Chaves em português; colunas da base em inglês. */
+import { toErpDeep } from '@/lib/erp-text'
 
 type Json = Record<string, unknown>
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; errors: string[] }
@@ -174,7 +175,7 @@ export function parseMaterialInput(body: unknown, mode: 'create' | 'update'): Pa
   if (mode === 'update' && Object.keys(row).length === 0 && errors.length === 0) {
     errors.push('nenhum campo para alterar')
   }
-  return errors.length ? { ok: false, errors } : { ok: true, value: row }
+  return errors.length ? { ok: false, errors } : { ok: true, value: toErpDeep(row) }
 }
 
 function list(value: unknown): Json[] {
