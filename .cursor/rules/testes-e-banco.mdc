@@ -1,0 +1,19 @@
+---
+description: Quando rodar os testes que usam o banco do PRO-MAT
+alwaysApply: true
+---
+
+# Testes e banco
+
+O Supabase do PRO-MAT é um só (produção) e tem orçamento de disco baixo. A sonda de segurança e o E2E criam e apagam um tenant inteiro a cada rodada.
+
+- **Durante o trabalho:** rode só o que não usa o banco:
+  - `npm run check` (em `web`): unitários, tipos e auditoria;
+  - `npx next build` (em `web`).
+- **Antes de cada commit:** uma rodada só, com as correções do período juntas:
+  - `npm run security:probe` (em `web`);
+  - `npm run test:e2e` (em `tests`).
+
+  Corrija as falhas e rode de novo só o que falhou (`npx playwright test --config=e2e/playwright.config.ts --project=<suíte>`).
+- Não rode a sonda nem o E2E para conferir mudança pequena de tela. Consulta de leitura ao banco, só quando necessária para entender um problema.
+- Detalhes em `docs/regras.md` (Segurança contínua) e `docs/tecnologias.md` (E2E).

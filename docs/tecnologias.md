@@ -124,7 +124,7 @@ npx playwright install chromium   # só na primeira vez
 npm run test:e2e                  # E2E_KEEP_DATA=1 mantém o tenant para inspeção
 ```
 
-Enquanto o banco for único, a rodada grava em produção, sempre num tenant próprio e apagado no fim.
+Enquanto o banco for único, a rodada grava em produção, sempre num tenant próprio e apagado no fim. Por isso o E2E e a sonda rodam **só antes de cada commit**, numa rodada única. Durante o trabalho, use `npm run check` e `next build`, que não usam o banco. Para repetir só uma suíte que falhou: `npx playwright test --config=e2e/playwright.config.ts --project=governance`.
 
 ## Migrations relevantes
 

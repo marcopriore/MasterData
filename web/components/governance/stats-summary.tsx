@@ -11,31 +11,30 @@ import {
   Timer,
 } from "lucide-react"
 import type { MaterialRequest } from "./request-card"
-
-export type GovernanceStats = {
-  total: number
-  em_andamento: number
-  atrasadas: number
-  taxa_rejeicao: number
-  tempo_medio_ciclo: number
-  sla_por_etapa: Record<string, number>
-}
+import { LATE_AFTER_DAYS, type GovernanceIndicators } from "@/lib/governance-stats"
 
 interface StatsSummaryProps {
   requests: MaterialRequest[]
   variant?: "default" | "governance"
-  governanceStats?: GovernanceStats | null
+  governanceStats?: GovernanceIndicators | null
   governanceStatsLoading?: boolean
 }
 
+const formatDays = (days: number | null) =>
+  days == null ? "—" : `${days.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${days === 1 ? "dia" : "dias"}`
+
 export function StatsSummary({ requests, variant = "default", governanceStats, governanceStatsLoading }: StatsSummaryProps) {
   if (variant === "governance") {
-    const stats = governanceStats
+    const stats: { label: string; value: string | number; hint?: string; icon: React.ReactNode; color: string; bgColor: string; labelColor: string }[] = governanceStats
       ? [
           { label: "EM ANDAMENTO", value: governanceStats.em_andamento, icon: <Clock className="size-5" />, color: "text-blue-300", bgColor: "bg-blue-500/25", labelColor: "text-blue-300" },
-          { label: "ATRASADAS", value: governanceStats.atrasadas, icon: <AlertTriangle className="size-5" />, color: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300", bgColor: governanceStats.atrasadas > 0 ? "bg-red-500/25" : "bg-green-500/25", labelColor: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300" },
-          { label: "TAXA DE REJEIÇÃO", value: `${governanceStats.taxa_rejeicao}%`, icon: <XCircle className="size-5" />, color: "text-orange-300", bgColor: "bg-orange-500/25", labelColor: "text-orange-300" },
-          { label: "TEMPO MÉDIO DE CICLO", value: `${governanceStats.tempo_medio_ciclo} dias`, icon: <Timer className="size-5" />, color: "text-purple-300", bgColor: "bg-purple-500/25", labelColor: "text-purple-300" },
+          { label: `ATRASADAS (+${LATE_AFTER_DAYS} DIAS)`, value: governanceStats.atrasadas, icon: <AlertTriangle className="size-5" />, color: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300", bgColor: governanceStats.atrasadas > 0 ? "bg-red-500/25" : "bg-green-500/25", labelColor: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300" },
+          { label: "TAXA DE REJEIÇÃO", value: `${governanceStats.taxa_rejeicao.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`, icon: <XCircle className="size-5" />, color: "text-orange-300", bgColor: "bg-orange-500/25", labelColor: "text-orange-300" },
+          {
+            label: "IDADE MÉDIA EM ANDAMENTO",
+            value: formatDays(governanceStats.idade_media_andamento),
+            hint: `Ciclo das finalizadas: ${formatDays(governanceStats.tempo_medio_ciclo)}`,
+            icon: <Timer className="size-5" />, color: "text-purple-300", bgColor: "bg-purple-500/25", labelColor: "text-purple-300" },
         ]
       : []
     if (governanceStatsLoading || stats.length === 0) {
@@ -66,6 +65,7 @@ export function StatsSummary({ requests, variant = "default", governanceStats, g
             <div className="min-w-0 flex-1">
               <p className="text-3xl font-bold tracking-tight text-white leading-none">{stat.value}</p>
               <p className={cn("mt-1.5 text-xs font-medium uppercase tracking-wider truncate", stat.labelColor)}>{stat.label}</p>
+              {stat.hint && <p className="mt-0.5 text-[11px] text-white/60 truncate">{stat.hint}</p>}
             </div>
           </div>
         ))}

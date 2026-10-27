@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { admin, must } from '../helpers/supabase'
 import { getState, STAGES, updateState } from '../helpers/state'
-import { expectToast, fillRequiredStageFields, kanbanCard, pageAs } from '../helpers/ui'
+import { expectToast, fillRequiredStageFields, kanbanCard, pageAs, reqCode } from '../helpers/ui'
 
 const NEXT: Record<string, string> = {
   cadastro: 'compras',
@@ -102,7 +102,35 @@ test.describe('04 - Governança: rejeição', () => {
     }
 
     const { data: history } = await admin.from('request_history').select('event_type, event_data').eq('request_id', req.id).eq('event_type', 'rejected').single()
+    updateState({ rejectedId: req.id })
     // A tela grava a justificativa em maiúsculas.
     expect((history?.event_data as { justification?: string })?.justification).toBe('TESTE E2E: FALTA DESENHO TÉCNICO')
+  })
+
+  test('indicadores refletem a lista e a rejeitada fica só em Rejeitadas', async ({ browser }) => {
+    const state = getState()
+    const { page, close } = await pageAs(browser, 'admin')
+    try {
+      await page.goto('/governance')
+      const indicator = (label: RegExp) => page.locator('p').filter({ hasText: label }).locator('xpath=preceding-sibling::p[1]')
+      // 1 finalizada + 1 rejeitada, nenhuma em andamento
+      await expect(indicator(/^EM ANDAMENTO$/)).toHaveText('0')
+      await expect(indicator(/^TAXA DE REJEIÇÃO$/)).toHaveText('50%')
+      await expect(indicator(/^IDADE MÉDIA EM ANDAMENTO$/)).toHaveText('—')
+      await expect(page.getByText(/^Ciclo das finalizadas: .+ dias?$/)).toBeVisible()
+
+      const column = (label: string) =>
+        page.locator('div[class*="min-w-[250px]"]').filter({ has: page.getByText(label, { exact: true }) })
+      const rejeitadas = column('Rejeitadas')
+      await expect(rejeitadas.getByText(reqCode(state.rejectedId!), { exact: true })).toBeVisible()
+      const cadastro = column('Central de Cadastro')
+      await expect(cadastro.getByText(reqCode(state.rejectedId!), { exact: true })).toHaveCount(0)
+
+      // A busca muda os indicadores: só a rejeitada
+      await page.getByPlaceholder(/buscar/i).first().fill(reqCode(state.rejectedId!))
+      await expect(indicator(/^TAXA DE REJEIÇÃO$/)).toHaveText('100%')
+    } finally {
+      await close()
+    }
   })
 })

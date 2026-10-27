@@ -45,8 +45,9 @@ export function kanbanCard(page: Page, id: number) {
  * Lista escolhe a primeira opção; NCM recebe 8 dígitos; número, 10; texto, um valor fixo.
  */
 export async function fillRequiredStageFields(page: Page) {
-  // Os campos da etapa carregam depois que o modal abre.
-  await expect(page.getByText(/CAMPOS DE RESPONSABILIDADE/)).toBeVisible()
+  // Os campos da etapa carregam depois que o modal abre. Etapa sem campo próprio não mostra a seção;
+  // se faltar obrigatório, o banco recusa a aprovação e o teste falha do mesmo jeito.
+  await page.getByText(/CAMPOS DE RESPONSABILIDADE/).waitFor({ timeout: 8_000 }).catch(() => undefined)
   const labels = page.locator('label[for^="attr-"]').filter({ hasText: /\*\s*$/ })
   const count = await labels.count()
   for (let i = 0; i < count; i++) {

@@ -22,6 +22,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
 import type { RequestErpState } from "@/lib/request-erp-state"
 import { kanbanMoveBlock } from "@/lib/kanban-move"
+import { DONE_STATUSES, REJECTED_STATUSES, statusGroup } from "@/lib/governance-stats"
 import { getWorkflowConfig, assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -205,26 +206,32 @@ export function KanbanBoard({
 
   const allStatusesSet = useMemo(() => {
     const s = new Set(columns.map((c) => c.id.toLowerCase()))
-    s.add("rejeitado")
+    for (const status of [...REJECTED_STATUSES, ...DONE_STATUSES]) s.add(status)
     return s
   }, [columns])
+  /** Coluna do cartão: rejeitada ("Rejected" da rejeição) → Rejeitadas; finalizada → última etapa. */
+  const columnKeyOf = useCallback(
+    (status: string | null | undefined) => {
+      const group = statusGroup(status)
+      if (group === "rejected") return "rejeitado"
+      if (group === "done" && columns.length > 0) return columns[columns.length - 1].id.toLowerCase()
+      return (status || "").toLowerCase()
+    },
+    [columns]
+  )
   const cardsByColumn = useCallback(
     (colId: string) => {
       const colLower = colId.toLowerCase()
-      const matched = localRequests.filter(
-        (r) => (r.status || "").toLowerCase() === colLower
-      )
-      // Orphaned cards (unknown status) fall into the first column
+      const matched = localRequests.filter((r) => columnKeyOf(r.status) === colLower)
+      // Status desconhecido (fora do workflow) cai na primeira coluna
       const orphans =
         columns.length > 0 && colId === columns[0].id
-          ? localRequests.filter(
-              (r) => !allStatusesSet.has((r.status || "").toLowerCase())
-            )
+          ? localRequests.filter((r) => !allStatusesSet.has(columnKeyOf(r.status)))
           : []
       return [...matched, ...orphans]
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [localRequests, columns]
+    [localRequests, columns, columnKeyOf]
   )
 
   // ── Drag handlers ────────────────────────────────────────────────────────────
@@ -326,7 +333,7 @@ export function KanbanBoard({
     }
   }
 
-  const hasRejeitadas = localRequests.some((r) => (r.status || "").toLowerCase() === "rejeitado")
+  const hasRejeitadas = localRequests.some((r) => columnKeyOf(r.status) === "rejeitado")
   const rejeitadasColumn: KanbanColumn | null =
     showAllColumns && hasRejeitadas
       ? { id: "rejeitado", label: "Rejeitadas", ...FIXED_COLORS.rejected }

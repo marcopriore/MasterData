@@ -34,6 +34,7 @@ export interface TestState {
   modelo?: string
   materialId?: number
   materialCode?: string
+  rejectedId?: number
 }
 
 export function getState(): TestState {

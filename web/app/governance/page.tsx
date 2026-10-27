@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
-  getGovernanceStats,
+  getRequestsFinishedAt,
   getWorkflows,
   getPdms,
   getRequests,
@@ -26,7 +26,8 @@ import { canSyncFromRequest, requestErpState, type RequestErpInfo, type RequestE
 import { KanbanBoard } from '@/components/governance/kanban-board'
 import { ListView } from '@/components/governance/list-view'
 import { FiltersBar } from '@/components/governance/filters-bar'
-import { StatsSummary, type GovernanceStats } from '@/components/governance/stats-summary'
+import { StatsSummary } from '@/components/governance/stats-summary'
+import { governanceIndicators, REJECTED_STATUSES, statusGroup } from '@/lib/governance-stats'
 import { EmptyColumn } from '@/components/governance/request-card'
 import type { MaterialRequest } from '@/components/governance/request-card'
 import { Button } from '@/components/ui/button'
@@ -149,8 +150,6 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
   }
 }
 
-const REJECTED_STATUSES = ['rejected', 'rejeitado']
-
 function filterRequests(
   requests: MaterialRequest[],
   search: string,
@@ -242,24 +241,14 @@ export default function GovernancePage() {
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyFetched, setHistoryFetched] = useState(false)
-  const [governanceStats, setGovernanceStats] = useState<GovernanceStats | null>(null)
-  const [governanceStatsLoading, setGovernanceStatsLoading] = useState(true)
-
   useEffect(() => {
     if (!ready) return
     const loadAll = async () => {
-      setGovernanceStatsLoading(true)
       setLoading(true)
       let wfList: Awaited<ReturnType<typeof getWorkflows>> | null = null
       try {
         let pdmList: Awaited<ReturnType<typeof getPdms>> | null = null
-        let stats: Awaited<ReturnType<typeof getGovernanceStats>> | null = null
-        ;[stats, wfList, pdmList] = await Promise.all([
-          getGovernanceStats(),
-          getWorkflows(),
-          getPdms(),
-        ])
-        setGovernanceStats(stats ?? null)
+        ;[wfList, pdmList] = await Promise.all([getWorkflows(), getPdms()])
         setWorkflows((wfList ?? []) as WorkflowHeader[])
         if (wfList && wfList.length > 0) {
           const active = wfList.find((w) => w.is_active) ?? wfList[0]
@@ -271,11 +260,9 @@ export default function GovernancePage() {
             .map((p) => ({ id: p.id, name: p.name, internal_code: p.internal_code, is_active: p.is_active ?? true }))
         )
       } catch {
-        setGovernanceStats(null)
         setWorkflows([])
         setPdms([])
       } finally {
-        setGovernanceStatsLoading(false)
         if (!wfList?.length) setLoading(false)
       }
     }
@@ -332,6 +319,13 @@ export default function GovernancePage() {
     void fetchErpStatus(requests)
   }, [requests, fetchErpStatus])
 
+  // Data da aprovação final de cada finalizada, para o tempo médio de ciclo.
+  const [finishedAt, setFinishedAt] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const done = requests.filter((r) => statusGroup(r.status) === 'done').map((r) => r.id)
+    getRequestsFinishedAt(done).then(setFinishedAt).catch(() => setFinishedAt({}))
+  }, [requests])
+
   /** A chamada ao ERP da última etapa roda em segundo plano; reconsulta depois que ela tem tempo de voltar. */
   const scheduleErpRefresh = useCallback(() => {
     window.setTimeout(() => { void fetchErpStatus(requestsRef.current) }, 4000)
@@ -377,6 +371,15 @@ export default function GovernancePage() {
     () => filterRequests(materialRequests, search, category, dateRange, stageFilter),
     [materialRequests, search, category, dateRange, stageFilter]
   )
+
+  /** Indicadores das solicitações que a tela mostra: workflow escolhido e filtros aplicados. */
+  const indicators = useMemo(() => {
+    const createdById = new Map(requests.map((r) => [String(r.id), r.date ?? null]))
+    return governanceIndicators(
+      filteredRequests.map((r) => ({ id: r.id, status: r.status, createdAt: createdById.get(r.id) ?? null })),
+      finishedAt
+    )
+  }, [filteredRequests, requests, finishedAt])
 
   const lastInitializedRequestIdRef = useRef<number | null>(null)
 
@@ -792,10 +795,10 @@ export default function GovernancePage() {
         <div className="space-y-6">
           {/* Stats Summary – indicadores de SLA e gestão */}
           <StatsSummary
-            requests={materialRequests}
+            requests={filteredRequests}
             variant="governance"
-            governanceStats={governanceStats}
-            governanceStatsLoading={governanceStatsLoading}
+            governanceStats={indicators}
+            governanceStatsLoading={loading && requests.length === 0}
           />
 
           {/* Card container - same as AttributesTable Card */}

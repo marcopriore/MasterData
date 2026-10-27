@@ -214,21 +214,27 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 }
 
 // ─── Governance Stats ────────────────────────────────────────────────────────
+// Os indicadores são calculados na tela (lib/governance-stats.ts) sobre a lista filtrada.
 
-export type GovernanceStats = {
-  total: number
-  em_andamento: number
-  atrasadas: number
-  taxa_rejeicao: number
-  tempo_medio_ciclo: number
-  sla_por_etapa: Record<string, number>
-}
-
-export async function getGovernanceStats(): Promise<GovernanceStats> {
+/** Quando cada solicitação foi finalizada: último "approved" que levou à etapa final. */
+export async function getRequestsFinishedAt(requestIds: number[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  if (requestIds.length === 0) return out
   const supabase = createClient()
-  const { data, error } = await supabase.rpc('get_governance_stats')
-  if (error) handleError(error)
-  return data as GovernanceStats
+  for (let i = 0; i < requestIds.length; i += 200) {
+    const { data, error } = await supabase
+      .from('request_history')
+      .select('request_id, created_at')
+      .in('request_id', requestIds.slice(i, i + 200))
+      .eq('event_type', 'approved')
+      .in('stage', ['finalizado', 'completed'])
+    if (error) handleError(error)
+    for (const row of data ?? []) {
+      const key = String(row.request_id)
+      if (!out[key] || row.created_at > out[key]) out[key] = row.created_at as string
+    }
+  }
+  return out
 }
 
 // ─── PDM ─────────────────────────────────────────────────────────────────────
