@@ -17,7 +17,9 @@ describe('kanbanMoveBlock', () => {
   })
 
   it('não rejeita pelo arraste', () => {
-    expect(kanbanMoveBlock('compras', 'rejeitado', 'finalizado')).toMatch(/justificativa/)
+    expect(kanbanMoveBlock('compras', 'rejeitado', 'finalizado')).toMatch(/motivo é obrigatório/)
+    expect(kanbanMoveBlock('compras', 'cancelado', 'finalizado')).toMatch(/Cancelar/)
+    expect(kanbanMoveBlock('cancelado', 'compras', 'finalizado')).toMatch(/cancelada/)
   })
 
   it('finalizada ou rejeitada não volta pelo arraste', () => {

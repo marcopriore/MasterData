@@ -31,6 +31,7 @@ test.describe.serial('04 - Governança: fluxo completo até o material', () => {
 
   for (const stage of STAGES) {
     test(`${stage.status}: ${stage.role} atende, preenche os campos e aprova`, async ({ browser }) => {
+      test.slow()
       const state = getState()
       const id = state.requestId!
       expect((await statusOf(id))?.status).toBe(stage.status)
@@ -93,6 +94,8 @@ test.describe('04 - Governança: rejeição', () => {
       await page.goto('/governance')
       await kanbanCard(page, req.id).getByRole('button', { name: 'Iniciar Atendimento' }).click()
       await page.getByRole('button', { name: 'Rejeitar' }).click()
+      await expect(page.getByRole('button', { name: 'Confirmar Rejeição' })).toBeDisabled()
+      await page.locator('#reject-category').selectOption('falta_informacao')
       await page.getByPlaceholder('Informe a justificativa...').fill('Teste E2E: falta desenho técnico')
       await page.getByRole('button', { name: 'Confirmar Rejeição' }).click()
       await expectToast(page, 'Solicitação rejeitada com sucesso!')
@@ -105,6 +108,8 @@ test.describe('04 - Governança: rejeição', () => {
     updateState({ rejectedId: req.id })
     // A tela grava a justificativa em maiúsculas.
     expect((history?.event_data as { justification?: string })?.justification).toBe('TESTE E2E: FALTA DESENHO TÉCNICO')
+    expect((history?.event_data as { motivo?: string })?.motivo).toBe('falta_informacao')
+    expect((history?.event_data as { etapa?: string })?.etapa).toBe('cadastro')
   })
 
   test('indicadores refletem a lista e a rejeitada fica só em Rejeitadas', async ({ browser }) => {

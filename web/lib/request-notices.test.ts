@@ -45,6 +45,10 @@ describe('evento a partir do histórico', () => {
     expect(noticeEventFromHistory('approved', 'finalizado')).toBe('completed')
     expect(noticeEventFromHistory('approved', 'completed')).toBe('completed')
   })
+
+  it('arraste do admin avisa como movida', () => {
+    expect(noticeEventFromHistory('stage_change', 'compras')).toBe('moved')
+  })
 })
 
 describe('destinatários', () => {
@@ -63,6 +67,17 @@ describe('destinatários', () => {
     const planned = selectNoticeRecipients({
       event: 'approved',
       actorId: 'cadastro',
+      requesterId: 'autor',
+      stage: 'compras',
+      users: people,
+    })
+    expect(planned.map((item) => item.userId)).toEqual(['compras-grupo'])
+  })
+
+  it('solicitação movida pelo admin avisa a área de destino', () => {
+    const planned = selectNoticeRecipients({
+      event: 'moved',
+      actorId: 'admin',
       requesterId: 'autor',
       stage: 'compras',
       users: people,

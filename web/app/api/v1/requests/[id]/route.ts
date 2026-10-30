@@ -1,12 +1,12 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { MATERIAL_API_COLUMNS, toApiMaterial } from '@/lib/material-api/payload'
 import { requestCode } from '@/lib/request-notices'
+import { statusGroup } from '@/lib/request-status'
 import { apiError, handleApiCall } from '@/lib/material-api/server'
 
 export const runtime = 'nodejs'
 
-const FINAL = ['finalizado', 'completed', 'concluído', 'concluido']
-const REJECTED = ['rejected', 'rejeitado']
+const SITUACAO = { done: 'finalizada', rejected: 'rejeitada', cancelled: 'cancelada', open: 'em_andamento' } as const
 
 /** Andamento da solicitação e, depois da última etapa, o material criado. Aceita 12 ou REQ-0012. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -39,7 +39,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       .eq('request_id', id)
       .maybeSingle()
 
-    const status = String(row.status ?? '').toLowerCase()
     return {
       status: 200,
       body: {
@@ -48,7 +47,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
           codigo,
           status: row.status,
           etapa: step?.step_name ?? null,
-          situacao: FINAL.includes(status) ? 'finalizada' : REJECTED.includes(status) ? 'rejeitada' : 'em_andamento',
+          situacao: SITUACAO[statusGroup(row.status)],
           origem: row.origin ?? 'interno',
           referencia_externa: row.external_reference ?? null,
           criada_em: row.created_at,

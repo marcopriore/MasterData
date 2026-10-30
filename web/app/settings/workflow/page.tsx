@@ -13,6 +13,7 @@ import {
   migrateRequestsToWorkflow,
   logAction,
 } from '@/lib/supabase-api'
+import { DEFAULT_STAGE_SLA_DAYS } from '@/lib/governance-stats'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -84,7 +85,10 @@ type WorkflowStep = {
   status_key?: string
   order: number
   is_active: boolean
+  sla_days?: number | null
 }
+
+type StepUpdate = { step_name?: string; status_key?: string; sla_days?: number | null }
 
 type MigrationStepInfo = {
   step_name: string
@@ -113,18 +117,24 @@ function StepSettingsPanel({
   onUpdate,
 }: {
   step: WorkflowStep
-  onUpdate: (id: number, data: { step_name?: string; status_key?: string }) => void
+  onUpdate: (id: number, data: StepUpdate) => void
 }) {
   const [stepName, setStepName] = useState(step.step_name)
   const [statusKey, setStatusKey] = useState(step.status_key || '')
+  const [slaDays, setSlaDays] = useState(step.sla_days != null ? String(step.sla_days) : '')
 
   useEffect(() => {
     setStepName(step.step_name)
     setStatusKey(step.status_key || '')
-  }, [step.id, step.step_name, step.status_key])
+    setSlaDays(step.sla_days != null ? String(step.sla_days) : '')
+  }, [step.id, step.step_name, step.status_key, step.sla_days])
 
   const handleSave = () => {
-    const updates: { step_name?: string; status_key?: string } = {}
+    const updates: StepUpdate = {}
+    const sla = slaDays.trim() === '' ? null : Math.min(365, Math.max(1, Math.round(Number(slaDays))))
+    if (sla !== (step.sla_days ?? null) && (sla === null || Number.isFinite(sla))) {
+      updates.sla_days = sla
+    }
     const newName = stepName.trim()
     if (newName && newName !== step.step_name) {
       updates.step_name = newName
@@ -178,6 +188,27 @@ function StepSettingsPanel({
             Usada para mapear requisições nesta etapa. Alterar pode quebrar cards existentes.
           </p>
         </div>
+        <div className="space-y-1.5">
+          <Label
+            htmlFor="step-sla-days"
+            className="text-[11px] font-medium uppercase tracking-wider text-slate-500"
+          >
+            Prazo na etapa (dias)
+          </Label>
+          <Input
+            id="step-sla-days"
+            type="number"
+            min={1}
+            max={365}
+            value={slaDays}
+            onChange={(e) => setSlaDays(e.target.value)}
+            placeholder={String(DEFAULT_STAGE_SLA_DAYS)}
+            className="min-h-[40px] w-32 border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus-visible:ring-[#0F1C38] focus-visible:ring-offset-0 dark:border-slate-300 dark:bg-white"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Parada aqui além desse prazo, a solicitação conta como atrasada na governança. Vazio: {DEFAULT_STAGE_SLA_DAYS} dias.
+          </p>
+        </div>
         <Button size="sm" onClick={handleSave} className="h-9">
           Salvar
         </Button>
@@ -195,7 +226,7 @@ function SortableStepCard({
 }: {
   step: WorkflowStep
   onDelete: (id: number) => void
-  onUpdate: (id: number, data: { step_name?: string; status_key?: string }) => void
+  onUpdate: (id: number, data: StepUpdate) => void
   expandedId: number | null
   onToggleSettings: (id: number) => void
 }) {
@@ -240,6 +271,7 @@ function SortableStepCard({
             <p className="text-xs text-slate-500 dark:text-muted-foreground">
               Ordem: {step.order}
               {step.status_key && ` • Chave: ${step.status_key}`}
+              {` • Prazo: ${step.sla_days ?? DEFAULT_STAGE_SLA_DAYS} dias`}
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -410,6 +442,7 @@ export default function WorkflowConfigPage() {
           status_key: s.status_key || slugifyStatusKey(s.step_name),
           order: i + 1,
           is_active: s.is_active ?? true,
+          sla_days: s.sla_days ?? null,
         })),
       }
       await bulkUpdateWorkflowConfig(payload)
@@ -459,7 +492,7 @@ export default function WorkflowConfigPage() {
     setInsertAfterId(null)
   }
 
-  const handleUpdateStep = (id: number, data: { step_name?: string; status_key?: string }) => {
+  const handleUpdateStep = (id: number, data: StepUpdate) => {
     setSteps((prev) =>
       prev.map((s) => (s.id === id ? { ...s, ...data } : s))
     )

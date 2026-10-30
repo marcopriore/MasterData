@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   getValueDictionary,
   updateValueDictionaryEntry,
@@ -24,17 +24,22 @@ export function useValueDictionary(_accessToken?: string | null) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // A busca dispara a cada letra: só a consulta mais recente atualiza a lista.
+  const fetchSeq = useRef(0)
   const fetchEntries = useCallback(async (search?: string) => {
+    const seq = ++fetchSeq.current
     setLoading(true)
     setError(null)
     try {
       const data = await getValueDictionary(search)
+      if (seq !== fetchSeq.current) return
       setEntries(Array.isArray(data) ? data : [])
     } catch (e) {
+      if (seq !== fetchSeq.current) return
       setError((e as Error)?.message ?? 'Erro ao carregar')
       setEntries([])
     } finally {
-      setLoading(false)
+      if (seq === fetchSeq.current) setLoading(false)
     }
   }, [])
 

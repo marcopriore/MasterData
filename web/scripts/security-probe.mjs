@@ -145,20 +145,20 @@ async function main() {
   }
 
   console.log('\nSem login (chave pública)')
-  await denied('anon não executa reject_request', () => anon.rpc('reject_request', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
+  await denied('anon não executa reject_request', () => anon.rpc('reject_request', { p_request_id: reqA.id, p_category: 'outro' }), () => reqStatus(reqA.id, 'cadastro'))
   await denied('anon não lê solicitações', () => anon.from('material_requests').select('id'))
 
   console.log('\nIsolamento entre tenants (usuário do tenant A)')
   await denied('não lê solicitação do tenant B', () => solic.from('material_requests').select('id').eq('id', reqB.id))
   await denied('não lê material do tenant B', () => solic.from('material_database').select('id').eq('id', matB.id))
   await denied('não lê usuários do tenant B', () => solic.from('users').select('id').eq('id', adminB.id))
-  await denied('atendente A não rejeita solicitação do B', () => atend.rpc('reject_request', { p_request_id: reqB.id }), () => reqStatus(reqB.id, 'cadastro'))
+  await denied('atendente A não rejeita solicitação do B', () => atend.rpc('reject_request', { p_request_id: reqB.id, p_category: 'outro' }), () => reqStatus(reqB.id, 'cadastro'))
   await denied('atendente A não aprova solicitação do B', () => atend.rpc('advance_workflow', { p_request_id: reqB.id }), () => reqStatus(reqB.id, 'cadastro'))
   await denied('não grava histórico na solicitação do B', () => solic.from('request_history').insert({ tenant_id: tA, request_id: reqB.id, user_id: requester.id, event_type: 'rejected', stage: 'x' }).select('id'),
     async () => ((await admin.from('request_history').select('id').eq('request_id', reqB.id)).data ?? []).length === 0)
   console.log('\nPermissões dentro do tenant (solicitante do A)')
   await denied('solicitante não aprova', () => solic.rpc('advance_workflow', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
-  await denied('solicitante não rejeita', () => solic.rpc('reject_request', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
+  await denied('solicitante não rejeita', () => solic.rpc('reject_request', { p_request_id: reqA.id, p_category: 'outro' }), () => reqStatus(reqA.id, 'cadastro'))
   await denied('solicitante não muda etapa direto', () => solic.from('material_requests').update({ status: 'finalizado' }).eq('id', reqA.id).select('id'), () => reqStatus(reqA.id, 'cadastro'))
   await denied('solicitante não abre solicitação já finalizada', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'finalizado', requester: 'X', urgency: 'low', user_id: requester.id }).select('id'),
     async () => ((await admin.from('material_requests').select('id').eq('tenant_id', tA).eq('status', 'finalizado')).data ?? []).length === 0)
@@ -185,7 +185,7 @@ async function main() {
   await denied('Compras não atende etapa de Cadastro', () => compras.rpc('assign_request', { p_request_id: reqA.id }),
     async () => (await admin.from('material_requests').select('assigned_to_id').eq('id', reqA.id).single()).data?.assigned_to_id == null)
   await denied('Compras não aprova etapa de Cadastro', () => compras.rpc('advance_workflow', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
-  await denied('Compras não rejeita etapa de Cadastro', () => compras.rpc('reject_request', { p_request_id: reqA.id }), () => reqStatus(reqA.id, 'cadastro'))
+  await denied('Compras não rejeita etapa de Cadastro', () => compras.rpc('reject_request', { p_request_id: reqA.id, p_category: 'outro' }), () => reqStatus(reqA.id, 'cadastro'))
   await denied('Compras não altera campos da etapa de Cadastro', () => compras.from('material_requests').update({ generated_description: 'HACK' }).eq('id', reqA.id).select('id'),
     async () => (await admin.from('material_requests').select('generated_description').eq('id', reqA.id).single()).data?.generated_description !== 'HACK')
   await denied('área não arrasta entre etapas (só Admin)', () => atend.rpc('move_request_stage', { p_request_id: reqA.id, p_status_key: 'x' }), () => reqStatus(reqA.id, 'cadastro'))
@@ -197,6 +197,16 @@ async function main() {
   await denied('inativo não abre solicitação', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'Inativo', urgency: 'low', user_id: requester.id }).select('id'),
     async () => ((await admin.from('material_requests').select('id').eq('tenant_id', tA).eq('requester', 'Inativo')).data ?? []).length === 0)
   await must(admin.from('users').update({ is_active: true }).eq('id', requester.id), 'reativar')
+
+  console.log('\nCancelamento')
+  const [reqC] = await must(admin.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'C', urgency: 'low', user_id: requester.id }).select('id'), 'solicitação C')
+  const [reqD] = await must(admin.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'D', urgency: 'low', user_id: requester.id, assigned_to_id: attendant.id }).select('id'), 'solicitação D')
+  await denied('outro usuário não cancela solicitação alheia', () => compras.rpc('cancel_request', { p_request_id: reqC.id }), () => reqStatus(reqC.id, 'cadastro'))
+  await denied('solicitante não cancela depois do atendimento iniciado', () => solic.rpc('cancel_request', { p_request_id: reqD.id }), () => reqStatus(reqD.id, 'cadastro'))
+  await denied('solicitante não muda para cancelado direto', () => solic.from('material_requests').update({ status: 'cancelado' }).eq('id', reqC.id).select('id'), () => reqStatus(reqC.id, 'cadastro'))
+  await allowed('solicitante cancela a própria antes do atendimento', () => solic.rpc('cancel_request', { p_request_id: reqC.id, p_reason: 'sonda' }))
+  record(await reqStatus(reqC.id, 'cancelado'), 'cancelada fica com status cancelado')
+  await denied('cancelada não é aprovada', () => atend.rpc('advance_workflow', { p_request_id: reqC.id }), () => reqStatus(reqC.id, 'cancelado'))
 
   console.log('\nUso legítimo continua funcionando')
   await allowed('solicitante abre solicitação na primeira etapa', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'Sonda', urgency: 'low', user_id: requester.id }).select('id'))

@@ -103,7 +103,7 @@ interface UserModalProps {
 function UserModal({ mode, initial, roles, tenants, currentUserTenantId, onClose, onSaved }: UserModalProps) {
   const baseGroups = initial?.group_ids?.length
     ? [...initial.group_ids]
-    : (initial?.role_id ? [initial.role_id] : (roles[0] ? [roles[0].id] : []))
+    : (initial?.role_id ? [initial.role_id] : [])
   if (initial?.role_id && !baseGroups.includes(initial.role_id)) baseGroups.push(initial.role_id)
   const initialGroups = baseGroups
   const [name, setName] = useState(initial?.name ?? '')

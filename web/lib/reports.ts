@@ -32,6 +32,22 @@ export type MaterialBaseRow = {
   duplicados: number
 }
 
+/** report_rejections (migration 036): rejeições no período por etapa e motivo. */
+export type RejectionRow = {
+  stage: string
+  reason: string
+  total: number
+}
+
+export type RejectionGroup = { key: string; total: number }
+
+/** Totais por etapa e por motivo, do maior para o menor. */
+export function rejectionsBy(rows: RejectionRow[], field: 'stage' | 'reason'): RejectionGroup[] {
+  const totals = new Map<string, number>()
+  for (const row of rows) totals.set(row[field], (totals.get(row[field]) ?? 0) + row.total)
+  return [...totals.entries()].map(([key, total]) => ({ key, total })).sort((a, b) => b.total - a.total)
+}
+
 export type AreaRow = {
   area: string
   people: number

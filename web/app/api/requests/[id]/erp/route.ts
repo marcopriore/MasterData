@@ -2,10 +2,9 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { integrateRequestMaterial } from '@/lib/erp/integrate'
 import { getCallerAccess } from '@/lib/server-access'
+import { isDoneStatus } from '@/lib/request-status'
 
 export const runtime = 'nodejs'
-
-const FINAL = ['finalizado', 'completed', 'concluído', 'concluido']
 
 /** Depois da última etapa: cria no ERP o material da solicitação, se o tenant tiver integração de criação ativa. */
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -25,7 +24,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .eq('tenant_id', ctx.tenantId)
     .maybeSingle()
   if (!row) return NextResponse.json({ error: 'Solicitação não encontrada' }, { status: 404 })
-  if (!FINAL.includes(String(row.status ?? '').toLowerCase())) {
+  if (!isDoneStatus(row.status)) {
     return NextResponse.json({ result: 'skipped', reason: 'solicitação ainda não finalizada' })
   }
 

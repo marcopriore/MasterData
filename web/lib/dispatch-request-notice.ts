@@ -27,8 +27,13 @@ function asPrefs(value: unknown): Partial<NoticePrefs> | null {
   return row as Partial<NoticePrefs>
 }
 
-function reasonFromHistory(eventData: unknown): string {
+/** Texto do motivo: justificativa da rejeição ou, no cancelamento, o motivo livre. */
+function reasonFromHistory(eventData: unknown, event: string): string {
   if (!eventData || typeof eventData !== 'object') return ''
+  if (event === 'cancelled') {
+    const motivo = (eventData as { motivo?: unknown }).motivo
+    return typeof motivo === 'string' ? motivo : ''
+  }
   const justification = (eventData as { justification?: unknown }).justification
   return typeof justification === 'string' ? justification : ''
 }
@@ -114,7 +119,7 @@ export async function dispatchRequestNotice(input: {
   const copy = noticeCopy(event, {
     code: requestCode(input.requestId),
     stage: String(history.stage ?? ''),
-    reason: reasonFromHistory(history.event_data),
+    reason: reasonFromHistory(history.event_data, event),
   })
   const link = `${input.appOrigin.replace(/\/$/, '')}/governance?req=${input.requestId}`
 

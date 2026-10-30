@@ -78,7 +78,7 @@ Ficam em `roles.permissions` (JSONB). A UI está em `web/app/admin/roles/page.ts
 
 Papéis semeados no onboarding e na Empresa Demo: ADMIN e MASTER (quase tudo), SOLICITANTE (abre pedido, vê PDM, base e workflow), CADASTRO (atende, edita PDM, campos e importação), COMPRAS, MRP, FISCAL e CONTABILIDADE (aprovam, rejeitam, consultam).
 
-Cada um desses nomes é um grupo de perfil. O usuário pode ter vários grupos. A permissão de tela é a união dos grupos mais extras individuais (`user_permission_grants`). Extra que o grupo já cobre não é gravado de novo e aparece travado na tela. `users.role_id` continua sendo um único papel de etapa, e precisa ser um dos grupos marcados: é ele que define os campos da governança para quem não está no grupo ADMIN. Quem está no grupo ADMIN, ou é master, vê os campos da fase atual da solicitação.
+Cada um desses nomes é um grupo de perfil. O usuário pode ter vários grupos. A permissão de tela é a união dos grupos mais extras individuais (`user_permission_grants`). Extra que o grupo já cobre não é gravado de novo e aparece travado na tela. `users.role_id` continua sendo um único papel de etapa, e precisa ser um dos grupos marcados: é ele que define os campos da governança para quem não está no grupo ADMIN. Quem está no grupo ADMIN, ou é master, vê os campos da fase atual da solicitação. Usuário novo abre sem nenhum grupo marcado: o admin escolhe, para ninguém ganhar o primeiro grupo da lista (às vezes ADMIN) sem querer.
 
 O master atua em qualquer etapa como o responsável dela, sem trocar de perfil: vê todas as colunas, tem **Iniciar atendimento** em qualquer solicitação livre e, depois de assumir, preenche os campos da etapa atual (o título mostra a área da etapa) e tem Salvar, Salvar e Aprovar e Rejeitar. O histórico registra o master como quem agiu. Solicitação já assumida por outra pessoa continua com ela.
 
@@ -97,7 +97,15 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 - Só o atendente atual (ou ninguém) pode assumir. Outro usuário recebe erro de conflito.
 - **Cada área só na própria etapa (migration 034):** atender, salvar os campos, aprovar e rejeitar só quem tem como papel de etapa (`users.role_id`) a área da etapa atual. A área tem o nome da etapa em maiúsculas: `cadastro` → CADASTRO, `compras` → COMPRAS. ADMIN (papel ou grupo) e Master atuam em qualquer etapa. Regra no banco (`can_act_on_stage`); na tela, cada área vê só a coluna dela no kanban.
 - Arrastar o cartão entre etapas é só do ADMIN e do Master. A área aprova ou rejeita a própria etapa; arrastando, pularia as etapas das outras.
-- Solicitação finalizada ou já rejeitada não pode ser rejeitada.
+- Solicitação fechada não pode ser rejeitada, aprovada nem atendida. Fechada = finalizada, rejeitada ou cancelada. A regra é única: `lib/request-status.ts` na tela, `is_closed_status()` no banco.
+- **Rejeição (migration 036):** exige um motivo padrão (`lib/rejection-reasons.ts`: duplicado, falta informação, PDM errado, especificação incorreta, não é material de cadastro, outro) e a justificativa em texto. O histórico guarda motivo e etapa; o relatório Rejeições agrupa por etapa e por motivo.
+- **Cancelamento (migration 036, status `cancelado`):**
+  - **Solicitante:** cancela a própria enquanto ela está na primeira etapa e ninguém iniciou o atendimento.
+  - **Depois disso:** só o ADMIN ou o Master, pela governança.
+  
+  Cancelada sai do fluxo e não reabre. Se o Admin cancela, o solicitante é avisado.
+- **Prazo por etapa (migration 036):** `workflow_config.sla_days`, configurável em Configurações → Workflow; sem prazo valem 5 dias. `material_requests.stage_entered_at` guarda quando a solicitação entrou na etapa atual, mantido por gatilho. Na governança, **atrasada** é a que está parada na etapa além do prazo dela.
+- **Arraste pelo Admin:** a área da etapa de destino recebe aviso ("movida para…"), na mesma preferência de "aprovada".
 - Rejeitada pode ser **corrigida e reenviada** (`resubmit_request`, migration 028) por quem abriu, por quem está no grupo ADMIN do tenant ou pelo Master. A mesma solicitação (mesmo REQ) recebe PDM, atributos, descrição, urgência e justificativa corrigidos e volta para a primeira etapa ativa do workflow, sem atendente. O histórico grava `resubmitted` com a descrição e os atributos anteriores; a área da primeira etapa é avisada como numa solicitação nova. Antes de reenviar, a checagem de duplicidade roda de novo.
 - O arraste no kanban não finaliza, não rejeita e não reabre solicitação finalizada ou rejeitada. Essas mudanças só pelas RPCs (`advance_workflow`, `reject_request`), que gravam histórico, avisam e criam o material.
 - Entre etapas intermediárias, o arraste (ADMIN e Master) passa por `move_request_stage` (migration 026): valida que a etapa é do workflow, libera o atendente e grava `stage_change` no histórico com etapa de origem, destino e atendente anterior. Não gera aviso.

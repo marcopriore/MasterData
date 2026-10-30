@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { RequestErpState } from "@/lib/request-erp-state"
+import { isClosedStatus } from "@/lib/request-status"
 import {
   AlertTriangle,
   Calendar,
@@ -406,8 +407,7 @@ export function RequestCard({
   }
 
   // Kanban card
-  const FINAL_STATUSES = ['completed', 'finalizado', 'rejected', 'rejeitado']
-  const isFinalStatus = FINAL_STATUSES.includes((request.status ?? '').toLowerCase())
+  const isFinalStatus = isClosedStatus(request.status)
 
   const descriptionText = request.generated_description || request.description || '—'
   const assignedToId = request.assigned_to_id ?? null

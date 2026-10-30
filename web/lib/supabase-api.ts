@@ -16,13 +16,16 @@ import {
 import type { RequestErpInfo } from '@/lib/request-erp-state'
 import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
 import { safeSearchTerm } from '@/lib/search-term'
-import { isRejectedStatus, type MyRequestRow } from '@/lib/my-requests'
+import { type MyRequestRow } from '@/lib/my-requests'
+import type { RejectionReason } from '@/lib/rejection-reasons'
+import { isCancelledStatus, isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-status'
 import {
   toNullableNumber,
   toNumber,
   type FlowRow,
   type MaterialBaseRow,
   type ProductivityRow,
+  type RejectionRow,
 } from '@/lib/reports'
 
 // ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
@@ -86,6 +89,22 @@ async function getCurrentUserTenantId(): Promise<number> {
   return promise
 }
 
+const PAGE_SIZE = 1000
+
+/** Todas as linhas, em páginas: o PostgREST devolve no máximo 1000 por consulta. A consulta precisa de ordem estável. */
+async function allPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1)
+    if (error) handleError(error)
+    out.push(...(data ?? []))
+    if (!data || data.length < PAGE_SIZE) break
+  }
+  return out
+}
+
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
 export type DashboardStats = {
@@ -118,6 +137,7 @@ const STATUS_LABELS: Record<string, string> = {
   contabilidade: 'Contabilidade',
   finalizado: 'Finalizado',
   rejected: 'Rejeitado',
+  cancelado: 'Cancelado',
   pending: 'Pendente',
 }
 
@@ -143,52 +163,50 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const roleName = (profile?.roles as { name?: string })?.name?.toUpperCase() ?? ''
   const roleType = (profile?.roles as { role_type?: string })?.role_type ?? 'sistema'
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
+  const effectiveTenantId = await getCurrentUserTenantId()
 
-  // Tenant efetivo: master usa app_metadata.tenant_id (switch), demais usam profile.tenant_id
-  const effectiveTenantId = isMaster
-    ? ((user.app_metadata?.tenant_id as number) ?? profile?.tenant_id)
-    : profile?.tenant_id
-
-  // RLS para master retorna TODOS os tenants (is_master_user) — precisamos filtrar por effectiveTenantId
-  let reqQuery = supabase
-    .from('material_requests')
-    .select('id, requester, cost_center, urgency, status, generated_description, pdm_id, created_at, user_id')
-  if (effectiveTenantId != null) {
-    reqQuery = reqQuery.eq('tenant_id', effectiveTenantId)
+  // Escopo do painel: Master e ADMIN veem tudo; solicitante, as próprias; área, a fila da sua etapa.
+  let scopeUser: string | null = null
+  let scopeStatus: string | null = null
+  if (!isMaster && roleName !== 'ADMIN') {
+    if (roleName === 'SOLICITANTE') scopeUser = user.id
+    else if (['etapa', 'operacional'].includes(roleType) && roleName) scopeStatus = roleName.toLowerCase()
   }
-  const { data: requests, error: reqErr } = await reqQuery
-  if (reqErr) handleError(reqErr)
 
-  const [{ count: pdmCount }, { count: userCount }] = await Promise.all([
-    supabase.from('pdm_templates').select('*', { count: 'exact', head: true }),
+  // Contagem no banco (request_counts, migration 035): a lista inteira passaria do corte de 1000 linhas.
+  let recentQuery = supabase
+    .from('material_requests')
+    .select('id, requester, cost_center, urgency, status, generated_description, pdm_id, created_at')
+    .eq('tenant_id', effectiveTenantId ?? 0)
+    .order('created_at', { ascending: false })
+    .limit(5)
+  if (scopeUser) recentQuery = recentQuery.eq('user_id', scopeUser)
+  if (scopeStatus) recentQuery = recentQuery.ilike('status', scopeStatus)
+
+  const [countsRes, recentRes, { count: pdmCount }, { count: userCount }] = await Promise.all([
+    supabase.rpc('request_counts', { p_user_id: scopeUser, p_status: scopeStatus }),
+    recentQuery,
+    supabase.from('pdm_templates').select('*', { count: 'exact', head: true }).eq('tenant_id', effectiveTenantId ?? 0),
     supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('tenant_id', effectiveTenantId ?? 0),
   ])
+  if (countsRes.error) handleError(countsRes.error)
+  if (recentRes.error) handleError(recentRes.error)
 
-  let filtered = requests ?? []
-  if (!isMaster && roleName !== 'ADMIN') {
-    if (roleName === 'SOLICITANTE' && user.id) {
-      filtered = filtered.filter((r) => r.user_id === user.id)
-    } else if (['etapa', 'operacional'].includes(roleType) && roleName) {
-      filtered = filtered.filter((r) => (r.status ?? '').toLowerCase() === roleName.toLowerCase())
-    }
+  const counts = (countsRes.data ?? []) as { status: string; urgency: string; total: number | string }[]
+  const byStatus: Record<string, { value: number; key: string }> = {}
+  const byUrgency: Record<string, number> = {}
+  let total = 0
+  for (const row of counts) {
+    const n = Number(row.total)
+    total += n
+    const key = row.status === 'rejeitado' ? 'rejected' : row.status
+    const label = STATUS_LABELS[key] ?? (row.status || 'Outro')
+    byStatus[label] = { value: (byStatus[label]?.value ?? 0) + n, key }
+    const urgency = URGENCY_LABELS[row.urgency] ?? row.urgency
+    byUrgency[urgency] = (byUrgency[urgency] ?? 0) + n
   }
 
-  const byStatus: Record<string, { value: number; key: string }> = {}
-  filtered.forEach((r) => {
-    const key = (r.status ?? '').toLowerCase()
-    const label = STATUS_LABELS[key] ?? (r.status ?? 'Outro')
-    byStatus[label] = { value: (byStatus[label]?.value ?? 0) + 1, key }
-  })
-
-  const byUrgency: Record<string, number> = {}
-  filtered.forEach((r) => {
-    const label = URGENCY_LABELS[r.urgency ?? ''] ?? (r.urgency ?? '')
-    byUrgency[label] = (byUrgency[label] ?? 0) + 1
-  })
-
-  const recent = [...filtered]
-    .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
-    .slice(0, 5)
+  const recent = (recentRes.data ?? [])
     .map((r) => ({
       id: r.id,
       requester: r.requester ?? '',
@@ -201,7 +219,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     }))
 
   return {
-    total_requests: filtered.length,
+    total_requests: total,
     by_status: Object.entries(byStatus).map(([name, s]) => ({ name, value: s.value, key: s.key })).sort((a, b) => b.value - a.value),
     by_urgency: Object.entries(byUrgency).map(([name, value]) => ({ name, value })),
     recent_activities: recent,
@@ -489,6 +507,8 @@ export type ApiRequest = {
   assigned_to_id?: string | null
   assigned_to_name?: string | null
   pdm_attributes?: Record<string, { label: string; type: string; options: string[] }>
+  /** Quando entrou na etapa atual (migration 036). */
+  stage_entered_at?: string | null
 }
 
 export async function getRequests(params?: {
@@ -497,22 +517,27 @@ export async function getRequests(params?: {
   limit?: number
 }): Promise<ApiRequest[]> {
   const supabase = createClient()
-  let q = supabase
-    .from('material_requests')
-    .select(`
-      *,
-      pdm_templates(id, name)
-    `)
-    .order('created_at', { ascending: false })
+  const query = () => {
+    let q = supabase
+      .from('material_requests')
+      .select(`
+        *,
+        pdm_templates(id, name)
+      `)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+    if (params?.workflowId) q = q.eq('workflow_id', params.workflowId)
+    if (params?.status) q = q.eq('status', params.status)
+    return q
+  }
 
-  if (params?.workflowId) q = q.eq('workflow_id', params.workflowId)
-  if (params?.status) q = q.eq('status', params.status)
-  if (params?.limit) q = q.limit(params.limit)
-
-  const { data, error } = await q
-  if (error) handleError(error)
-
-  const rows = data ?? []
+  const rows = params?.limit
+    ? await (async () => {
+        const { data, error } = await query().limit(params.limit!)
+        if (error) handleError(error)
+        return data ?? []
+      })()
+    : await allPages((from, to) => query().range(from, to))
   const assigneeIds = [...new Set(rows.map((r) => r.assigned_to_id).filter(Boolean))] as string[]
   const pdmIds = [...new Set(rows.map((r) => {
     const pdm = Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates
@@ -570,6 +595,7 @@ export async function getRequests(params?: {
       assigned_to_id: r.assigned_to_id,
       assigned_to_name: assignedName,
       pdm_attributes: pdmAttributes,
+      stage_entered_at: r.stage_entered_at ?? null,
     })
   }
   return result
@@ -624,6 +650,17 @@ export async function getReportMaterialBase(): Promise<MaterialBaseRow[]> {
   }))
 }
 
+export async function getReportRejections(from: string, to: string): Promise<RejectionRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('report_rejections', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    stage: String(r.stage ?? ''),
+    reason: String(r.reason ?? ''),
+    total: toNumber(r.total),
+  }))
+}
+
 /** Solicitações abertas pelo usuário logado, no tenant efetivo, com etapa, atendente e motivo da rejeição. */
 export async function getMyRequests(): Promise<MyRequestRow[]> {
   const supabase = createClient()
@@ -631,14 +668,16 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
   if (!user) return []
   const tenantId = await getCurrentUserTenantId()
 
-  const { data, error } = await supabase
-    .from('material_requests')
-    .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, pdm_templates(name, internal_code)')
-    .eq('tenant_id', tenantId)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-  if (error) handleError(error)
-  const rows = data ?? []
+  const rows = await allPages((from, to) =>
+    supabase
+      .from('material_requests')
+      .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, pdm_templates(name, internal_code)')
+      .eq('tenant_id', tenantId)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)
+  )
 
   const assigneeIds = [...new Set(rows.map((r) => r.assigned_to_id).filter(Boolean))] as string[]
   const workflowIds = [...new Set(rows.map((r) => r.workflow_id).filter(Boolean))] as number[]
@@ -647,7 +686,7 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
   const [usersRes, stepsRes, rejectionsRes] = await Promise.all([
     assigneeIds.length ? supabase.from('users').select('id, name').in('id', assigneeIds) : Promise.resolve({ data: [] }),
     workflowIds.length
-      ? supabase.from('workflow_config').select('workflow_id, status_key, step_name').in('workflow_id', workflowIds)
+      ? supabase.from('workflow_config').select('workflow_id, status_key, step_name, "order", is_active').in('workflow_id', workflowIds)
       : Promise.resolve({ data: [] }),
     rejectedIds.length
       ? supabase
@@ -660,12 +699,13 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
   ])
 
   const names = new Map(((usersRes.data ?? []) as Array<{ id: string; name: string | null }>).map((u) => [u.id, u.name ?? '']))
-  const steps = new Map(
-    ((stepsRes.data ?? []) as Array<{ workflow_id: number; status_key: string; step_name: string }>).map((s) => [
-      `${s.workflow_id}:${s.status_key.toLowerCase()}`,
-      s.step_name,
-    ])
-  )
+  const stepRows = (stepsRes.data ?? []) as Array<{ workflow_id: number; status_key: string; step_name: string; order: number; is_active: boolean }>
+  const steps = new Map(stepRows.map((s) => [`${s.workflow_id}:${s.status_key.toLowerCase()}`, s.step_name]))
+  // Primeira etapa ativa de cada workflow: enquanto a solicitação está nela sem atendente, o autor cancela.
+  const firstStep = new Map<number, string>()
+  for (const s of [...stepRows].filter((s) => s.is_active).sort((a, b) => a.order - b.order)) {
+    if (!firstStep.has(s.workflow_id)) firstStep.set(s.workflow_id, s.status_key.toLowerCase())
+  }
   const reasons = new Map<number, string>()
   for (const h of (rejectionsRes.data ?? []) as Array<{ request_id: number; event_data: { justification?: string | null } | null }>) {
     if (!reasons.has(h.request_id)) reasons.set(h.request_id, h.event_data?.justification?.trim() ?? '')
@@ -683,11 +723,14 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
       status,
       step_label: isRejectedStatus(status)
         ? 'Rejeitada'
-        : steps.get(`${r.workflow_id}:${status.toLowerCase()}`) ?? requestStatusLabel(status),
+        : isCancelledStatus(status)
+          ? 'Cancelada'
+          : steps.get(`${r.workflow_id}:${status.toLowerCase()}`) ?? requestStatusLabel(status),
       urgency: (r.urgency ?? 'low') as MyRequestRow['urgency'],
       created_at: r.created_at ?? null,
       assigned_to_name: r.assigned_to_id ? names.get(r.assigned_to_id) ?? null : null,
       rejection_reason: reasons.get(r.id) || null,
+      can_cancel: !r.assigned_to_id && firstStep.get(r.workflow_id) === status.toLowerCase(),
     }
   })
 }
@@ -760,12 +803,10 @@ function queueRequestNotice(requestId: number) {
   }).catch(() => {})
 }
 
-const FINAL_REQUEST_STATUSES = ['finalizado', 'completed', 'concluído', 'concluido']
-
 /** Última etapa concluída: o servidor cria o material no ERP se houver integração de criação ativa. */
 function queueRequestErp(requestId: number, status: unknown) {
   if (typeof window === 'undefined') return
-  if (!FINAL_REQUEST_STATUSES.includes(String(status ?? '').toLowerCase())) return
+  if (!isDoneStatus(String(status ?? ''))) return
   void fetch(`/api/requests/${requestId}/erp`, { method: 'POST' }).catch(() => {})
 }
 
@@ -827,13 +868,13 @@ export async function checkDuplicateRequest(params: {
 
     const { data: openRequests, error: reqErr } = await supabase
       .from('material_requests')
-      .select('id, technical_attributes, generated_description')
+      .select('id, status, technical_attributes, generated_description')
       .eq('pdm_id', params.pdm_id)
-      .not('status', 'in', '("finalizado","rejected","rejeitado","completed")')
 
     if (reqErr) throw reqErr
 
-    for (const row of openRequests ?? []) {
+    // Fechada (finalizada, rejeitada — gravada "Rejected" — ou cancelada) não conta como duplicada.
+    for (const row of (openRequests ?? []).filter((r) => !isClosedStatus(r.status))) {
       if (attrsMatch(target, pickDescriptionAttrs(row.technical_attributes, descriptionKeys))) {
         return {
           isDuplicate: true,
@@ -911,15 +952,31 @@ export async function resubmitRequest(
   return data as ApiRequest
 }
 
-export async function rejectRequest(id: number, reason?: string): Promise<ApiRequest> {
+/** category: motivo padrão (lib/rejection-reasons.ts), obrigatório; reason: texto livre. */
+export async function rejectRequest(id: number, reason: string, category: RejectionReason): Promise<ApiRequest> {
   const supabase = createClient()
-  const { data, error } = await supabase.rpc('reject_request', { p_request_id: id, p_reason: reason ?? '' })
+  const { data, error } = await supabase.rpc('reject_request', { p_request_id: id, p_reason: reason, p_category: category })
   if (error) handleError(error)
   void logAction({
     category: 'requests',
     action: 'request_rejected',
     description: 'Solicitação rejeitada',
-    event_data: { request_id: id, reason: reason ?? '' },
+    event_data: { request_id: id, reason, motivo: category },
+  })
+  queueRequestNotice(id)
+  return data as ApiRequest
+}
+
+/** Solicitante (na primeira etapa, sem atendente) ou Admin. A RPC confere quem pode. */
+export async function cancelRequest(id: number, reason = ''): Promise<ApiRequest> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('cancel_request', { p_request_id: id, p_reason: reason })
+  if (error) handleError(error)
+  void logAction({
+    category: 'requests',
+    action: 'request_cancelled',
+    description: 'Solicitação cancelada',
+    event_data: { request_id: id, reason },
   })
   queueRequestNotice(id)
   return data as ApiRequest
@@ -936,6 +993,7 @@ export async function moveRequestToStatus(id: number, statusKey: string): Promis
     description: 'Solicitação movida no kanban',
     event_data: { request_id: id, para: statusKey },
   })
+  queueRequestNotice(id)
   return data as ApiRequest
 }
 
@@ -1080,7 +1138,16 @@ export async function getRequestById(id: number): Promise<ApiRequest | null> {
 // ─── Workflows ───────────────────────────────────────────────────────────────
 
 export type WorkflowHeader = { id: number; name: string; description?: string | null; is_active?: boolean }
-export type WorkflowStep = { id: number; workflow_id: number; step_name: string; status_key: string; order: number; is_active: boolean }
+export type WorkflowStep = {
+  id: number
+  workflow_id: number
+  step_name: string
+  status_key: string
+  order: number
+  is_active: boolean
+  /** Prazo da etapa em dias (migration 036); vazio usa o padrão da governança. */
+  sla_days?: number | null
+}
 
 export async function getWorkflows(): Promise<WorkflowHeader[]> {
   if (cachedWorkflows && Date.now() - cachedWorkflowsTime < CACHE_TTL_MS) {
@@ -1126,7 +1193,7 @@ export async function updateWorkflow(id: number, payload: Partial<WorkflowHeader
 
 export async function bulkUpdateWorkflowConfig(payload: {
   workflow_id: number
-  steps: { id?: number | null; step_name: string; status_key?: string; order: number; is_active?: boolean }[]
+  steps: { id?: number | null; step_name: string; status_key?: string; order: number; is_active?: boolean; sla_days?: number | null }[]
 }): Promise<void> {
   const supabase = createClient()
   const tenantId = await getCurrentUserTenantId()
@@ -1139,12 +1206,12 @@ export async function bulkUpdateWorkflowConfig(payload: {
       status_key: s.status_key ?? s.step_name.toLowerCase().replace(/\s+/g, '_'),
       order: s.order ?? i,
       is_active: s.is_active ?? true,
+      ...(s.sla_days !== undefined ? { sla_days: s.sla_days } : {}),
     }
-    if (s.id) {
-      await supabase.from('workflow_config').update(row).eq('id', s.id)
-    } else {
-      await supabase.from('workflow_config').insert(row)
-    }
+    const { error } = s.id
+      ? await supabase.from('workflow_config').update(row).eq('id', s.id)
+      : await supabase.from('workflow_config').insert(row)
+    if (error) handleError(error)
   }
   invalidateApiCache()
 }
@@ -1325,11 +1392,15 @@ type ErpActionResult = {
 
 /** Situação no ERP do material de cada solicitação (finalizada), calculada no servidor. */
 export async function getRequestsErpStatus(requestIds: number[]): Promise<RequestErpInfo[]> {
-  if (requestIds.length === 0) return []
-  const res = await fetch(`/api/requests/erp-status?ids=${requestIds.join(',')}`)
-  const payload = await res.json().catch(() => ({})) as { items?: RequestErpInfo[]; error?: string }
-  if (!res.ok) throw new Error(payload.error ?? 'Falha ao consultar a situação no ERP')
-  return payload.items ?? []
+  // A rota aceita até 200 ids por chamada.
+  const items: RequestErpInfo[] = []
+  for (let i = 0; i < requestIds.length; i += 200) {
+    const res = await fetch(`/api/requests/erp-status?ids=${requestIds.slice(i, i + 200).join(',')}`)
+    const payload = await res.json().catch(() => ({})) as { items?: RequestErpInfo[]; error?: string }
+    if (!res.ok) throw new Error(payload.error ?? 'Falha ao consultar a situação no ERP')
+    items.push(...(payload.items ?? []))
+  }
+  return items
 }
 
 /** Mesma regra da trava do ERP, calculada no servidor. */
@@ -1991,14 +2062,47 @@ export async function uploadRequestAttachment(
   const { error } = await supabase.storage.from('request-attachments').upload(path, file, { upsert: false })
   if (error) handleError(error)
 
-  await supabase.from('request_attachments').insert({
+  const { error: recordError } = await supabase.from('request_attachments').insert({
     request_id: requestId,
     file_name: file.name,
     file_path: path,
     mime_type: file.type || 'application/octet-stream',
     file_size: file.size,
   })
+  if (recordError) handleError(recordError)
   return { path }
+}
+
+export type RequestAttachment = {
+  id: number
+  file_name: string
+  file_size: number | null
+  uploaded_at: string | null
+  /** Link de download válido por alguns minutos (bucket privado). */
+  url: string | null
+}
+
+export async function getRequestAttachments(requestId: number): Promise<RequestAttachment[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('request_attachments')
+    .select('id, file_name, file_path, file_size, uploaded_at')
+    .eq('request_id', requestId)
+    .order('uploaded_at')
+  if (error) handleError(error)
+  const rows = data ?? []
+  if (rows.length === 0) return []
+  const { data: signed } = await supabase.storage
+    .from('request-attachments')
+    .createSignedUrls(rows.map((r) => r.file_path as string), 600)
+  const urlByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]))
+  return rows.map((r) => ({
+    id: r.id as number,
+    file_name: r.file_name as string,
+    file_size: (r.file_size as number | null) ?? null,
+    uploaded_at: (r.uploaded_at as string | null) ?? null,
+    url: urlByPath.get(r.file_path as string) ?? null,
+  }))
 }
 
 // ─── System Logs ──────────────────────────────────────────────────────────────

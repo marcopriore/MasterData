@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { getSystemLogs, getUsersApi, downloadFile } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
@@ -199,7 +199,10 @@ export default function AdminLogsPage() {
     })
   }
 
+  // Só a consulta mais recente atualiza a tabela (troca rápida de página ou filtro).
+  const fetchSeq = useRef(0)
   const fetchLogs = useCallback(() => {
+    const seq = ++fetchSeq.current
     setLoading(true)
     getSystemLogs({
       page,
@@ -210,14 +213,16 @@ export default function AdminLogsPage() {
       to: appliedDateTo ? appliedDateTo + 'T23:59:59' : undefined,
     })
       .then((data) => {
+        if (seq !== fetchSeq.current) return
         setLogs(data.items ?? [])
         setTotal(data.total ?? 0)
       })
       .catch(() => {
+        if (seq !== fetchSeq.current) return
         setLogs([])
         setTotal(0)
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (seq === fetchSeq.current) setLoading(false) })
   }, [page, limit, appliedCategory, appliedUserId, appliedDateFrom, appliedDateTo])
 
   useEffect(() => {

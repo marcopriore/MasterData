@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { defaultPeriod, formatHours, periodToRange, productivityByArea, totalsOfBase, type ProductivityRow } from './reports'
+import { defaultPeriod, formatHours, periodToRange, productivityByArea, rejectionsBy, totalsOfBase, type ProductivityRow } from './reports'
+
+describe('rejeições por etapa e motivo', () => {
+  it('soma e ordena do maior para o menor', () => {
+    const rows = [
+      { stage: 'cadastro', reason: 'duplicado', total: 3 },
+      { stage: 'cadastro', reason: 'falta_informacao', total: 1 },
+      { stage: 'fiscal', reason: 'duplicado', total: 2 },
+    ]
+    expect(rejectionsBy(rows, 'stage')).toEqual([{ key: 'cadastro', total: 4 }, { key: 'fiscal', total: 2 }])
+    expect(rejectionsBy(rows, 'reason')).toEqual([{ key: 'duplicado', total: 5 }, { key: 'falta_informacao', total: 1 }])
+  })
+})
 
 const person = (extra: Partial<ProductivityRow>): ProductivityRow => ({
   user_id: 'u',

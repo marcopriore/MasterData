@@ -22,7 +22,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
 import type { RequestErpState } from "@/lib/request-erp-state"
 import { kanbanMoveBlock } from "@/lib/kanban-move"
-import { DONE_STATUSES, REJECTED_STATUSES, statusGroup } from "@/lib/governance-stats"
+import { CANCELLED_STATUSES, DONE_STATUSES, REJECTED_STATUSES, statusGroup } from "@/lib/request-status"
 import { getWorkflowConfig, assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -206,14 +206,15 @@ export function KanbanBoard({
 
   const allStatusesSet = useMemo(() => {
     const s = new Set(columns.map((c) => c.id.toLowerCase()))
-    for (const status of [...REJECTED_STATUSES, ...DONE_STATUSES]) s.add(status)
+    for (const status of [...REJECTED_STATUSES, ...DONE_STATUSES, ...CANCELLED_STATUSES]) s.add(status)
     return s
   }, [columns])
-  /** Coluna do cartão: rejeitada ("Rejected" da rejeição) → Rejeitadas; finalizada → última etapa. */
+  /** Coluna do cartão: rejeitada ("Rejected" da rejeição) → Rejeitadas; cancelada → Canceladas; finalizada → última etapa. */
   const columnKeyOf = useCallback(
     (status: string | null | undefined) => {
       const group = statusGroup(status)
       if (group === "rejected") return "rejeitado"
+      if (group === "cancelled") return "cancelado"
       if (group === "done" && columns.length > 0) return columns[columns.length - 1].id.toLowerCase()
       return (status || "").toLowerCase()
     },
@@ -338,7 +339,12 @@ export function KanbanBoard({
     showAllColumns && hasRejeitadas
       ? { id: "rejeitado", label: "Rejeitadas", ...FIXED_COLORS.rejected }
       : null
-  const columnsToRender = rejeitadasColumn ? [...baseColumns, rejeitadasColumn] : baseColumns
+  const hasCanceladas = localRequests.some((r) => columnKeyOf(r.status) === "cancelado")
+  const canceladasColumn: KanbanColumn | null =
+    showAllColumns && hasCanceladas
+      ? { id: "cancelado", label: "Canceladas", ...FIXED_COLORS.draft }
+      : null
+  const columnsToRender = [...baseColumns, ...(rejeitadasColumn ? [rejeitadasColumn] : []), ...(canceladasColumn ? [canceladasColumn] : [])]
 
   return (
     <DndContext

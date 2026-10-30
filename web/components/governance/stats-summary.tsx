@@ -11,7 +11,7 @@ import {
   Timer,
 } from "lucide-react"
 import type { MaterialRequest } from "./request-card"
-import { LATE_AFTER_DAYS, type GovernanceIndicators } from "@/lib/governance-stats"
+import type { GovernanceIndicators } from "@/lib/governance-stats"
 
 interface StatsSummaryProps {
   requests: MaterialRequest[]
@@ -28,7 +28,7 @@ export function StatsSummary({ requests, variant = "default", governanceStats, g
     const stats: { label: string; value: string | number; hint?: string; icon: React.ReactNode; color: string; bgColor: string; labelColor: string }[] = governanceStats
       ? [
           { label: "EM ANDAMENTO", value: governanceStats.em_andamento, icon: <Clock className="size-5" />, color: "text-blue-300", bgColor: "bg-blue-500/25", labelColor: "text-blue-300" },
-          { label: `ATRASADAS (+${LATE_AFTER_DAYS} DIAS)`, value: governanceStats.atrasadas, icon: <AlertTriangle className="size-5" />, color: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300", bgColor: governanceStats.atrasadas > 0 ? "bg-red-500/25" : "bg-green-500/25", labelColor: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300" },
+          { label: "ATRASADAS", hint: "Além do prazo da etapa", value: governanceStats.atrasadas, icon: <AlertTriangle className="size-5" />, color: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300", bgColor: governanceStats.atrasadas > 0 ? "bg-red-500/25" : "bg-green-500/25", labelColor: governanceStats.atrasadas > 0 ? "text-red-300" : "text-green-300" },
           { label: "TAXA DE REJEIÇÃO", value: `${governanceStats.taxa_rejeicao.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`, icon: <XCircle className="size-5" />, color: "text-orange-300", bgColor: "bg-orange-500/25", labelColor: "text-orange-300" },
           {
             label: "IDADE MÉDIA EM ANDAMENTO",

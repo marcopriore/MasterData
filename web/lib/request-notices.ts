@@ -1,6 +1,7 @@
 /** Quem avisar e com qual texto, sem banco e sem Resend. */
 
-export type NoticeEvent = 'created' | 'assigned' | 'approved' | 'rejected' | 'completed'
+/** moved: o Admin arrastou para outra etapa no kanban (avisa a área de destino, como approved). */
+export type NoticeEvent = 'created' | 'assigned' | 'approved' | 'moved' | 'rejected' | 'cancelled' | 'completed'
 
 export type NoticePrefs = {
   notify_request_created: boolean
@@ -55,14 +56,16 @@ export function noticeEventFromHistory(eventType: string, stage: string | null |
   if (type === 'assigned') return 'assigned'
   if (type === 'rejected') return 'rejected'
   if (type === 'approved') return FINAL_STAGES.has(stageKey) ? 'completed' : 'approved'
+  if (type === 'stage_change') return 'moved'
+  if (type === 'cancelled') return 'cancelled'
   return null
 }
 
 function prefPair(event: NoticeEvent): { notify: keyof NoticePrefs; email: keyof NoticePrefs } {
   if (event === 'created') return { notify: 'notify_request_created', email: 'email_request_created' }
   if (event === 'assigned') return { notify: 'notify_request_assigned', email: 'email_request_assigned' }
-  if (event === 'approved') return { notify: 'notify_request_approved', email: 'email_request_approved' }
-  if (event === 'rejected') return { notify: 'notify_request_rejected', email: 'email_request_rejected' }
+  if (event === 'approved' || event === 'moved') return { notify: 'notify_request_approved', email: 'email_request_approved' }
+  if (event === 'rejected' || event === 'cancelled') return { notify: 'notify_request_rejected', email: 'email_request_rejected' }
   return { notify: 'notify_request_completed', email: 'email_request_completed' }
 }
 
@@ -87,7 +90,8 @@ export function selectNoticeRecipients(input: {
   const targeted = input.users.filter((user) => {
     if (!user.isActive) return false
     if (input.actorId && user.id === input.actorId) return false
-    if (input.event === 'assigned' || input.event === 'rejected' || input.event === 'completed') {
+    // Cancelada pelo próprio autor não gera aviso: o autor é o ator e já fica de fora acima.
+    if (input.event === 'assigned' || input.event === 'rejected' || input.event === 'cancelled' || input.event === 'completed') {
       return input.requesterId != null && user.id === input.requesterId
     }
     if (!stage.trim()) return false
@@ -121,6 +125,13 @@ export function noticeCopy(
   }
   if (event === 'completed') {
     return { title: 'Solicitação concluída', message: `${input.code} foi concluída.` }
+  }
+  if (event === 'cancelled') {
+    const detail = reason ? ` Motivo: ${reason}` : ''
+    return { title: 'Solicitação cancelada', message: `${input.code} foi cancelada pelo administrador.${detail}` }
+  }
+  if (event === 'moved') {
+    return { title: 'Solicitação movida', message: `${input.code} foi movida para ${stageLabel} pelo administrador.` }
   }
   return { title: 'Etapa aprovada', message: `${input.code} foi encaminhada para ${stageLabel}.` }
 }

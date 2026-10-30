@@ -164,6 +164,9 @@ async function checkSupabase(env) {
     ['031', 'tenant_overview', {}],
     ['032', 'require_permission', { p_key: 'can_view_logs' }],
     ['033', 'stage_missing_fields', { p_tenant_id: -1, p_status: 'cadastro', p_attributes: {} }],
+    ['035', 'request_counts', {}],
+    ['036', 'cancel_request', { p_request_id: -1 }],
+    ['036', 'report_rejections', { p_from: '2026-01-01', p_to: '2026-01-02' }],
   ]
   for (const [migration, fn, params] of rpcs) {
     const { error: rpcErr } = await admin.rpc(fn, params)

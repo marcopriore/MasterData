@@ -8,6 +8,7 @@ import {
   getReportFlow,
   getReportMaterialBase,
   getReportProductivity,
+  getReportRejections,
   getWorkflowConfig,
   requestStatusLabel,
 } from '@/lib/supabase-api'
@@ -16,17 +17,20 @@ import {
   formatHours,
   periodToRange,
   productivityByArea,
+  rejectionsBy,
   totalsOfBase,
   type FlowRow,
   type MaterialBaseRow,
   type ProductivityRow,
+  type RejectionRow,
 } from '@/lib/reports'
+import { rejectionReasonLabel } from '@/lib/rejection-reasons'
 import { exportRowsToXlsx } from '@/lib/export-xlsx'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-type Tab = 'fluxo' | 'produtividade' | 'base'
+type Tab = 'fluxo' | 'produtividade' | 'rejeicoes' | 'base'
 
 function Kpi({ label, value, tone }: { label: string; value: string | number; tone?: 'alert' }) {
   return (
@@ -66,6 +70,7 @@ export default function ReportsPage() {
   const [flow, setFlow] = useState<FlowRow[]>([])
   const [people, setPeople] = useState<ProductivityRow[]>([])
   const [base, setBase] = useState<MaterialBaseRow[]>([])
+  const [rejections, setRejections] = useState<RejectionRow[]>([])
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
 
@@ -77,15 +82,17 @@ export default function ReportsPage() {
     setLoading(true)
     const range = periodToRange(period.from, period.to)
     try {
-      const [flowRows, peopleRows, baseRows, steps] = await Promise.all([
+      const [flowRows, peopleRows, baseRows, rejectionRows, steps] = await Promise.all([
         getReportFlow(range.from, range.to),
         getReportProductivity(range.from, range.to),
         getReportMaterialBase(),
+        getReportRejections(range.from, range.to),
         getWorkflowConfig().catch(() => []),
       ])
       setFlow(flowRows)
       setPeople(peopleRows)
       setBase(baseRows)
+      setRejections(rejectionRows)
       setStepNames(new Map(steps.map((s) => [s.status_key.toLowerCase(), { name: s.step_name, order: s.order }])))
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Não foi possível carregar os relatórios.')
@@ -108,6 +115,10 @@ export default function ReportsPage() {
   const peopleSorted = useMemo(() => [...people].sort((a, b) => b.approved + b.rejected - (a.approved + a.rejected)), [people])
   const baseSorted = useMemo(() => [...base].sort((a, b) => b.total - a.total), [base])
   const baseTotals = useMemo(() => totalsOfBase(base), [base])
+  const rejectionStageLabel = useCallback((stage: string) => (stage === 'nao_informada' ? 'Não informada' : stageLabel(stage)), [stageLabel])
+  const rejectionsByStage = useMemo(() => rejectionsBy(rejections, 'stage'), [rejections])
+  const rejectionsByReason = useMemo(() => rejectionsBy(rejections, 'reason'), [rejections])
+  const rejectionsTotal = rejections.reduce((s, r) => s + r.total, 0)
 
   const maxAvg = Math.max(0, ...flow.map((r) => r.avg_hours ?? 0))
   const maxOpen = Math.max(0, ...flow.map((r) => r.current_open))
@@ -143,6 +154,14 @@ export default function ReportsPage() {
           })),
           'Produtividade',
           `relatorio_produtividade_${period.from}_${period.to}`
+        )
+      } else if (tab === 'rejeicoes') {
+        await exportRowsToXlsx(
+          [...rejections]
+            .sort((a, b) => b.total - a.total)
+            .map((r) => ({ Etapa: rejectionStageLabel(r.stage), Motivo: rejectionReasonLabel(r.reason), Rejeições: r.total })),
+          'Rejeições',
+          `relatorio_rejeicoes_${period.from}_${period.to}`
         )
       } else {
         await exportRowsToXlsx(
@@ -208,8 +227,47 @@ export default function ReportsPage() {
         <TabsList>
           <TabsTrigger value="fluxo">Fluxo</TabsTrigger>
           <TabsTrigger value="produtividade">Produtividade</TabsTrigger>
+          <TabsTrigger value="rejeicoes">Rejeições</TabsTrigger>
           <TabsTrigger value="base">Base de materiais</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="rejeicoes" className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Kpi label="Rejeições no período" value={rejectionsTotal} tone={rejectionsTotal > 0 ? 'alert' : undefined} />
+            <Kpi label="Etapa que mais rejeita" value={rejectionsByStage[0] ? `${rejectionStageLabel(rejectionsByStage[0].key)} · ${rejectionsByStage[0].total}` : '—'} />
+            <Kpi label="Motivo mais comum" value={rejectionsByReason[0] ? `${rejectionReasonLabel(rejectionsByReason[0].key)} · ${rejectionsByReason[0].total}` : '—'} />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {([
+              ['Por etapa', rejectionsByStage, rejectionStageLabel],
+              ['Por motivo', rejectionsByReason, rejectionReasonLabel],
+            ] as const).map(([title, groups, label]) => (
+              <div key={title} className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-zinc-700/50 dark:bg-card">
+                <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold dark:border-zinc-700">{title}</div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {groups.length === 0 ? (
+                      <tr><td className="py-10 text-center text-muted-foreground">{loading ? 'Carregando…' : 'Nenhuma rejeição no período.'}</td></tr>
+                    ) : groups.map((g) => (
+                      <tr key={g.key} className="border-b border-slate-100 last:border-b-0 dark:border-zinc-700/40">
+                        <td className={`${td} font-medium`}>{label(g.key)}</td>
+                        <td className={`${td} w-56`}>
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 shrink-0 text-right tabular-nums">{g.total}</span>
+                            <Bar value={g.total} max={groups[0]?.total ?? 0} tone="red" />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            O motivo padrão é obrigatório desde a versão 3.18; rejeições anteriores aparecem como &quot;Não informado&quot;. A etapa é onde a solicitação estava ao ser rejeitada.
+          </p>
+        </TabsContent>
 
         <TabsContent value="fluxo" className="mt-4 space-y-4">
           <div className="grid gap-3 sm:grid-cols-3">

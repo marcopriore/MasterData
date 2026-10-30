@@ -20,6 +20,7 @@ const row = (id: number, extra: Partial<MyRequestRow> = {}): MyRequestRow => ({
   created_at: null,
   assigned_to_name: null,
   rejection_reason: null,
+  can_cancel: false,
   ...extra,
 })
 
@@ -29,6 +30,7 @@ describe('situationOf', () => {
     expect(situationOf('finalizado')).toBe('finalizada')
     expect(situationOf('Rejected')).toBe('rejeitada')
     expect(situationOf('rejeitado')).toBe('rejeitada')
+    expect(situationOf('cancelado')).toBe('cancelada')
   })
 })
 
@@ -63,6 +65,6 @@ describe('applyMyRequests', () => {
   })
 
   it('conta por situação', () => {
-    expect(countBySituation(rows)).toEqual({ andamento: 1, finalizada: 1, rejeitada: 1 })
+    expect(countBySituation(rows)).toEqual({ andamento: 1, finalizada: 1, rejeitada: 1, cancelada: 0 })
   })
 })

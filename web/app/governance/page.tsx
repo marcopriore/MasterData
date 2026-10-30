@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   getRequestsFinishedAt,
+  getWorkflowConfig,
+  cancelRequest,
   getWorkflows,
   getPdms,
   getRequests,
@@ -42,7 +44,8 @@ import {
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import { AlertTriangle, ChevronLeft, Check, X, Save, Loader2, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react'
-import { isRejectedStatus } from '@/lib/my-requests'
+import { isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-status'
+import { REJECTION_REASONS, type RejectionReason } from '@/lib/rejection-reasons'
 import { toErpText } from '@/lib/erp-text'
 import { Input } from '@/components/ui/input'
 import { applyFieldMask, FIELD_MASKS } from '@/lib/masks'
@@ -105,6 +108,7 @@ type ApiRequest = {
   assigned_to_id?: string | null
   assigned_to_name?: string | null
   pdm_attributes?: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
+  stage_entered_at?: string | null
 }
 
 function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
@@ -269,19 +273,22 @@ export default function GovernancePage() {
     loadAll()
   }, [ready, pathname])
 
+  // Só a consulta mais recente atualiza o quadro (troca de workflow ou recarga depois de uma ação).
+  const fetchSeq = useRef(0)
   const fetchRequests = useCallback((opts?: { silent?: boolean }): Promise<ApiRequest[]> => {
+    const seq = ++fetchSeq.current
     if (!opts?.silent) setLoading(true)
     return getRequests({ workflowId: selectedWorkflowId ?? undefined })
       .then((data) => {
         const arr = (data ?? []) as ApiRequest[]
-        setRequests(arr)
+        if (seq === fetchSeq.current) setRequests(arr)
         return arr
       })
       .catch(() => {
-        setRequests([])
+        if (seq === fetchSeq.current) setRequests([])
         return []
       })
-      .finally(() => { if (!opts?.silent) setLoading(false) })
+      .finally(() => { if (!opts?.silent && seq === fetchSeq.current) setLoading(false) })
   }, [selectedWorkflowId])
 
   useEffect(() => {
@@ -298,7 +305,7 @@ export default function GovernancePage() {
 
   const fetchErpStatus = useCallback(async (list: ApiRequest[]) => {
     const finalized = list
-      .filter((r) => ['finalizado', 'completed', 'concluído', 'concluido'].includes((r.status ?? '').toLowerCase()))
+      .filter((r) => isDoneStatus(r.status))
       .map((r) => r.id)
     if (finalized.length === 0) {
       setErpInfo(new Map())
@@ -325,6 +332,15 @@ export default function GovernancePage() {
     const done = requests.filter((r) => statusGroup(r.status) === 'done').map((r) => r.id)
     getRequestsFinishedAt(done).then(setFinishedAt).catch(() => setFinishedAt({}))
   }, [requests])
+
+  // Prazo de cada etapa do workflow escolhido, para "atrasadas".
+  const [slaByStage, setSlaByStage] = useState<Record<string, number | null>>({})
+  useEffect(() => {
+    if (selectedWorkflowId == null) return
+    getWorkflowConfig(selectedWorkflowId)
+      .then((steps) => setSlaByStage(Object.fromEntries(steps.map((s) => [s.status_key.toLowerCase(), s.sla_days ?? null]))))
+      .catch(() => setSlaByStage({}))
+  }, [selectedWorkflowId])
 
   /** A chamada ao ERP da última etapa roda em segundo plano; reconsulta depois que ela tem tempo de voltar. */
   const scheduleErpRefresh = useCallback(() => {
@@ -374,12 +390,19 @@ export default function GovernancePage() {
 
   /** Indicadores das solicitações que a tela mostra: workflow escolhido e filtros aplicados. */
   const indicators = useMemo(() => {
-    const createdById = new Map(requests.map((r) => [String(r.id), r.date ?? null]))
+    const byId = new Map(requests.map((r) => [String(r.id), r]))
     return governanceIndicators(
-      filteredRequests.map((r) => ({ id: r.id, status: r.status, createdAt: createdById.get(r.id) ?? null })),
-      finishedAt
+      filteredRequests.map((r) => ({
+        id: r.id,
+        status: r.status,
+        createdAt: byId.get(r.id)?.date ?? null,
+        stageEnteredAt: byId.get(r.id)?.stage_entered_at ?? null,
+      })),
+      finishedAt,
+      Date.now(),
+      slaByStage
     )
-  }, [filteredRequests, requests, finishedAt])
+  }, [filteredRequests, requests, finishedAt, slaByStage])
 
   const lastInitializedRequestIdRef = useRef<number | null>(null)
 
@@ -462,8 +485,7 @@ export default function GovernancePage() {
   const isCadastroPhase = (selectedRequest?.status ?? '').toLowerCase() === 'cadastro'
   const canEditTechnicalAttributes = isAssignedToMe && isCadastroPhase
 
-  const FINAL_STATUSES = ['completed', 'finalizado', 'rejected', 'rejeitado']
-  const isSelectedFinal = FINAL_STATUSES.includes((selectedRequest?.status ?? '').toLowerCase())
+  const isSelectedFinal = isClosedStatus(selectedRequest?.status)
 
   const selectedErpInfo = selectedRequest ? erpInfo.get(selectedRequest.id) ?? null : null
   const selectedErpState = selectedErpInfo ? requestErpState(selectedErpInfo) : null
@@ -561,6 +583,7 @@ export default function GovernancePage() {
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectJustification, setRejectJustification] = useState('')
+  const [rejectCategory, setRejectCategory] = useState<RejectionReason | ''>('')
   const [rejectError, setRejectError] = useState<string | null>(null)
   const [dupModalOpen, setDupModalOpen] = useState(false)
   const [dupInfo, setDupInfo] = useState<{
@@ -741,8 +764,30 @@ export default function GovernancePage() {
       .finally(() => setHistoryLoading(false))
   }, [selectedRequest, historyFetched, historyLoading])
 
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const handleCancelConfirm = async () => {
+    if (!selectedRequest) return
+    setApproveRejectLoading(true)
+    try {
+      await cancelRequest(selectedRequest.id, cancelReason.trim())
+      toast.success('Solicitação cancelada.')
+      setCancelOpen(false)
+      handleCloseModal()
+      await fetchRequests({ silent: true })
+    } catch (err) {
+      toast.error('Falha ao cancelar', { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setApproveRejectLoading(false)
+    }
+  }
+
   const handleRejectConfirm = async () => {
     if (!selectedRequest) return
+    if (!rejectCategory) {
+      setRejectError('Escolha o motivo da rejeição.')
+      return
+    }
     if (!rejectJustification.trim()) {
       setRejectError('Justificativa é obrigatória.')
       return
@@ -750,13 +795,14 @@ export default function GovernancePage() {
     setApproveRejectLoading(true)
     setRejectError(null)
     try {
-      await rejectRequest(selectedRequest.id, rejectJustification.trim())
+      await rejectRequest(selectedRequest.id, rejectJustification.trim(), rejectCategory)
       toast.success('Solicitação rejeitada com sucesso!')
       setRejectModalOpen(false)
+      setRejectCategory('')
       handleCloseModal()
       await fetchRequests({ silent: true })
-    } catch {
-      setRejectError('Falha ao rejeitar solicitação')
+    } catch (err) {
+      setRejectError(err instanceof Error ? err.message : 'Falha ao rejeitar solicitação')
     } finally {
       setApproveRejectLoading(false)
     }
@@ -1350,6 +1396,17 @@ export default function GovernancePage() {
                 {validationError && (
                   <p className="text-sm text-destructive">{validationError}</p>
                 )}
+                {(user?.is_master || isAdmin) && !isSelectedFinal && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="self-start text-muted-foreground hover:text-red-700"
+                    disabled={saveLoading || approveRejectLoading}
+                    onClick={() => { setCancelReason(''); setCancelOpen(true) }}
+                  >
+                    Cancelar solicitação
+                  </Button>
+                )}
               </DialogFooter>
             </>
           )}
@@ -1400,6 +1457,31 @@ export default function GovernancePage() {
         </DialogContent>
       </Dialog>
 
+      {/* Cancelamento pelo Admin (o solicitante cancela em Minhas Solicitações enquanto ninguém atendeu) */}
+      <Dialog open={cancelOpen} onOpenChange={(open) => { if (!open) setCancelOpen(false) }}>
+        <DialogContent className="max-w-md border-slate-200 bg-white text-slate-900 shadow-xl dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
+          <DialogHeader>
+            <DialogTitle>Cancelar REQ-{String(selectedRequest?.id ?? '').padStart(4, '0')}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            A solicitação sai do fluxo e não pode ser reaberta. Para corrigir e reenviar, use Rejeitar.
+          </p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value.toUpperCase())}
+            maxLength={500}
+            placeholder="Motivo do cancelamento (opcional)"
+            className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm uppercase"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={approveRejectLoading}>Voltar</Button>
+            <Button className="bg-red-600 hover:bg-red-700" onClick={handleCancelConfirm} disabled={approveRejectLoading}>
+              {approveRejectLoading ? 'Processando…' : 'Confirmar cancelamento'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Modal de Rejeição com justificativa obrigatória */}
       <Dialog
         open={rejectModalOpen}
@@ -1421,6 +1503,23 @@ export default function GovernancePage() {
               Informe a justificativa da reprovação para a solicitação REQ-
               {String(selectedRequest?.id ?? '').padStart(4, '0')}.
             </p>
+            <div>
+              <label htmlFor="reject-category" className="text-sm font-medium block mb-2">
+                Motivo
+              </label>
+              <select
+                id="reject-category"
+                value={rejectCategory}
+                onChange={(e) => setRejectCategory(e.target.value as RejectionReason | '')}
+                disabled={approveRejectLoading}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">Selecione o motivo...</option>
+                {REJECTION_REASONS.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="text-sm font-medium block mb-2">
                 Justificativa da reprovação (obrigatória)
@@ -1448,7 +1547,7 @@ export default function GovernancePage() {
             </Button>
             <Button
               onClick={handleRejectConfirm}
-              disabled={approveRejectLoading || !rejectJustification.trim()}
+              disabled={approveRejectLoading || !rejectJustification.trim() || !rejectCategory}
               className="bg-red-600 hover:bg-red-700"
             >
               {approveRejectLoading ? 'Processando…' : 'Confirmar Rejeição'}

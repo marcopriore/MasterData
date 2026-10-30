@@ -3,20 +3,25 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, FilePlus, FileText, Loader2, RotateCcw, Search, X } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, ExternalLink, FilePlus, FileText, Loader2, Paperclip, RotateCcw, Search, X } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import {
+  cancelRequest,
   getMyRequests,
+  getRequestAttachments,
   getRequestHistory,
   getRequestsErpStatus,
   requestStatusLabel,
   type HistoryEvent,
+  type RequestAttachment,
 } from '@/lib/supabase-api'
+import { exportRowsToXlsx } from '@/lib/export-xlsx'
 import {
   applyMyRequests,
   countBySituation,
   DEFAULT_MY_REQUESTS,
+  filterMyRequests,
   MY_REQUESTS_PAGE_SIZE,
   situationOf,
   type MyRequestRow,
@@ -33,6 +38,13 @@ const SITUATION_LABEL: Record<MyRequestSituation, string> = {
   andamento: 'Em andamento',
   finalizada: 'Finalizadas',
   rejeitada: 'Rejeitadas',
+  cancelada: 'Canceladas',
+}
+
+function formatSize(bytes: number | null): string {
+  if (bytes == null) return ''
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`
 }
 
 const URGENCY_LABEL = { low: 'Baixa', medium: 'Média', high: 'Alta' } as const
@@ -49,6 +61,8 @@ function StageBadge({ row }: { row: MyRequestRow }) {
   const cls =
     situation === 'rejeitada'
       ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
+      : situation === 'cancelada'
+        ? 'border-slate-300 bg-slate-100 text-slate-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
       : situation === 'finalizada'
         ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-900/30 dark:text-green-400'
         : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300'
@@ -66,6 +80,11 @@ function MyRequestsContent() {
   const [detailId, setDetailId] = useState<number | null>(null)
   const [history, setHistory] = useState<HistoryEvent[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [attachments, setAttachments] = useState<RequestAttachment[]>([])
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -101,13 +120,59 @@ function MyRequestsContent() {
     if (detailId == null) return
     let cancelled = false
     setHistory([])
+    setAttachments([])
     setHistoryLoading(true)
     getRequestHistory(detailId)
       .then((events) => { if (!cancelled) setHistory(events) })
       .catch(() => { if (!cancelled) setHistory([]) })
       .finally(() => { if (!cancelled) setHistoryLoading(false) })
+    getRequestAttachments(detailId)
+      .then((files) => { if (!cancelled) setAttachments(files) })
+      .catch(() => { if (!cancelled) setAttachments([]) })
     return () => { cancelled = true }
   }, [detailId])
+
+  const handleCancel = async () => {
+    if (detailId == null) return
+    setCancelling(true)
+    try {
+      await cancelRequest(detailId, cancelReason.trim())
+      toast.success('Solicitação cancelada.')
+      setCancelOpen(false)
+      await load()
+    } catch (err) {
+      toast.error('Não foi possível cancelar', { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const list = filterMyRequests(rows, state)
+      await exportRowsToXlsx(
+        list.map((row) => ({
+          'Código': row.code,
+          'PDM': row.pdm_name,
+          'Código PDM': row.pdm_code,
+          'Descrição': row.description,
+          'Situação': SITUATION_LABEL[situationOf(row.status)],
+          'Etapa': row.step_label,
+          'Atendente': row.assigned_to_name ?? '',
+          'Urgência': URGENCY_LABEL[row.urgency] ?? row.urgency,
+          'Aberta em': formatDate(row.created_at),
+          'Motivo da rejeição': row.rejection_reason ?? '',
+        })),
+        'Minhas Solicitações',
+        'minhas_solicitacoes'
+      )
+    } catch (err) {
+      toast.error('Falha ao exportar', { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const result = useMemo(() => applyMyRequests(rows, state), [rows, state])
   const counts = useMemo(() => countBySituation(rows), [rows])
@@ -140,18 +205,24 @@ function MyRequestsContent() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">Acompanhe as solicitações de cadastro que você abriu</p>
         </div>
-        {can('can_submit_request') && (
-          <Link href="/requests/new">
-            <Button className="gap-2 bg-[#C69A46] text-[#0F1C38] hover:bg-[#C69A46]/90">
-              <FilePlus className="size-4" />
-              Nova Solicitação
-            </Button>
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="gap-2" onClick={handleExport} disabled={exporting || rows.length === 0}>
+            {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            Exportar Excel
+          </Button>
+          {can('can_submit_request') && (
+            <Link href="/requests/new">
+              <Button className="gap-2 bg-[#C69A46] text-[#0F1C38] hover:bg-[#C69A46]/90">
+                <FilePlus className="size-4" />
+                Nova Solicitação
+              </Button>
+            </Link>
+          )}
+        </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-4">
-        {(['andamento', 'finalizada', 'rejeitada'] as const).map((situation) => (
+      <div className="grid gap-3 sm:grid-cols-5">
+        {(['andamento', 'finalizada', 'rejeitada', 'cancelada'] as const).map((situation) => (
           <button
             key={situation}
             type="button"
@@ -380,6 +451,38 @@ function MyRequestsContent() {
                 </div>
               )}
 
+              {attachments.length > 0 && (
+                <div>
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Anexos</p>
+                  <ul className="space-y-1.5">
+                    {attachments.map((file) => (
+                      <li key={file.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2 text-sm dark:border-zinc-700/50">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{file.file_name}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">{formatSize(file.file_size)}</span>
+                        </span>
+                        {file.url && (
+                          <a href={file.url} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1 text-xs font-medium hover:underline">
+                            <Download className="size-3.5" />
+                            Baixar
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {situationOf(detail.status) === 'andamento' && detail.can_cancel && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-zinc-700/50 dark:bg-muted/20">
+                  <p className="text-muted-foreground">Ninguém iniciou o atendimento ainda. Você pode cancelar esta solicitação.</p>
+                  <Button size="sm" variant="outline" className="text-red-700" onClick={() => { setCancelReason(''); setCancelOpen(true) }}>
+                    Cancelar solicitação
+                  </Button>
+                </div>
+              )}
+
               <div>
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Histórico</p>
                 {historyLoading ? (
@@ -404,6 +507,28 @@ function MyRequestsContent() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelOpen} onOpenChange={(open) => { if (!open) setCancelOpen(false) }}>
+        <DialogContent className="max-w-md border-slate-200 bg-white text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">
+          <DialogHeader>
+            <DialogTitle>Cancelar {detail?.code ?? 'solicitação'}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">A solicitação sai do fluxo e não pode ser reaberta.</p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value.toUpperCase())}
+            maxLength={500}
+            placeholder="Motivo do cancelamento (opcional)"
+            className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm uppercase"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCancelOpen(false)} disabled={cancelling}>Voltar</Button>
+            <Button className="bg-red-600 text-white hover:bg-red-700" onClick={handleCancel} disabled={cancelling}>
+              {cancelling ? 'Cancelando…' : 'Confirmar cancelamento'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { CANCELLED_STATUSES, DONE_STATUSES, REJECTED_STATUSES } from '@/lib/request-status'
 import {
   attrsMatch,
   countsForDuplicate,
@@ -14,7 +15,7 @@ export type DuplicateBlock = {
   reason: string
 }
 
-const OPEN_REQUEST_EXCLUDED = ['finalizado', 'completed', 'concluído', 'concluido', 'rejected', 'rejeitado']
+const OPEN_REQUEST_EXCLUDED = [...DONE_STATUSES, ...REJECTED_STATUSES, ...CANCELLED_STATUSES]
 const CANDIDATE_COLS = 'id, id_sistema, description, detailed_description, pdm_code, status'
 
 type GuardMaterial = DuplicateCandidate & {
