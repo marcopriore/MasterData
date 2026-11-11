@@ -24,7 +24,7 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/settings/workflow` | Fluxos e etapas (ordem com drag-and-drop). Cada etapa tem nome, chave de status e prazo em dias (vazio: 5), usado nas "atrasadas" da governança. |
 | `/admin/users` | Usuários do tenant: criar, editar, ativar, import/export. |
 | `/admin/roles` | Perfis e as 16 permissões. |
-| `/admin/fields` | Dicionário de campos. Aba **Campos**: cadastro do campo (nome, identificador, referência ERP, visão, bloco do JSON, tipo, opções, status). Aba **Regras** (migrations 038 e 039): regra padrão (etapa e obrigatoriedade de cada campo) e **Nova regra** por condição (ex.: Tipo de Material = FERT), com a etapa e a obrigatoriedade campo a campo ou "não aparece"; exportação e importação em Excel. |
+| `/admin/fields` | Dicionário de campos. Aba **Campos**: cadastro do campo (nome, identificador, referência ERP, visão, bloco do JSON, tipo, opções, status). Aba **Regras** (migrations 038 e 039): regra padrão (etapa e obrigatoriedade de cada campo) e **Nova regra** por condição (ex.: Tipo de Material = FERT), com a etapa e a obrigatoriedade campo a campo ou "não aparece"; exportação e importação em Excel. As regras valem também na Base de Dados (edição, importação por planilha, API e envio ao ERP; migration 040). |
 | `/admin/value-dictionary` | Valores de lista, abreviação, similares, unificação e propagação. |
 | `/admin/logs` | Auditoria, com exportação. |
 | `/admin/integrations` | Monitor das chamadas das APIs de material da empresa. Quem tem `can_view_logs` vê. |

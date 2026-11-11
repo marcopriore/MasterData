@@ -41,8 +41,9 @@ function compact(obj: Json): Json {
  * Monta o JSON do ERP a partir da linha de material_database.
  * Ordem de precedência no cabeçalho: colunas do material, campos_adicionais, campos do dicionário.
  * productId e contentID são sempre do PRO-MAT.
+ * hidden: campos que a regra por material esconde para este material (não vão para o ERP).
  */
-export function buildErpPayload(material: Json, fields: DictionaryField[] = []): ErpPayload {
+export function buildErpPayload(material: Json, fields: DictionaryField[] = [], hidden: ReadonlySet<string> = new Set()): ErpPayload {
   const attributes = map(material.technical_attributes)
   const header: Json = compact({
     type: material.material_type,
@@ -57,7 +58,7 @@ export function buildErpPayload(material: Json, fields: DictionaryField[] = []):
 
   for (const field of fields) {
     const key = field.erp_field?.trim()
-    if (!key) continue
+    if (!key || hidden.has(field.field_name)) continue
     const value = attributeText(attributes[field.field_name])
     if (!value) continue
     if (field.erp_block === 'header') header[key] = value

@@ -41,6 +41,8 @@ export default defineConfig({
     { name: 'roles', testMatch: 'roles.spec.ts', dependencies: ['setup'] },
     { name: 'fields', testMatch: 'fields.spec.ts', dependencies: ['setup'] },
     { name: 'users', testMatch: 'users.spec.ts', dependencies: ['auth', 'governance'] },
+    // Por último: a regra criada nela mudaria os campos das outras suítes no mesmo tenant.
+    { name: 'field-rules', testMatch: 'field-rules.spec.ts', dependencies: ['database', 'users', 'fields', 'pdm', 'roles', 'value-dictionary'] },
   ],
   reporter: [['list'], ['html', { outputFolder: 'report', open: 'never' }]],
 })

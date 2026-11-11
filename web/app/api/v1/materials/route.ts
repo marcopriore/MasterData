@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { safeSearchTerm } from '@/lib/search-term'
 import { MATERIAL_API_COLUMNS, MATERIAL_STATUS, parseMaterialInput, toApiMaterial } from '@/lib/material-api/payload'
-import { apiError, findPdm, handleApiCall, readJson } from '@/lib/material-api/server'
+import { apiError, applyMaterialRules, findPdm, handleApiCall, readJson } from '@/lib/material-api/server'
 
 export const runtime = 'nodejs'
 
@@ -22,13 +22,19 @@ export async function POST(request: Request) {
       row.pdm_name = pdm.name
     }
 
+    const sent = (row.technical_attributes ?? {}) as Record<string, unknown>
+    const checked = await applyMaterialRules(client.tenantId, { ...row, technical_attributes: sent }, sent)
+    if (!checked.ok) return checked.outcome
+    row.technical_attributes = checked.technicalAttributes
+
     const { data, error } = await supabaseAdmin.rpc('api_insert_material', {
       p_tenant_id: client.tenantId,
       p_row: row,
     })
     if (error) return apiError(500, 'não foi possível gravar o material')
     const material = toApiMaterial(data as Record<string, unknown>)
-    return { status: 201, body: { material }, detail: String(material.id_sistema ?? '') }
+    const created = checked.warnings.length ? { material, avisos: checked.warnings } : { material }
+    return { status: 201, body: created, detail: String(material.id_sistema ?? '') }
   })
 }
 

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { MATERIAL_API_COLUMNS, parseMaterialInput, toApiMaterial } from '@/lib/material-api/payload'
-import { apiError, findMaterialByCode, findPdm, handleApiCall, readJson, validCode } from '@/lib/material-api/server'
+import { apiError, applyMaterialRules, findMaterialByCode, findPdm, handleApiCall, readJson, validCode } from '@/lib/material-api/server'
+import { materialTypeChanged } from '@/lib/material-rules'
 
 export const runtime = 'nodejs'
 
@@ -25,7 +26,7 @@ export async function PATCH(request: Request, context: Context) {
     const code = decodeURIComponent(codigo ?? '')
     if (!validCode(code)) return apiError(400, 'código inválido')
 
-    const current = await findMaterialByCode(client.tenantId, code, 'id, id_sistema, erp_status, technical_attributes')
+    const current = await findMaterialByCode(client.tenantId, code, '*')
     if (!current) return { ...apiError(404, 'material não encontrado'), detail: code }
     const detail = String(current.id_sistema ?? code)
     if (current.erp_status === 'integrando') {
@@ -47,10 +48,13 @@ export async function PATCH(request: Request, context: Context) {
         changes.pdm_name = null
       }
     }
-    if (changes.technical_attributes) {
-      const before = (current.technical_attributes ?? {}) as Record<string, unknown>
-      changes.technical_attributes = { ...before, ...(changes.technical_attributes as Record<string, unknown>) }
-    }
+    const sent = (changes.technical_attributes ?? {}) as Record<string, unknown>
+    const before = (current.technical_attributes ?? {}) as Record<string, unknown>
+    const after = { ...current, ...changes, technical_attributes: { ...before, ...sent } }
+    if (materialTypeChanged(current, after)) return { ...apiError(422, 'tipo_material não pode ser alterado em material já cadastrado (o ERP não permite)'), detail }
+    const checked = await applyMaterialRules(client.tenantId, after, sent)
+    if (!checked.ok) return { ...checked.outcome, detail }
+    if (changes.technical_attributes || checked.warnings.length) changes.technical_attributes = checked.technicalAttributes
 
     const { data, error } = await supabaseAdmin
       .from('material_database')
@@ -65,6 +69,7 @@ export async function PATCH(request: Request, context: Context) {
       .select(MATERIAL_API_COLUMNS)
       .single()
     if (error || !data) return { ...apiError(500, 'não foi possível alterar o material'), detail }
-    return { status: 200, body: { material: toApiMaterial(data as unknown as Record<string, unknown>) }, detail }
+    const material = toApiMaterial(data as unknown as Record<string, unknown>)
+    return { status: 200, body: checked.warnings.length ? { material, avisos: checked.warnings } : { material }, detail }
   })
 }

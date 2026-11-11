@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useParams, usePathname } from 'next/navigation'
 import { erpViewLabel } from '@/lib/erp-views'
@@ -14,8 +14,11 @@ import {
   erpEliminateMaterial,
   getMaterialDuplicateBlock,
   getFieldDictionary,
+  getFieldRules,
   logAction,
 } from '@/lib/supabase-api'
+import { resolveField, type FieldRuleProfile } from '@/lib/field-rules'
+import { hiddenMaterialFields, materialAttributes, missingMaterialFields, missingMessage, type RuleField } from '@/lib/material-rules'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { NumericUnitInput } from '@/components/ui/numeric-unit-input'
@@ -27,6 +30,8 @@ import { useTheme } from 'next-themes'
 import { maskNCM, maskCFOP } from '@/lib/masks'
 import { toErpText } from '@/lib/erp-text'
 import { DescriptionLengthIndicator } from '@/components/ui/description-length-indicator'
+
+type DictViewField = { field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }
 
 type MaterialDetail = {
   id: number
@@ -272,6 +277,8 @@ export default function DatabaseDetailPage() {
   const [duplicateBlock, setDuplicateBlock] = useState<{ codes: string[]; reason: string | null } | null>(null)
   const [fieldsByView, setFieldsByView] = useState<Record<string, Array<{ field_name: string; field_label: string; erp_view: string; field_type?: string; display_order?: number }>>>({})
   const [fieldsByViewOptions, setFieldsByViewOptions] = useState<Record<string, string[]>>({})
+  const [ruleFields, setRuleFields] = useState<RuleField[]>([])
+  const [ruleProfiles, setRuleProfiles] = useState<FieldRuleProfile[]>([])
   const measurementUnits = useMeasurementUnits()
   const [pdmTemplate, setPdmTemplate] = useState<{
     id: number
@@ -369,8 +376,38 @@ export default function DatabaseDetailPage() {
     [material?.technical_attributes, generateDescription]
   )
 
+  /** Material como ficaria com o que está na tela (regras por material, migration 040). */
+  const draftMaterial = useCallback((extraAttrs?: Record<string, unknown>) => {
+    if (!material) return null
+    const ta: Record<string, unknown> = { ...(material.technical_attributes ?? {}) }
+    for (const f of ruleFields) if (f.field_name in formData) ta[f.field_name] = formData[f.field_name]
+    if (extraAttrs) Object.assign(ta, extraAttrs)
+    return { ...material, ...formData, technical_attributes: ta } as Record<string, unknown>
+  }, [material, formData, ruleFields])
+
+  const draftAttrs = useMemo(() => {
+    const draft = draftMaterial()
+    return draft ? materialAttributes(draft) : {}
+  }, [draftMaterial])
+  const hiddenNow = useMemo(() => hiddenMaterialFields(ruleFields, draftAttrs, ruleProfiles), [ruleFields, draftAttrs, ruleProfiles])
+  const requiredNow = useMemo(
+    () => new Set(ruleFields.filter((f) => resolveField(f, draftAttrs, ruleProfiles).requirement === 'required').map((f) => f.field_name)),
+    [ruleFields, draftAttrs, ruleProfiles]
+  )
+
+  /** O banco recusa material incompleto; a tela avisa antes, com os campos que faltam. */
+  const checkRules = (extraAttrs?: Record<string, unknown>): boolean => {
+    const draft = draftMaterial(extraAttrs)
+    if (!draft) return true
+    const missing = missingMaterialFields(ruleFields, materialAttributes(draft), ruleProfiles)
+    if (missing.length === 0) return true
+    toast.error(missingMessage(missing), { duration: 10000 })
+    return false
+  }
+
   const handleSaveAttributes = useCallback(async () => {
     if (!material) return
+    if (!checkRules(attrValues)) return
     setSavingAttrs(true)
     try {
       const attrsPayload: Record<string, string> = {}
@@ -417,16 +454,24 @@ export default function DatabaseDetailPage() {
     } finally {
       setSavingAttrs(false)
     }
-  }, [material, attrValues, generatedDesc, setDetailedDesc])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [material, attrValues, generatedDesc, setDetailedDesc, ruleFields, ruleProfiles, formData])
 
   useEffect(() => {
     if (!id || Number.isNaN(id)) return
     setLoading(true)
     setError(null)
-    Promise.all([getMaterialById(id), getFieldDictionary()])
-      .then(([m, fields]) => {
+    Promise.all([getMaterialById(id), getFieldDictionary(), getFieldRules().catch(() => [] as FieldRuleProfile[])])
+      .then(([m, fields, profiles]) => {
         const mat = m as MaterialDetail
         setMaterial(mat)
+        setRuleProfiles(profiles.filter((p) => p.is_active))
+        setRuleFields(fields.map((f) => ({
+          field_name: f.field_name as string,
+          field_label: f.field_label as string,
+          responsible_role: f.responsible_role as string,
+          is_required: f.is_required === true,
+        })))
         setFormData({
           ...mat,
           ...(typeof mat.technical_attributes === 'object' && mat.technical_attributes !== null
@@ -508,6 +553,7 @@ export default function DatabaseDetailPage() {
 
   const handleSave = async () => {
     if (!material) return
+    if (!checkRules(editingAttributes ? attrValues : undefined)) return
     setSaving(true)
     try {
       const payload: Record<string, unknown> = {}
@@ -673,6 +719,71 @@ export default function DatabaseDetailPage() {
     techAttrs?.['tipo_material'] ??
     techAttrs?.['material_type'] ??
     '—'
+  // Com o campo no dicionário, o Tipo de Material é editado por ele (é condição das regras).
+  const hasDictTipo = ruleFields.some((f) => f.field_name === 'tipo_material')
+  const savedAttrs = materialAttributes(material as unknown as Record<string, unknown>)
+  const typeIsSet = savedAttrs.tipo_material != null && String(savedAttrs.tipo_material).trim() !== ''
+
+  /** Campo do dicionário: some se a regra esconde, asterisco se a regra exige. */
+  const renderDictField = (field: DictViewField) => {
+    if (hiddenNow.has(field.field_name)) return null
+    const label = `${field.field_label}${requiredNow.has(field.field_name) ? ' *' : ''}`
+    const rawVal = savedAttrs[field.field_name] ?? (material as unknown as Record<string, unknown>)[field.field_name]
+    const displayVal = rawVal != null && rawVal !== '' ? formatAttrValue(rawVal) : '—'
+    // Tipo de Material definido não muda (migration 041); vazio pode receber o primeiro valor.
+    const typeLocked = field.field_name === 'tipo_material' && typeIsSet
+    if (!editMode || typeLocked) {
+      return <Row key={field.field_name} label={typeLocked && editMode ? `${label} (não muda: o ERP não permite)` : label} value={displayVal} />
+    }
+    const currentVal =
+      formData[field.field_name] !== undefined
+        ? String(formData[field.field_name] ?? '')
+        : rawVal != null
+          ? String(rawVal)
+          : ''
+    const selectOpts = fieldsByViewOptions[field.field_name] ?? []
+    const isSelect = field.field_type === 'select' && Array.isArray(selectOpts)
+    return (
+      <div key={field.field_name} className="flex flex-col gap-0.5">
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
+        {isSelect ? (
+          <select
+            value={currentVal}
+            onChange={(e) => handleUpdate(field.field_name, e.target.value)}
+            className={INPUT_BASE}
+            style={{ colorScheme: isDark ? 'dark' : 'light' }}
+          >
+            <option value="">Selecione...</option>
+            {selectOpts.map((opt: string) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type={field.field_type === 'number' ? 'number' : 'text'}
+            value={currentVal}
+            onChange={(e) => {
+              const v = e.target.value
+              if (field.field_type === 'number') {
+                handleUpdate(field.field_name, v === '' ? null : parseFloat(v))
+              } else {
+                const mask = field.field_name === 'ncm' ? maskNCM : field.field_name === 'cfop' ? maskCFOP : null
+                handleUpdate(field.field_name, mask ? mask(v) : v.toUpperCase())
+              }
+            }}
+            className={
+              field.field_type === 'number' || field.field_name === 'ncm' || field.field_name === 'cfop'
+                ? INPUT_BASE
+                : `${INPUT_BASE} uppercase`
+            }
+            style={{ colorScheme: isDark ? 'dark' : 'light' }}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={`space-y-6 ${showActionBar ? 'pb-24' : ''}`}>
@@ -869,7 +980,7 @@ export default function DatabaseDetailPage() {
                 <Row label="Unidade de Medida" value={String(unitVal)} />
               )}
 
-              {editMode ? (
+              {!hasDictTipo && (editMode && !typeIsSet ? (
                 <EditableRow
                   label="Tipo de Material"
                   isDark={isDark}
@@ -881,7 +992,7 @@ export default function DatabaseDetailPage() {
                 />
               ) : (
                 <Row label="Tipo de Material" value={String(matTypeVal)} />
-              )}
+              ))}
 
               {editMode ? (
                 <div className="flex flex-col gap-0.5">
@@ -902,21 +1013,8 @@ export default function DatabaseDetailPage() {
               )}
 
               {(fieldsByView['Dados Básicos'] ?? [])
-                .filter(
-                  (field) =>
-                    field.field_name !== 'material_type' &&
-                    field.field_name !== 'tipo_material'
-                )
-                .map((field) => {
-                  const rawVal =
-                    material.technical_attributes?.[field.field_name] ??
-                    (material as Record<string, unknown>)[field.field_name]
-                  const displayVal = rawVal != null && rawVal !== ''
-                    ? formatAttrValue(rawVal) : '—'
-                  return (
-                    <Row key={field.field_name} label={field.field_label} value={displayVal} />
-                  )
-                })}
+                .filter((field) => field.field_name !== 'material_type')
+                .map(renderDictField)}
             </div>
           </div>
         </SectionCard>
@@ -1128,70 +1226,7 @@ export default function DatabaseDetailPage() {
 
           return orderedEntries.map(([viewName, viewFields]) => (
             <SectionCard key={viewName} title={viewName}>
-              {(viewFields as any[]).map((field) => {
-                const rawVal =
-                  material.technical_attributes?.[field.field_name] ??
-                  (material as Record<string, unknown>)[field.field_name]
-                const displayVal = rawVal != null && rawVal !== '' ? formatAttrValue(rawVal) : '—'
-                if (!editMode) {
-                  return <Row key={field.field_name} label={field.field_label} value={displayVal} />
-                }
-                const currentVal =
-                  formData[field.field_name] !== undefined
-                    ? String(formData[field.field_name] ?? '')
-                    : rawVal != null
-                      ? String(rawVal)
-                      : ''
-                const selectOpts = fieldsByViewOptions[field.field_name] ?? []
-                const isSelect = field.field_type === 'select' && Array.isArray(selectOpts)
-                return (
-                  <div key={field.field_name} className="flex flex-col gap-0.5">
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">{field.field_label}</span>
-                    {isSelect ? (
-                      <select
-                        value={currentVal}
-                        onChange={(e) => handleUpdate(field.field_name, e.target.value)}
-                        className={INPUT_BASE}
-                        style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                      >
-                        <option value="">Selecione...</option>
-                        {selectOpts.map((opt: string) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type={field.field_type === 'number' ? 'number' : 'text'}
-                        value={currentVal}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          if (field.field_type === 'number') {
-                            handleUpdate(field.field_name, v === '' ? null : parseFloat(v))
-                          } else {
-                            const mask =
-                              field.field_name === 'ncm'
-                                ? maskNCM
-                                : field.field_name === 'cfop'
-                                  ? maskCFOP
-                                  : null
-                            handleUpdate(field.field_name, mask ? mask(v) : v.toUpperCase())
-                          }
-                        }}
-                        className={
-                          field.field_type === 'number'
-                            ? INPUT_BASE
-                            : field.field_name === 'ncm' || field.field_name === 'cfop'
-                              ? INPUT_BASE
-                              : `${INPUT_BASE} uppercase`
-                        }
-                        style={{ colorScheme: isDark ? 'dark' : 'light' }}
-                      />
-                    )}
-                  </div>
-                )
-              })}
+              {(viewFields as DictViewField[]).map(renderDictField)}
             </SectionCard>
           ))
         })()}

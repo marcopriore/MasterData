@@ -2,13 +2,25 @@ import { requirePermission } from '@/lib/server-access'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
-import { toErpDeep } from '@/lib/erp-text'
+import { toErpDeep, toErpText } from '@/lib/erp-text'
+import { loadMaterialRuleContext } from '@/lib/material-rules-server'
+import {
+  dropHiddenFields,
+  GENERATED_FIELDS,
+  MATERIAL_TYPE_LOCKED,
+  materialAttributes,
+  materialTypeChanged,
+  missingMaterialFields,
+  missingMessage,
+} from '@/lib/material-rules'
 
 const HEADERS = [
   'operacao', 'codigo_material', 'descricao', 'pdm_code', 'status',
   'unit_of_measure', 'material_type', 'gross_weight', 'net_weight',
   'lead_time', 'min_stock', 'max_stock', 'standard_price', 'ncm', 'cfop', 'origem',
 ]
+
+type ExistingRow = { id: number; id_erp: string; technical_attributes: Record<string, unknown> | null } & Record<string, unknown>
 
 export async function POST(request: Request) {
   const ctx = await requirePermission('can_bulk_import')
@@ -64,8 +76,14 @@ export async function POST(request: Request) {
     }
   }
 
+  // Regras por material (migrations 038/039): os campos do dicionário entram por coluna com o identificador do campo.
+  const rules = await loadMaterialRuleContext(effectiveTenantId)
+  const dictionaryColumns = rules.fields
+    .map((f) => f.field_name)
+    .filter((name) => !GENERATED_FIELDS.includes(name) && !HEADERS.includes(name) && name.toLowerCase() in colMap)
+
   const get = (row: string[], key: string) => {
-    const i = colMap[key]
+    const i = colMap[key.toLowerCase()]
     return i != null ? String(row[i] ?? '').trim() : ''
   }
   const getNum = (row: string[], key: string) => {
@@ -73,6 +91,24 @@ export async function POST(request: Request) {
     if (!v) return null
     const n = parseFloat(v.replace(',', '.'))
     return isNaN(n) ? null : n
+  }
+
+  // Materiais a editar, de uma vez: a regra vale para o material como fica depois da alteração.
+  const editCodes = [...new Set(
+    data.slice(1)
+      .filter((row) => get(row as string[], 'operacao').toUpperCase().startsWith('E'))
+      .map((row) => get(row as string[], 'codigo_material'))
+      .filter(Boolean)
+  )]
+  const existingByCode = new Map<string, ExistingRow>()
+  for (let i = 0; i < editCodes.length; i += 200) {
+    const { data: found, error } = await supabaseAdmin
+      .from('material_database')
+      .select('*')
+      .eq('tenant_id', effectiveTenantId)
+      .in('id_erp', editCodes.slice(i, i + 200))
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    for (const m of (found ?? []) as ExistingRow[]) existingByCode.set(m.id_erp, m)
   }
 
   const rows: Array<{
@@ -107,6 +143,8 @@ export async function POST(request: Request) {
     if (statusVal && !['Ativo', 'Bloqueado', 'Obsoleto'].includes(statusVal)) {
       warnings.push('status inválido; será usado Ativo')
     }
+    const existing = operacao === 'E' && codigo ? existingByCode.get(codigo) ?? null : null
+    if (operacao === 'E' && codigo && !existing) errors.push(`codigo_material ${codigo} não encontrado na base`)
 
     const rowData: Record<string, unknown> = {
       description: descricao || null,
@@ -124,6 +162,25 @@ export async function POST(request: Request) {
       cfop: get(row, 'cfop') || null,
       origin: get(row, 'origem') || null,
     }
+
+    const sentAttributes: Record<string, unknown> = {}
+    for (const name of dictionaryColumns) {
+      const value = get(row, name)
+      if (value) sentAttributes[name] = toErpText(value)
+    }
+    const after = {
+      ...(existing ?? {}),
+      ...rowData,
+      technical_attributes: { ...(existing?.technical_attributes ?? {}), ...sentAttributes },
+    }
+    if (existing && materialTypeChanged(existing, after)) errors.push(MATERIAL_TYPE_LOCKED)
+    const attributes = materialAttributes(after)
+    const { kept, dropped } = dropHiddenFields(sentAttributes, rules.fields, attributes, rules.profiles)
+    for (const field of dropped) warnings.push(`${field.field_label} não se aplica a este material e foi ignorado`)
+    const missing = missingMaterialFields(rules.fields, attributes, rules.profiles)
+    if (missing.length > 0) errors.push(missingMessage(missing))
+    rowData.technical_attributes = { ...(existing?.technical_attributes ?? {}), ...kept }
+    if (existing) rowData.existing_id = existing.id
 
     const hasError = errors.length > 0
     const hasWarn = warnings.length > 0
@@ -160,57 +217,36 @@ export async function POST(request: Request) {
 
   let created = 0
   let updated = 0
+  const failed: string[] = []
 
   for (const r of rows) {
     if (r.status === 'error') continue
-    const d = toErpDeep(r.data as Record<string, unknown>)
-    if (r.operacao === 'C') {
-      const { error } = await supabaseAdmin.from('material_database').insert({
-        tenant_id: effectiveTenantId,
-        description: d.description,
-        pdm_code: d.pdm_code,
-        status: d.status ?? 'Ativo',
-        unit_of_measure: d.unit_of_measure,
-        material_type: d.material_type,
-        gross_weight: d.gross_weight,
-        net_weight: d.net_weight,
-        lead_time: d.lead_time,
-        min_stock: d.min_stock,
-        max_stock: d.max_stock,
-        standard_price: d.standard_price,
-        ncm: d.ncm,
-        cfop: d.cfop,
-        origin: d.origin,
-      })
-      if (!error) created++
-    } else {
-      const { data: existing } = await supabaseAdmin
-        .from('material_database')
-        .select('id')
-        .eq('tenant_id', effectiveTenantId)
-        .eq('id_erp', r.codigo_material)
-        .single()
-      if (existing) {
-        const { error } = await supabaseAdmin.from('material_database').update({
-          description: d.description,
-          pdm_code: d.pdm_code,
-          status: d.status,
-          unit_of_measure: d.unit_of_measure,
-          material_type: d.material_type,
-          gross_weight: d.gross_weight,
-          net_weight: d.net_weight,
-          lead_time: d.lead_time,
-          min_stock: d.min_stock,
-          max_stock: d.max_stock,
-          standard_price: d.standard_price,
-          ncm: d.ncm,
-          cfop: d.cfop,
-          origin: d.origin,
-        }).eq('id', existing.id)
-        if (!error) updated++
-      }
+    const { existing_id: existingId, ...rest } = r.data
+    const d = toErpDeep(rest as Record<string, unknown>)
+    const values = {
+      description: d.description,
+      pdm_code: d.pdm_code,
+      status: d.status ?? 'Ativo',
+      unit_of_measure: d.unit_of_measure,
+      material_type: d.material_type,
+      gross_weight: d.gross_weight,
+      net_weight: d.net_weight,
+      lead_time: d.lead_time,
+      min_stock: d.min_stock,
+      max_stock: d.max_stock,
+      standard_price: d.standard_price,
+      ncm: d.ncm,
+      cfop: d.cfop,
+      origin: d.origin,
+      technical_attributes: d.technical_attributes ?? {},
     }
+    const { error } = r.operacao === 'C'
+      ? await supabaseAdmin.from('material_database').insert({ tenant_id: effectiveTenantId, ...values })
+      : await supabaseAdmin.from('material_database').update(values).eq('id', existingId as number).eq('tenant_id', effectiveTenantId)
+    if (error) failed.push(`Linha ${r.row_number}: ${error.message}`)
+    else if (r.operacao === 'C') created++
+    else updated++
   }
 
-  return NextResponse.json({ created, updated })
+  return NextResponse.json({ created, updated, failed })
 }

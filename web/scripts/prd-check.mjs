@@ -171,6 +171,7 @@ async function checkSupabase(env) {
     ['036', 'report_rejections', { p_from: '2026-01-01', p_to: '2026-01-02' }],
     ['037', 'report_erp_integrations', { p_from: '2026-01-01', p_to: '2026-01-02' }],
     ['037', 'report_erp_errors', {}],
+    ['040', 'material_missing_fields', { p_tenant_id: -1, p_attributes: {} }],
     ['039', 'field_effective', { p_tenant_id: -1, p_field_name: '-', p_base_role: 'CADASTRO', p_base_required: false, p_attributes: {} }],
   ]
   for (const [migration, fn, params] of rpcs) {

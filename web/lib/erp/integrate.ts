@@ -3,6 +3,8 @@ import { buildErpDeletePayload, buildErpPayload, type DictionaryField } from './
 import { callErp } from './client'
 import { classifyErpSyncAction } from './sync-action'
 import { findDuplicateBlock } from './duplicate-guard'
+import { loadMaterialRuleContext } from '@/lib/material-rules-server'
+import { hiddenMaterialFields, materialAttributes } from '@/lib/material-rules'
 
 export type IntegrateOutcome =
   | { result: 'mock' }
@@ -109,7 +111,9 @@ export async function integrateMaterial(tenantId: number, materialId: number, us
     .maybeSingle()
   if (!claimed) return { result: 'skipped', reason: 'material já está em integração' }
 
-  const payload = buildErpPayload(claimed, await dictionaryFields(tenantId))
+  const [erpFields, rules] = await Promise.all([dictionaryFields(tenantId), loadMaterialRuleContext(tenantId)])
+  const hidden = hiddenMaterialFields(rules.fields, materialAttributes(claimed), rules.profiles)
+  const payload = buildErpPayload(claimed, erpFields, hidden)
   const call = await callErp({
     tenantId,
     operation,

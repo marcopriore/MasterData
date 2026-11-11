@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { requirePermission } from '@/lib/server-access'
 import { safeSearchTerm } from '@/lib/search-term'
+import { GENERATED_FIELDS } from '@/lib/material-rules'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 
@@ -12,13 +13,22 @@ const TEMPLATE_HEADERS = [
   'ncm', 'cfop', 'origem',
 ]
 
+const cellText = (value: unknown): string => {
+  if (value == null) return ''
+  if (typeof value === 'object' && 'value' in (value as object)) {
+    const v = value as { value?: unknown; unit?: unknown }
+    return `${v.value ?? ''}${v.unit ?? ''}`.trim()
+  }
+  return String(value)
+}
+
 export async function GET(request: Request) {
   const ctx = await requirePermission('can_view_database')
   if ('error' in ctx) return ctx.error
   const supabase = await createServerSupabaseClient()
 
   const { searchParams } = new URL(request.url)
-  const q = searchParams.get('q') ?? ''
+  const q = safeSearchTerm(searchParams.get('q'))
   const status = searchParams.get('status') ?? ''
   const pdm_code = searchParams.get('pdm_code') ?? ''
   const erp_status = searchParams.get('erp_status') ?? ''
@@ -33,36 +43,47 @@ export async function GET(request: Request) {
   if (date_from) query = query.gte('created_at', date_from)
   if (date_to) query = query.lte('created_at', `${date_to}T23:59:59.999Z`)
 
-  const { data: materials, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  const rows = (materials ?? []).map((m) => [
-    'E',
-    m.id_erp ?? '',
-    m.description ?? '',
-    m.pdm_code ?? '',
-    m.status ?? 'Ativo',
-    m.unit_of_measure ?? '',
-    m.material_type ?? '',
-    '',
-    '',
-    m.gross_weight ?? '',
-    m.net_weight ?? '',
-    '',
-    '',
-    '',
-    m.lead_time ?? '',
-    m.min_stock ?? '',
-    m.max_stock ?? '',
-    m.standard_price ?? '',
-    '',
-    '',
-    m.ncm ?? '',
-    m.cfop ?? '',
-    m.origin ?? '',
+  const [{ data: materials, error }, { data: fields }] = await Promise.all([
+    query,
+    supabase.from('field_dictionary').select('field_name').eq('tenant_id', ctx.tenantId).eq('is_active', true).order('display_order'),
   ])
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Mesmas colunas do modelo de importação: o arquivo exportado volta pela importação sem ajuste.
+  const dictionary = (fields ?? [])
+    .map((f) => f.field_name as string)
+    .filter((name) => !GENERATED_FIELDS.includes(name) && !TEMPLATE_HEADERS.includes(name))
 
-  const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...rows])
+  const rows = (materials ?? []).map((m) => {
+    const attrs = (m.technical_attributes ?? {}) as Record<string, unknown>
+    return [
+      'E',
+      m.id_erp ?? '',
+      m.description ?? '',
+      m.pdm_code ?? '',
+      m.status ?? 'Ativo',
+      m.unit_of_measure ?? '',
+      m.material_type ?? '',
+      '',
+      '',
+      m.gross_weight ?? '',
+      m.net_weight ?? '',
+      '',
+      '',
+      '',
+      m.lead_time ?? '',
+      m.min_stock ?? '',
+      m.max_stock ?? '',
+      m.standard_price ?? '',
+      '',
+      '',
+      m.ncm ?? '',
+      m.cfop ?? '',
+      m.origin ?? '',
+      ...dictionary.map((name) => cellText(attrs[name])),
+    ]
+  })
+
+  const ws = XLSX.utils.aoa_to_sheet([[...TEMPLATE_HEADERS, ...dictionary], ...rows])
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Materiais')
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })

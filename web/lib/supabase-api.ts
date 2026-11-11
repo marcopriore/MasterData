@@ -2447,6 +2447,8 @@ export async function uploadMaterialsImport(
   }>
   created?: number
   updated?: number
+  /** Linhas que o banco recusou na gravação. */
+  failed?: string[]
 }> {
   const form = new FormData()
   form.append('file', file)

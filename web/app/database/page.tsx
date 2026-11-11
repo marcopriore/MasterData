@@ -269,6 +269,9 @@ export default function DatabasePage() {
       closeBulkImportModal()
       fetchMaterials()
       toast.success(`${res.created ?? 0} criados, ${res.updated ?? 0} atualizados!`)
+      if (res.failed?.length) {
+        toast.error(`${res.failed.length} linha(s) não gravadas`, { description: res.failed.slice(0, 5).join(' · '), duration: 15000 })
+      }
     } catch (err) {
       setBulkImportError((err as Error)?.message ?? 'Falha ao importar materiais')
     } finally {

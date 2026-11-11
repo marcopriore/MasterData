@@ -244,6 +244,24 @@ async function main() {
     async () => (await admin.from('material_requests').select('technical_attributes').eq('id', reqF.id).single()).data?.technical_attributes?.tipo_material === 'FERT')
   await allowed('a etapa atual muda os outros campos', () => compras.from('material_requests').update({ technical_attributes: { tipo_material: 'FERT', obs: 'X' } }).eq('id', reqF.id).select('id'))
 
+  console.log('\nRegras de campos na Base de Dados')
+  const standardizer = await makeUser(tA, 'PADR', { can_standardize: true, can_view_database: true })
+  const padr = await signIn(standardizer.email)
+  const [matF] = await must(admin.from('material_database').insert({ tenant_id: tA, id_sistema: `SONDA-${tag}-F`, description: 'SONDA FERT', status: 'Ativo', erp_status: 'pendente_erp', source: 'manual', technical_attributes: { tipo_material: 'FERT' } }).select('id'), 'material FERT A')
+  const matAttrs = async () => (await admin.from('material_database').select('technical_attributes').eq('id', matF.id).single()).data?.technical_attributes ?? {}
+  await denied('material FERT sem o campo exigido não é salvo pela tela', () => padr.from('material_database').update({ technical_attributes: { tipo_material: 'FERT', obs: 'X' } }).eq('id', matF.id).select('id'),
+    async () => (await matAttrs()).obs === undefined)
+  await allowed('com o campo exigido preenchido, o material é salvo', () => padr.from('material_database').update({ technical_attributes: { tipo_material: 'FERT', sonda_campo: 'OK' } }).eq('id', matF.id).select('id'))
+  record((await matAttrs()).sonda_campo === 'OK', 'o campo exigido ficou gravado')
+  await denied('não apaga o campo exigido depois', () => padr.from('material_database').update({ technical_attributes: { tipo_material: 'FERT' } }).eq('id', matF.id).select('id'),
+    async () => (await matAttrs()).sonda_campo === 'OK')
+  const tipoIsFert = async () => (await matAttrs()).tipo_material === 'FERT'
+  await denied('tipo de material de material cadastrado não muda pela tela', () => padr.from('material_database').update({ technical_attributes: { tipo_material: 'NLAG', sonda_campo: 'OK' } }).eq('id', matF.id).select('id'), tipoIsFert)
+  const { error: lockErr } = await admin.from('material_database').update({ technical_attributes: { tipo_material: 'NLAG', sonda_campo: 'OK' } }).eq('id', matF.id)
+  record(Boolean(lockErr) && (await tipoIsFert()), 'tipo de material não muda nem pelo servidor (importação, API)', lockErr ? '' : 'o banco aceitou a troca')
+  const { data: leak, error: leakErr } = await relB.rpc('material_missing_fields', { p_tenant_id: tA, p_attributes: { tipo_material: 'FERT' } })
+  record(Boolean(leakErr) || leak == null, 'outro tenant não descobre os campos exigidos do A', leak ? `devolveu "${leak}"` : '')
+
   console.log('\nUso legítimo continua funcionando')
   await allowed('solicitante abre solicitação na primeira etapa', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'Sonda', urgency: 'low', user_id: requester.id }).select('id'))
   await allowed('solicitante registra log em nome próprio', () => solic.from('system_logs').insert({ tenant_id: tA, user_id: requester.id, category: 'system', action: 'sonda', description: 'ok' }))

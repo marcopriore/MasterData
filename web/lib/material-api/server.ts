@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { recordIntegrationLog } from '@/lib/integration-logs'
 import { hashApiKey, looksLikeApiKey } from './api-key'
 import { MAX_BODY_BYTES, RATE_LIMIT_PER_KEY, RATE_LIMIT_UNAUTHENTICATED } from './limits'
+import { loadMaterialRuleContext } from '@/lib/material-rules-server'
+import { dropHiddenFields, materialAttributes, missingMaterialFields } from '@/lib/material-rules'
 
 async function callsInLastMinute(clientId: number | null): Promise<number> {
   const since = new Date(Date.now() - 60_000).toISOString()
@@ -144,6 +146,35 @@ export async function findMaterialByCode(tenantId: number, code: string, columns
     if (data) return data as unknown as Record<string, unknown>
   }
   return null
+}
+
+/**
+ * Regras por material (migrations 038/039) no material como fica depois da gravação.
+ * Falta obrigatório: 422 com "campo (rótulo)" em detalhes. Campo que não se aplica ao material: sai de
+ * technical_attributes e volta em avisos.
+ */
+export async function applyMaterialRules(
+  tenantId: number,
+  after: Record<string, unknown>,
+  sentAttributes: Record<string, unknown>
+): Promise<{ ok: true; technicalAttributes: Record<string, unknown>; warnings: string[] } | { ok: false; outcome: ApiOutcome }> {
+  const rules = await loadMaterialRuleContext(tenantId)
+  const attributes = materialAttributes(after)
+  const missing = missingMaterialFields(rules.fields, attributes, rules.profiles)
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      outcome: apiError(422, 'campos obrigatórios não preenchidos para este material', missing.map((f) => `${f.field_name} (${f.field_label})`)),
+    }
+  }
+  const { dropped } = dropHiddenFields(sentAttributes, rules.fields, attributes, rules.profiles)
+  const technicalAttributes = { ...((after.technical_attributes ?? {}) as Record<string, unknown>) }
+  for (const field of dropped) delete technicalAttributes[field.field_name]
+  return {
+    ok: true,
+    technicalAttributes,
+    warnings: dropped.map((f) => `${f.field_name} não se aplica a este material e foi ignorado`),
+  }
 }
 
 export function validCode(code: string | undefined): code is string {

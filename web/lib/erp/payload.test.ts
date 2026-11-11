@@ -35,6 +35,12 @@ const fields = [
 describe('JSON do ERP', () => {
   const payload = buildErpPayload(material, fields)
 
+  it('campo que a regra esconde para o material não vai para o ERP', () => {
+    const withHidden = buildErpPayload(material, fields, new Set(['potencia']))
+    expect(JSON.stringify(withHidden)).not.toContain('Z_POTENCIA')
+    expect(JSON.stringify(payload)).toContain('Z_POTENCIA')
+  })
+
   it('monta o cabeçalho com colunas, campos adicionais e dicionário', () => {
     expect(payload).toMatchObject({
       contentID: 'MDM-000123',
