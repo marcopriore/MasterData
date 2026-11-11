@@ -14,6 +14,10 @@ PRO-MAT é o sistema de cadastro padronizado de materiais (PDM), governança por
 | Planilhas | `xlsx` 0.20.3 do CDN da SheetJS (importação e exportação; a do npm parou na 0.18.5, com falhas conhecidas) |
 | Testes | Vitest em `web/lib/**/*.test.ts` (regressão de acesso) e Playwright em `tests/e2e` |
 
+Carregamento: `components/ui/page-loading.tsx` (`PageLoading`, spinner com "Carregando...", no bloco ou cobrindo a tela) é o padrão para tela ou lista esperando dados. `components/navigation-progress.tsx`, montado no `AppShell`, mostra a barra no topo ao clicar num link interno e, depois de 180 ms, a camada "Carregando..." até a rota mudar (desiste após 20 s). `app/loading.tsx` cobre a renderização da rota no servidor.
+
+Suporte: as telas de `/support` usam a paleta do Valore (classe `.theme-valore` em `globals.css`, aplicada em `app/support/layout.tsx`): azul como cor principal, fundo claro, bordas suaves e etiquetas de status coloridas. Diálogos e listas de seleção abrem fora da página (portal) e recebem a classe também. O botão expõe `data-variant` para o tema trocar o azul-marinho fixo do botão principal. O resto do sistema continua com a paleta institucional (azul-marinho e dourado).
+
 A maior parte das leituras e escritas vai direto do browser para o Supabase (`web/lib/supabase-api.ts`), com RLS filtrando por tenant. Rotas em `web/app/api` existem para operações que precisam da service role: usuários, onboarding, troca de tenant, import/export.
 
 ## O que deixou de valer
@@ -166,3 +170,6 @@ Enquanto o banco for único, a rodada grava em produção, sempre num tenant pr�
 | 034 | Cada área só na própria etapa: `can_act_on_stage` em atender, aprovar, rejeitar e salvar campos (`guard_request_area`); arrastar entre etapas só ADMIN/Master (`user_is_tenant_admin`); não rejeita solicitação finalizada; `erp_view` do dicionário de campos em código |
 | 035 | `request_counts`: contagem de solicitações por status e urgência no banco, para o painel inicial |
 | 036 | `is_closed_status`; cancelamento (`cancel_request`, status `cancelado`); `reject_request` com motivo padrão obrigatório; `report_rejections`; prazo por etapa (`workflow_config.sla_days`) e entrada na etapa (`material_requests.stage_entered_at`, por gatilho) |
+| 037 | `material_requests.is_closed` (coluna gerada por `is_closed_status`) e índice para a governança trazer só as fechadas recentes; `report_erp_integrations` e `report_erp_errors` (SECURITY DEFINER, exigem `can_view_reports`, porque o log do sistema só é lido com `can_view_logs`) |
+| 038 | Regras por material: `field_rule_profiles` (condições + regras); `stage_missing_fields` cobra a regra em qualquer etapa e sai do alcance de quem logou; `guard_request_area` trava o campo de condição fora da etapa dele |
+| 039 | A regra também define a etapa do campo (`rules` = `{campo: {role, requirement}}`), `field_effective()` no lugar de `field_requirement()`, campos de condição tirados das próprias regras (`field_rule_conditions`); sai `field_rule_settings` |

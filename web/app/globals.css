@@ -150,6 +150,9 @@
   --radius-xl: calc(var(--radius) + 4px);
   --radius-section: var(--radius-section, 1rem);
   --color-heading: var(--heading);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
@@ -215,6 +218,100 @@ input, select, textarea {
   --kanban-card-sub:        rgba(255,255,255,0.55);
   --kanban-card-accent:     #C69A46;
   --kanban-card-separator:  rgba(255,255,255,0.1);
+}
+
+/* Suporte: mesma paleta do Valore (azul, fundo claro, bordas suaves). Dialogs e selects
+   abrem em portal e precisam da classe também. */
+:root {
+  --success: oklch(0.65 0.18 165);
+  --warning: oklch(0.8 0.15 80);
+  --warning-foreground: oklch(0.25 0 0);
+}
+.theme-valore {
+  --background: oklch(0.98 0 0);
+  --heading: oklch(0.145 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.52 0.26 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.96 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.96 0.005 250);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.96 0.005 250);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.91 0 0);
+  --input: oklch(0.91 0 0);
+  --ring: oklch(0.55 0.2 250);
+  --success: oklch(0.65 0.18 165);
+  --warning: oklch(0.8 0.15 80);
+  --warning-foreground: oklch(0.25 0 0);
+  --shadow-card-float: 0 1px 3px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04);
+  color: var(--foreground);
+}
+.dark .theme-valore {
+  --background: oklch(0.12 0.02 250);
+  --heading: oklch(0.92 0 0);
+  --foreground: oklch(0.92 0 0);
+  --card: oklch(0.16 0.02 250);
+  --card-foreground: oklch(0.92 0 0);
+  --popover: oklch(0.16 0.02 250);
+  --popover-foreground: oklch(0.92 0 0);
+  --primary: oklch(0.52 0.26 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.22 0.02 250);
+  --secondary-foreground: oklch(0.92 0 0);
+  --muted: oklch(0.22 0.02 250);
+  --muted-foreground: oklch(0.6 0 0);
+  --accent: oklch(0.22 0.02 250);
+  --accent-foreground: oklch(0.92 0 0);
+  --destructive: oklch(0.5 0.2 25);
+  --border: oklch(0.25 0.02 250);
+  --input: oklch(0.25 0.02 250);
+  --ring: oklch(0.6 0.2 250);
+  --warning: oklch(0.75 0.15 80);
+  --warning-foreground: oklch(0.85 0.1 80);
+  --shadow-card-float: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+@layer base {
+  .theme-valore,
+  .theme-valore *,
+  .theme-valore ::before,
+  .theme-valore ::after {
+    border-color: var(--border);
+  }
+}
+.theme-valore [data-slot="card"] {
+  background: var(--card);
+  border-color: var(--border);
+}
+.theme-valore [data-slot="button"]:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+}
+.theme-valore [data-slot="button"][data-variant="default"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+.theme-valore [data-slot="button"][data-variant="default"]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--primary) 90%, black);
+  border-color: transparent;
+}
+.theme-valore [data-slot="button"][data-variant="outline"] {
+  background: var(--card);
+  border-color: var(--border);
+}
+.theme-valore [data-slot="button"][data-variant="outline"]:hover:not(:disabled),
+.theme-valore [data-slot="button"][data-variant="ghost"]:hover:not(:disabled),
+.theme-valore [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 
 /* Section containers - rounded-2xl corners */

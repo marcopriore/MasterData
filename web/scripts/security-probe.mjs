@@ -100,7 +100,7 @@ async function makeFlow(tenantId) {
 
 async function cleanup() {
   for (const tenantId of created.tenants) {
-    for (const table of ['request_history', 'notifications', 'system_logs', 'material_database', 'material_requests', 'pdm_templates', 'workflow_config', 'workflow_header']) {
+    for (const table of ['request_history', 'notifications', 'system_logs', 'material_database', 'material_requests', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_dictionary']) {
       await admin.from(table).delete().eq('tenant_id', tenantId)
     }
   }
@@ -125,7 +125,7 @@ async function main() {
   const requester = await makeUser(tA, 'SOLIC', { can_submit_request: true, can_view_database: true, can_attend: false })
   const attendant = await makeUser(tA, 'ATEND', { can_attend: true, can_approve: true, can_reject: true, can_view_database: true }, 'CADASTRO')
   const otherArea = await makeUser(tA, 'COMPR', { can_attend: true, can_approve: true, can_reject: true, can_view_database: true }, 'COMPRAS')
-  const adminB = await makeUser(tB, 'ADMB', { can_manage_roles: true, can_manage_users: true, can_view_logs: true, can_attend: true, can_approve: true, can_reject: true })
+  const adminB = await makeUser(tB, 'ADMB', { can_manage_roles: true, can_manage_users: true, can_view_logs: true, can_view_reports: true, can_attend: true, can_approve: true, can_reject: true })
 
   const [reqB] = await must(admin.from('material_requests').insert({ tenant_id: tB, pdm_id: flowB.pdmId, workflow_id: flowB.workflowId, status: 'cadastro', requester: 'B', urgency: 'low', user_id: adminB.id }).select('id, status'), 'solicitação B')
   const [reqA] = await must(admin.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'A', urgency: 'low', user_id: requester.id }).select('id, status'), 'solicitação A')
@@ -207,6 +207,42 @@ async function main() {
   await allowed('solicitante cancela a própria antes do atendimento', () => solic.rpc('cancel_request', { p_request_id: reqC.id, p_reason: 'sonda' }))
   record(await reqStatus(reqC.id, 'cancelado'), 'cancelada fica com status cancelado')
   await denied('cancelada não é aprovada', () => atend.rpc('advance_workflow', { p_request_id: reqC.id }), () => reqStatus(reqC.id, 'cancelado'))
+
+  console.log('\nRelatório de integração ERP')
+  await must(admin.from('material_database').insert({ tenant_id: tA, id_sistema: `SONDA-${tag}-E`, description: 'SONDA ERRO', status: 'Ativo', erp_status: 'erro_erp', erp_error_message: `SONDA ERRO ${tag}`, source: 'manual' }), 'material com erro A')
+  await must(admin.from('system_logs').insert({ tenant_id: tA, user_id: attendant.id, category: 'database', action: 'erp_integrated', description: 'Material integrado ao ERP (simulação)' }), 'log ERP A')
+  await denied('sem "Ver Relatórios" não lê as integrações', () => solic.rpc('report_erp_integrations', { p_from: '2000-01-01', p_to: '2100-01-01' }))
+  await denied('sem "Ver Relatórios" não lê os erros do ERP', () => solic.rpc('report_erp_errors'))
+  const relB = await signIn(adminB.email)
+  const { data: errorsB, error: errorsBErr } = await relB.rpc('report_erp_errors')
+  record(!errorsBErr && !(errorsB ?? []).some((r) => String(r.message).includes(tag)), 'relatório do tenant B não mostra erro do tenant A', errorsBErr?.message ?? '')
+  const { data: eventsB, error: eventsBErr } = await relB.rpc('report_erp_integrations', { p_from: '2000-01-01', p_to: '2100-01-01' })
+  record(!eventsBErr && (eventsB ?? []).length === 0, 'relatório do tenant B não conta integração do tenant A', eventsBErr?.message ?? '')
+
+  console.log('\nRegras de campos por material')
+  await must(admin.from('field_dictionary').insert([
+    { tenant_id: tA, field_name: 'tipo_material', field_label: 'Tipo de Material', erp_view: 'dados_basicos', field_type: 'select', options: ['FERT', 'NLAG'], responsible_role: 'CADASTRO', is_required: false, display_order: 1 },
+    { tenant_id: tA, field_name: 'sonda_campo', field_label: 'Campo da sonda', erp_view: 'dados_basicos', field_type: 'text', responsible_role: 'CADASTRO', is_required: false, display_order: 2 },
+  ]), 'campos A')
+  const [profA] = await must(admin.from('field_rule_profiles').insert({ tenant_id: tA, name: `SONDA FERT ${tag}`, conditions: { tipo_material: 'FERT' }, rules: { sonda_campo: { requirement: 'required' } } }).select('id'), 'regra A')
+  const profUnchanged = async () => (await admin.from('field_rule_profiles').select('rules').eq('id', profA.id).single()).data?.rules?.sonda_campo?.requirement === 'required'
+  await denied('outro tenant não lê as regras do A', () => relB.from('field_rule_profiles').select('id').eq('id', profA.id))
+  await denied('outro tenant não grava regra no A', () => relB.from('field_rule_profiles').insert({ tenant_id: tA, name: `HACK ${tag}`, conditions: { tipo_material: 'X' } }).select('id'),
+    async () => ((await admin.from('field_rule_profiles').select('id').eq('tenant_id', tA).eq('name', `HACK ${tag}`)).data ?? []).length === 0)
+  await denied('sem "Gerenciar campos" não altera regra', () => solic.from('field_rule_profiles').update({ rules: { sonda_campo: { requirement: 'hidden' } } }).eq('id', profA.id).select('id'), profUnchanged)
+  await denied('não consulta campos de outro tenant pelo banco', () => relB.rpc('stage_missing_fields', { p_tenant_id: tA, p_status: 'cadastro', p_attributes: {} }))
+  await denied('não consulta a regra de outro tenant pelo banco', () => relB.rpc('field_effective', { p_tenant_id: tA, p_field_name: 'sonda_campo', p_base_role: 'CADASTRO', p_base_required: false, p_attributes: { tipo_material: 'FERT' } }))
+
+  const [reqE] = await must(admin.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'E', urgency: 'low', user_id: requester.id, technical_attributes: { tipo_material: 'FERT' } }).select('id'), 'solicitação E')
+  await allowed('atendente assume a solicitação FERT', () => atend.rpc('assign_request', { p_request_id: reqE.id }))
+  await denied('FERT sem o campo exigido pelo perfil não é aprovada', () => atend.rpc('advance_workflow', { p_request_id: reqE.id }), () => reqStatus(reqE.id, 'cadastro'))
+  await allowed('atendente preenche o campo exigido', () => atend.from('material_requests').update({ technical_attributes: { tipo_material: 'FERT', sonda_campo: 'OK' } }).eq('id', reqE.id).select('id'))
+  await allowed('com o campo preenchido, a FERT é aprovada', () => atend.rpc('advance_workflow', { p_request_id: reqE.id }))
+
+  const [reqF] = await must(admin.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'compras', requester: 'F', urgency: 'low', user_id: requester.id, assigned_to_id: otherArea.id, technical_attributes: { tipo_material: 'FERT' } }).select('id'), 'solicitação F')
+  await denied('fora da etapa dele, o tipo de material não muda', () => compras.from('material_requests').update({ technical_attributes: { tipo_material: 'NLAG' } }).eq('id', reqF.id).select('id'),
+    async () => (await admin.from('material_requests').select('technical_attributes').eq('id', reqF.id).single()).data?.technical_attributes?.tipo_material === 'FERT')
+  await allowed('a etapa atual muda os outros campos', () => compras.from('material_requests').update({ technical_attributes: { tipo_material: 'FERT', obs: 'X' } }).eq('id', reqF.id).select('id'))
 
   console.log('\nUso legítimo continua funcionando')
   await allowed('solicitante abre solicitação na primeira etapa', () => solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: 'Sonda', urgency: 'low', user_id: requester.id }).select('id'))

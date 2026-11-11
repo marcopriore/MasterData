@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { PageLoading } from '@/components/ui/page-loading'
+import { StatusBadge } from '@/components/ui/status-badge'
 import { Textarea } from '@/components/ui/textarea'
 import {
   AXISDESK_TIPO_OPTIONS,
@@ -17,6 +19,7 @@ import {
   getAvailableSupportActions,
   getAxisDeskPrioridadeLabel,
   getAxisDeskStatusLabel,
+  getAxisDeskStatusVariant,
   type AxisDeskChamadoAcao,
   type AxisDeskChamadoDetalhe,
   type AxisDeskHistoricoEntry,
@@ -122,7 +125,7 @@ export function SupportTicketDetail({ ticketId }: { ticketId: string }) {
     }
   }
 
-  if (loading) return <p className="py-16 text-center text-sm text-muted-foreground">Carregando chamado…</p>
+  if (loading) return <PageLoading label="Carregando chamado…" />
   if (!ticket) {
     return (
       <div className="space-y-4">
@@ -155,12 +158,12 @@ export function SupportTicketDetail({ ticketId }: { ticketId: string }) {
             </Button>
             <div>
               <h1 className="text-2xl font-semibold text-foreground">{ticket.titulo}</h1>
-              <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-md border bg-card px-2 py-1">{getAxisDeskStatusLabel(ticket.status)}</span>
-                <span className="rounded-md border bg-muted px-2 py-1">{getAxisDeskPrioridadeLabel(ticket.prioridade)}</span>
-                <span className="rounded-md border bg-muted px-2 py-1">{AXISDESK_TIPO_OPTIONS.find((item) => item.value === ticket.tipo)?.label ?? ticket.tipo}</span>
-                {ticket.categoria ? <span className="rounded-md border bg-card px-2 py-1">{ticket.categoria.nome}</span> : null}
-                {ticket.subcategoria ? <span className="rounded-md border bg-card px-2 py-1">{ticket.subcategoria.nome}</span> : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                <StatusBadge variant={getAxisDeskStatusVariant(ticket.status)}>{getAxisDeskStatusLabel(ticket.status)}</StatusBadge>
+                <StatusBadge variant="muted">{getAxisDeskPrioridadeLabel(ticket.prioridade)}</StatusBadge>
+                <StatusBadge variant="info">{AXISDESK_TIPO_OPTIONS.find((item) => item.value === ticket.tipo)?.label ?? ticket.tipo}</StatusBadge>
+                {ticket.categoria ? <StatusBadge variant="default">{ticket.categoria.nome}</StatusBadge> : null}
+                {ticket.subcategoria ? <StatusBadge variant="default">{ticket.subcategoria.nome}</StatusBadge> : null}
               </div>
             </div>
           </div>

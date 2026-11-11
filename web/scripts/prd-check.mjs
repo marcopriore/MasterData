@@ -136,6 +136,8 @@ async function checkSupabase(env) {
     ['integration_logs', 'id', '019'],
     ['api_clients', 'id', '020'],
     ['tenant_erp_connections', 'response_code_field', '022/023'],
+    ['material_requests', 'is_closed', '037'],
+    ['field_rule_profiles', 'rules', '038'],
   ]
   for (const [table, column, migration] of tables) {
     const { error } = await admin.from(table).select(column).limit(1)
@@ -167,6 +169,9 @@ async function checkSupabase(env) {
     ['035', 'request_counts', {}],
     ['036', 'cancel_request', { p_request_id: -1 }],
     ['036', 'report_rejections', { p_from: '2026-01-01', p_to: '2026-01-02' }],
+    ['037', 'report_erp_integrations', { p_from: '2026-01-01', p_to: '2026-01-02' }],
+    ['037', 'report_erp_errors', {}],
+    ['039', 'field_effective', { p_tenant_id: -1, p_field_name: '-', p_base_role: 'CADASTRO', p_base_required: false, p_attributes: {} }],
   ]
   for (const [migration, fn, params] of rpcs) {
     const { error: rpcErr } = await admin.rpc(fn, params)

@@ -1,5 +1,35 @@
 import { describe, expect, it } from 'vitest'
-import { defaultPeriod, formatHours, periodToRange, productivityByArea, rejectionsBy, totalsOfBase, type ProductivityRow } from './reports'
+import { defaultPeriod, erpByDay, erpTotals, formatDay, formatHours, periodToRange, productivityByArea, rejectionsBy, totalsOfBase, type ProductivityRow } from './reports'
+
+describe('integração com o ERP', () => {
+  const rows = [
+    { day: '2026-10-29', action: 'erp_integrated', simulated: true, total: 3 },
+    { day: '2026-10-29', action: 'erp_integrated', simulated: false, total: 1 },
+    { day: '2026-10-29', action: 'erp_integration_failed', simulated: false, total: 1 },
+    { day: '2026-10-30', action: 'erp_eliminated', simulated: false, total: 2 },
+    { day: '2026-10-30', action: 'erp_blocked_duplicate', simulated: false, total: 1 },
+    { day: '2026-10-30', action: 'outra_coisa', simulated: false, total: 9 },
+  ]
+
+  it('agrupa por dia, do mais recente, e ignora ação desconhecida', () => {
+    expect(erpByDay(rows)).toEqual([
+      { day: '2026-10-30', integrated: 0, failed: 0, eliminated: 2, elimination_failed: 0, blocked: 1 },
+      { day: '2026-10-29', integrated: 4, failed: 1, eliminated: 0, elimination_failed: 0, blocked: 0 },
+    ])
+  })
+
+  it('totais, simulação e taxa de sucesso das integrações', () => {
+    const totals = erpTotals(rows)
+    expect(totals.integrated).toBe(4)
+    expect(totals.simulated).toBe(3)
+    expect(totals.success_rate).toBe(80)
+    expect(erpTotals([]).success_rate).toBeNull()
+  })
+
+  it('dia no formato brasileiro sem mudar de fuso', () => {
+    expect(formatDay('2026-10-01')).toBe('01/10/2026')
+  })
+})
 
 describe('rejeições por etapa e motivo', () => {
   it('soma e ordena do maior para o menor', () => {

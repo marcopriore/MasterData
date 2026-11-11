@@ -6,9 +6,14 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 
 - **`NEXT_PUBLIC_APP_URL` no ambiente.** Falta no `.env.local` (esperado em desenvolvimento) e é obrigatória em produção, para os links de e-mail e das solicitações criadas por API apontarem para o endereço certo.
 
-- **Minhas Solicitações, próximos.** Aba com as solicitações que o usuário atendeu (aprovou ou rejeitou), se for pedida.
-- **Relatórios, próximos.** Integrações com o ERP no período.
-- **Governança com muito volume.** A lista é carregada inteira, em páginas de 1000 (correto, sem corte), e o kanban mostra todos os cartões. Com milhares de solicitações fechadas, vale limitar as colunas Finalizado, Rejeitadas e Canceladas aos últimos meses ou paginar a lista.
+- **Regras por material, fase 2 (combinado em 10/11/2026).** A regra (038/039: etapa e obrigatoriedade por condição) vale no fluxo de solicitações. Falta aplicar em todas as entradas da base:
+  - edição manual na Base de Dados;
+  - importação por planilha (linha que não cumpre a regra é recusada com a lista de campos; campo oculto enviado é ignorado com aviso);
+  - API de materiais (422 com os campos que faltam) e a documentação de integração;
+  - campo oculto fora do payload do ERP.
+  
+  Depois, suíte E2E das regras.
+- **Governança com muitas abertas.** Desde a 037 as fechadas vêm só dos últimos 90 dias (ajustável na tela). As abertas continuam todas: com milhares em andamento ao mesmo tempo, o próximo passo é paginar a lista.
 - **AxisDesk em produção respondendo 500.** A chave do PRO-MAT é aceita, mas `/api/categorias` e `/api/chamados` do AxisDesk falham na primeira consulta ao próprio banco. Conferir o projeto Supabase do AxisDesk (pausado?) e os logs da Vercel dele.
 - **E-mail de redefinição de senha.** O link sai pelo e-mail do Supabase Auth. O SMTP padrão do Supabase só entrega para membros da equipe do projeto e tem limite baixo; em produção é preciso o SMTP próprio (Resend) e o modelo de e-mail com `token_hash`, descritos em `deploy-producao.md`.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.

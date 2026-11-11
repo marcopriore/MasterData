@@ -17,6 +17,7 @@ import { DEFAULT_STAGE_SLA_DAYS } from '@/lib/governance-stats'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PageLoading } from '@/components/ui/page-loading'
 import {
   Dialog,
   DialogContent,
@@ -809,9 +810,7 @@ export default function WorkflowConfigPage() {
             )}
           </div>
           {loading ? (
-            <p className="py-8 text-center text-slate-500 dark:text-muted-foreground">
-              Carregando etapas...
-            </p>
+            <PageLoading label="Carregando etapas..." minHeight="min-h-[20vh]" />
           ) : steps.length === 0 ? (
             <p className="py-8 text-center text-slate-500 dark:text-muted-foreground">
               Nenhuma etapa configurada. Clique em Adicionar Nova Etapa.

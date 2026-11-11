@@ -39,6 +39,73 @@ export type RejectionRow = {
   total: number
 }
 
+/** report_erp_integrations (migration 037): eventos de ERP do log, por dia e ação. */
+export type ErpEventRow = {
+  day: string
+  action: string
+  simulated: boolean
+  total: number
+}
+
+/** report_erp_errors (migration 037): materiais hoje com erro no ERP, pela mensagem. */
+export type ErpErrorRow = {
+  message: string
+  total: number
+  last_update: string | null
+}
+
+export type ErpCounts = {
+  integrated: number
+  failed: number
+  eliminated: number
+  elimination_failed: number
+  blocked: number
+}
+
+export type ErpDayRow = ErpCounts & { day: string }
+
+const ERP_ACTION: Record<string, keyof ErpCounts> = {
+  erp_integrated: 'integrated',
+  erp_integration_failed: 'failed',
+  erp_eliminated: 'eliminated',
+  erp_elimination_failed: 'elimination_failed',
+  erp_blocked_duplicate: 'blocked',
+}
+
+const emptyErpCounts = (): ErpCounts => ({ integrated: 0, failed: 0, eliminated: 0, elimination_failed: 0, blocked: 0 })
+
+/** Uma linha por dia, do mais recente para o mais antigo. */
+export function erpByDay(rows: ErpEventRow[]): ErpDayRow[] {
+  const days = new Map<string, ErpDayRow>()
+  for (const row of rows) {
+    const key = ERP_ACTION[row.action]
+    if (!key) continue
+    const current = days.get(row.day) ?? { day: row.day, ...emptyErpCounts() }
+    current[key] += row.total
+    days.set(row.day, current)
+  }
+  return [...days.values()].sort((a, b) => b.day.localeCompare(a.day))
+}
+
+/** Totais do período, quantos vieram da simulação e a taxa de sucesso das integrações (null sem tentativa). */
+export function erpTotals(rows: ErpEventRow[]): ErpCounts & { simulated: number; success_rate: number | null } {
+  const out = { ...emptyErpCounts(), simulated: 0 }
+  for (const row of rows) {
+    const key = ERP_ACTION[row.action]
+    if (!key) continue
+    out[key] += row.total
+    if (row.simulated) out.simulated += row.total
+  }
+  const attempts = out.integrated + out.failed
+  return { ...out, success_rate: attempts > 0 ? Math.round((out.integrated / attempts) * 100) : null }
+}
+
+/** Dia AAAA-MM-DD em DD/MM/AAAA, sem passar por Date (evita o fuso). */
+export function formatDay(day: string): string {
+  const [y, m, d] = day.split('-')
+  return y && m && d ? `${d}/${m}/${y}` : day
+}
+
 export type RejectionGroup = { key: string; total: number }
 
 /** Totais por etapa e por motivo, do maior para o menor. */

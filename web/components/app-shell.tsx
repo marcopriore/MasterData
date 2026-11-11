@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { AppSidebar } from '@/components/app-sidebar'
 import { Topbar } from '@/components/topbar'
+import { NavigationProgress } from '@/components/navigation-progress'
 
 const SIDEBAR_HIDDEN_PATHS = ['/login', '/reset-password']
 const COLLAPSED_KEY = 'promat:sidebar-collapsed'
@@ -44,6 +45,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div style={{ '--nav-width': collapsed ? NAV_WIDTH_COLLAPSED : NAV_WIDTH_OPEN } as React.CSSProperties}>
       <AppSidebar collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
       <Topbar />
+      <NavigationProgress />
       <main className="min-h-screen p-8 pt-[4.5rem] ml-0 transition-[margin] duration-200 md:ml-[var(--nav-width)]">{children}</main>
     </div>
   )

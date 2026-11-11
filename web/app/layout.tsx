@@ -34,7 +34,7 @@ export default async function RootLayout({
   // O script de tema é inline e precisa do nonce do CSP (proxy.ts).
   const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="pt-BR" suppressHydrationWarning>
       <body
         className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >

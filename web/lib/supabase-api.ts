@@ -17,11 +17,21 @@ import type { RequestErpInfo } from '@/lib/request-erp-state'
 import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
 import { safeSearchTerm } from '@/lib/search-term'
 import { type MyRequestRow } from '@/lib/my-requests'
+import { toProfile, type FieldRuleProfile } from '@/lib/field-rules'
+import {
+  ATTENDED_EVENT_TYPES,
+  summarizeAttended,
+  type AttendedEvent,
+  type AttendedRequestInfo,
+  type AttendedRow,
+} from '@/lib/attended-requests'
 import type { RejectionReason } from '@/lib/rejection-reasons'
 import { isCancelledStatus, isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-status'
 import {
   toNullableNumber,
   toNumber,
+  type ErpErrorRow,
+  type ErpEventRow,
   type FlowRow,
   type MaterialBaseRow,
   type ProductivityRow,
@@ -515,8 +525,13 @@ export async function getRequests(params?: {
   workflowId?: number
   status?: string
   limit?: number
+  /** Abertas sempre; fechadas só as que fecharam nos últimos N dias (is_closed, migration 037). */
+  closedSinceDays?: number | null
 }): Promise<ApiRequest[]> {
   const supabase = createClient()
+  const closedSince = params?.closedSinceDays
+    ? new Date(Date.now() - params.closedSinceDays * 24 * 3600 * 1000).toISOString()
+    : null
   const query = () => {
     let q = supabase
       .from('material_requests')
@@ -528,6 +543,7 @@ export async function getRequests(params?: {
       .order('id', { ascending: false })
     if (params?.workflowId) q = q.eq('workflow_id', params.workflowId)
     if (params?.status) q = q.eq('status', params.status)
+    if (closedSince) q = q.or(`is_closed.eq.false,stage_entered_at.gte.${closedSince}`)
     return q
   }
 
@@ -659,6 +675,87 @@ export async function getReportRejections(from: string, to: string): Promise<Rej
     reason: String(r.reason ?? ''),
     total: toNumber(r.total),
   }))
+}
+
+export async function getReportErpIntegrations(from: string, to: string): Promise<ErpEventRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('report_erp_integrations', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    day: String(r.day ?? ''),
+    action: String(r.action ?? ''),
+    simulated: r.simulated === true,
+    total: toNumber(r.total),
+  }))
+}
+
+export async function getReportErpErrors(): Promise<ErpErrorRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('report_erp_errors')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    message: String(r.message ?? ''),
+    total: toNumber(r.total),
+    last_update: r.last_update ? String(r.last_update) : null,
+  }))
+}
+
+/** Solicitações em que o usuário logado iniciou o atendimento, aprovou, rejeitou ou moveu de etapa. */
+export async function getMyAttendedRequests(): Promise<AttendedRow[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const tenantId = await getCurrentUserTenantId()
+
+  const events = await allPages((from, to) =>
+    supabase
+      .from('request_history')
+      .select('id, request_id, event_type, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('user_id', user.id)
+      .in('event_type', ATTENDED_EVENT_TYPES)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to)
+  )
+  const ids = [...new Set(events.map((e) => e.request_id as number))]
+  if (ids.length === 0) return []
+
+  const requests: Array<{ id: number; status: string | null; generated_description: string | null; workflow_id: number | null; pdm_templates: unknown }> = []
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from('material_requests')
+      .select('id, status, generated_description, workflow_id, pdm_templates(name)')
+      .eq('tenant_id', tenantId)
+      .in('id', ids.slice(i, i + 200))
+    if (error) handleError(error)
+    requests.push(...(data ?? []))
+  }
+
+  const workflowIds = [...new Set(requests.map((r) => r.workflow_id).filter(Boolean))] as number[]
+  const { data: stepRows } = workflowIds.length
+    ? await supabase.from('workflow_config').select('workflow_id, status_key, step_name').in('workflow_id', workflowIds)
+    : { data: [] }
+  const steps = new Map(((stepRows ?? []) as Array<{ workflow_id: number; status_key: string; step_name: string }>)
+    .map((s) => [`${s.workflow_id}:${s.status_key.toLowerCase()}`, s.step_name]))
+
+  const infos = new Map<number, AttendedRequestInfo>()
+  for (const r of requests) {
+    const pdm = (Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates) as { name?: string } | null
+    const status = String(r.status ?? '')
+    infos.set(r.id, {
+      id: r.id,
+      pdm_name: pdm?.name ?? '—',
+      description: r.generated_description ?? '',
+      status,
+      step_label: isRejectedStatus(status)
+        ? 'Rejeitada'
+        : isCancelledStatus(status)
+          ? 'Cancelada'
+          : steps.get(`${r.workflow_id}:${status.toLowerCase()}`) ?? requestStatusLabel(status),
+    })
+  }
+  return summarizeAttended(events as AttendedEvent[], infos)
 }
 
 /** Solicitações abertas pelo usuário logado, no tenant efetivo, com etapa, atendente e motivo da rejeição. */
@@ -1757,25 +1854,20 @@ export async function deleteField(id: number): Promise<void> {
   invalidateApiCache()
 }
 
-/** Maps workflow status_key to field_dictionary responsible_role */
+/** Área da etapa = nome da etapa em maiúsculas (como can_act_on_stage); fechada não tem campos. */
 function statusToResponsibleRole(status: string | undefined): string | null {
-  if (!status?.trim()) return null
-  const s = status.trim().toLowerCase()
-  const map: Record<string, string> = {
-    cadastro: 'CADASTRO',
-    compras: 'COMPRAS',
-    mrp: 'MRP',
-    fiscal: 'FISCAL',
-    contabilidade: 'CONTABILIDADE',
-  }
-  return map[s] ?? null
+  if (!status?.trim() || isClosedStatus(status)) return null
+  return status.trim().toUpperCase()
 }
 
-/** Fields for the current phase. Admin/Master: by request status (phase). Operators: by user role. */
-export async function getMyFields(requestStatus?: string): Promise<MyField[]> {
+/**
+ * Etapa cujos campos o usuário preenche e todos os campos ativos. Admin/Master: a etapa da solicitação;
+ * demais: o papel de etapa. Quais campos aparecem depende do material (fieldsForStage, regras da 039).
+ */
+export async function getStageFields(requestStatus?: string): Promise<{ role: string | null; fields: MyField[] }> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return []
+  if (!user) return { role: null, fields: [] }
 
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
   const { data: profile } = await supabase.from('users').select('roles!users_role_id_fkey(name)').eq('id', user.id).single()
@@ -1789,24 +1881,19 @@ export async function getMyFields(requestStatus?: string): Promise<MyField[]> {
     return ((role as { name?: string } | null)?.name ?? '').toUpperCase() === 'ADMIN'
   })
 
-  let responsibleRole: string | null
-  if (seesCurrentPhaseFields({ isMaster, roleName, hasAdminGroup })) {
-    responsibleRole = statusToResponsibleRole(requestStatus ?? '')
-    if (!responsibleRole) return []
-  } else {
-    if (!roleName) return []
-    responsibleRole = roleName
-  }
+  const responsibleRole = seesCurrentPhaseFields({ isMaster, roleName, hasAdminGroup })
+    ? statusToResponsibleRole(requestStatus ?? '')
+    : roleName || null
+  if (!responsibleRole) return { role: null, fields: [] }
 
   const { data, error } = await supabase
     .from('field_dictionary')
     .select('*')
     .eq('is_active', true)
-    .eq('responsible_role', responsibleRole)
     .order('display_order')
   if (error) handleError(error)
 
-  return (data ?? []).map((r) => ({
+  return { role: responsibleRole, fields: (data ?? []).map((r) => ({
     id: r.id,
     field_name: r.field_name,
     field_label: r.field_label,
@@ -1819,7 +1906,7 @@ export async function getMyFields(requestStatus?: string): Promise<MyField[]> {
     is_active: r.is_active,
     display_order: r.display_order,
     created_at: r.created_at,
-  }))
+  })) }
 }
 
 export type MyField = {
@@ -1835,6 +1922,45 @@ export type MyField = {
   is_active: boolean
   display_order: number
   created_at: string | null
+}
+
+// ─── Regras por material (migrations 038 e 039) ─────────────────────────────
+
+/** Regras do tenant em uso (RLS filtra; leitura liberada a todos do tenant). */
+export async function getFieldRules(): Promise<FieldRuleProfile[]> {
+  const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
+  const { data, error } = await supabase.from('field_rule_profiles').select('*').eq('tenant_id', tenantId).order('name')
+  if (error) handleError(error)
+  return (data ?? []).map((row) => toProfile(row as Record<string, unknown>))
+}
+
+export async function saveFieldRuleProfile(profile: Omit<FieldRuleProfile, 'id'> & { id?: number }): Promise<FieldRuleProfile> {
+  const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
+  const row = {
+    name: toErpText(profile.name.trim()).toUpperCase(),
+    conditions: Object.fromEntries(
+      Object.entries(profile.conditions).filter(([, v]) => v.trim() !== '').map(([k, v]) => [k, toErpText(v.trim())])
+    ),
+    rules: profile.rules,
+    is_active: profile.is_active,
+    updated_at: new Date().toISOString(),
+  }
+  const { data, error } = profile.id
+    ? await supabase.from('field_rule_profiles').update(row).eq('id', profile.id).select().single()
+    : await supabase.from('field_rule_profiles').insert({ ...row, tenant_id: tenantId }).select().single()
+  if (error) {
+    if (error.code === '23505') throw new Error('Já existe uma regra com esse nome.')
+    handleError(error)
+  }
+  return toProfile(data as Record<string, unknown>)
+}
+
+export async function deleteFieldRuleProfile(id: number): Promise<void> {
+  const supabase = createClient()
+  const { error } = await supabase.from('field_rule_profiles').delete().eq('id', id)
+  if (error) handleError(error)
 }
 
 export type FieldLabelItem = { field_name: string; field_label: string }

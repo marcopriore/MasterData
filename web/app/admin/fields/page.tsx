@@ -12,6 +12,8 @@ import {
 } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { ERP_VIEWS as ERP_VIEW_LIST, erpViewCode, erpViewLabel } from '@/lib/erp-views'
+import { FieldRulesPanel } from '@/components/fields/field-rules-panel'
+import { PageLoading } from '@/components/ui/page-loading'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -75,15 +77,6 @@ const FIELD_TYPES = [
   { value: 'select', label: 'Lista de Opções', icon: List },
 ] as const
 
-const ROLE_BADGE_STYLE: Record<string, { bg: string; text: string; border: string }> = {
-  ADMIN: { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' },
-  SOLICITANTE: { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
-  TRIAGEM: { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' },
-  FISCAL: { bg: '#F5F3FF', text: '#5B21B6', border: '#DDD6FE' },
-  MASTER: { bg: '#FEF3C7', text: '#B45309', border: '#FDE68A' },
-  MRP: { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0' },
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getFieldTypeIcon(type: string) {
@@ -143,8 +136,6 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
   const [erpView, setErpView] = useState(erpViewCode(initial?.erp_view) || 'dados_basicos')
   const [erpBlock, setErpBlock] = useState(initial?.erp_block ?? '')
   const [fieldType, setFieldType] = useState(initial?.field_type ?? 'text')
-  const [responsibleRole, setResponsibleRole] = useState(initial?.responsible_role ?? '')
-  const [isRequired, setIsRequired] = useState(initial?.is_required ?? false)
   const [optionsJson, setOptionsJson] = useState(() => {
     const o = initial?.options
     if (Array.isArray(o)) return JSON.stringify(o, null, 2)
@@ -170,10 +161,6 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
       toast.error('Identificador é obrigatório.')
       return
     }
-    if (!responsibleRole.trim()) {
-      toast.error('Responsável é obrigatório.')
-      return
-    }
     if (!/^[a-z][a-z0-9_]*$/.test(fieldName)) {
       toast.error('Identificador deve ser snake_case (ex: descricao_basica).')
       return
@@ -194,9 +181,8 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
 
     setSaving(true)
     try {
-      const role = roles.find((r) => r.name === responsibleRole)
-      const roleName = role?.name ?? responsibleRole
-
+      // Etapa e obrigatoriedade ficam na aba Regras; campo novo entra opcional na primeira etapa.
+      const firstStage = roles.find((r) => r.name.toUpperCase() === 'CADASTRO')?.name ?? 'CADASTRO'
       const body = {
         field_name: fieldName.trim(),
         field_label: fieldLabel.trim(),
@@ -207,10 +193,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
         options: fieldType === 'select'
           ? (parseOptionsJson(optionsJson) ?? []).map((v) => v.trim()).filter(Boolean)
           : null,
-        responsible_role: roleName,
-        is_required: isRequired,
-        is_active: true,
-        display_order: 0,
+        ...(mode === 'create' ? { responsible_role: firstStage, is_required: false, is_active: true, display_order: 0 } : {}),
       }
 
       let saved: FieldDictionary
@@ -333,32 +316,11 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
               ))}
             </select>
           </div>
-          <div>
-            <Label htmlFor="responsible_role">Responsável *</Label>
-            <select
-              id="responsible_role"
-              value={responsibleRole}
-              onChange={(e) => setResponsibleRole(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm dark:border-zinc-700 dark:bg-background dark:text-foreground"
-            >
-              <option value="">Selecione...</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="is_required"
-              checked={isRequired}
-              onChange={(e) => setIsRequired(e.target.checked)}
-              className="rounded border-input"
-            />
-            <Label htmlFor="is_required">Campo obrigatório</Label>
-          </div>
+          {mode === 'create' && (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-muted-foreground">
+              O campo novo entra opcional na etapa Cadastro. Etapa e obrigatoriedade se ajustam na aba Regras.
+            </p>
+          )}
           {fieldType === 'select' && (
             <div>
               <Label htmlFor="options">Opções (JSON array) *</Label>
@@ -406,12 +368,13 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
 
 export default function FieldsPage() {
   const pathname = usePathname()
-  const { user, can } = useUser()
+  const { user, can, ready } = useUser()
   const canAccess = user?.is_master || can('can_manage_fields')
   const [fields, setFields] = useState<FieldDictionary[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [erpViewFilter, setErpViewFilter] = useState('')
+  const [section, setSection] = useState<'campos' | 'regras'>('campos')
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<ModalMode>('create')
   const [editTarget, setEditTarget] = useState<FieldDictionary | null>(null)
@@ -436,9 +399,10 @@ export default function FieldsPage() {
     [fields, erpViewFilter]
   )
 
+  // Só depois da sessão: antes dela a RLS devolve a lista vazia.
   useEffect(() => {
-    fetchData()
-  }, [fetchData, pathname])
+    if (ready && canAccess) fetchData()
+  }, [ready, canAccess, fetchData, pathname])
 
   function openCreate() {
     setEditTarget(null)
@@ -486,6 +450,8 @@ export default function FieldsPage() {
     }
   }
 
+  if (!ready) return <PageLoading />
+
   if (!canAccess) {
     return (
       <div className="mx-auto max-w-2xl py-20 text-center">
@@ -507,19 +473,45 @@ export default function FieldsPage() {
           <div>
             <h1 className="text-xl font-bold text-foreground">Dicionário de Campos</h1>
             <p className="text-sm text-muted-foreground">
-              Campos e responsabilidades por etapa
+              Campos do material; em Regras, a etapa e a obrigatoriedade de cada um
             </p>
           </div>
         </div>
-        <Button
-          onClick={openCreate}
-          className="bg-[#0F1C38] hover:bg-[#162444] text-white shrink-0"
-        >
-          <Plus className="size-4 mr-2" />
-          Novo Campo
-        </Button>
+        {section === 'campos' && (
+          <Button
+            onClick={openCreate}
+            className="bg-[#0F1C38] hover:bg-[#162444] text-white shrink-0"
+          >
+            <Plus className="size-4 mr-2" />
+            Novo Campo
+          </Button>
+        )}
       </div>
 
+      <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-zinc-700 dark:bg-card" role="tablist">
+        {([['campos', 'Campos'], ['regras', 'Regras (etapa e obrigatoriedade)']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={section === key}
+            onClick={() => setSection(key)}
+            className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+              section === key
+                ? 'bg-[#0F1C38] text-white dark:bg-[#C69A46] dark:text-[#0F1C38]'
+                : 'text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-muted/40'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'regras' ? (
+        loading ? <PageLoading label="Carregando campos…" minHeight="min-h-[30vh]" /> : (
+          <FieldRulesPanel fields={fields} roles={roles.map((r) => r.name)} onFieldsChanged={fetchData} />
+        )
+      ) : (<>
       {/* Tabs filter */}
       <div className="flex flex-wrap gap-2">
         {ERP_VIEWS.map((v) => (
@@ -562,8 +554,6 @@ export default function FieldsPage() {
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Referência ERP</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Visão</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Tipo</th>
-                  <th className="px-5 py-3 font-semibold text-muted-foreground">Responsável</th>
-                  <th className="px-5 py-3 font-semibold text-muted-foreground">Obrigatório</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground">Status</th>
                   <th className="px-5 py-3 font-semibold text-muted-foreground text-right">Ações</th>
                 </tr>
@@ -571,11 +561,6 @@ export default function FieldsPage() {
               <tbody>
                 {visibleFields.map((f) => {
                   const viewStyle = ERP_VIEW_COLORS[erpViewCode(f.erp_view)] ?? {
-                    bg: '#F8FAFC',
-                    text: '#475569',
-                    border: '#E2E8F0',
-                  }
-                  const roleStyle = ROLE_BADGE_STYLE[f.responsible_role] ?? {
                     bg: '#F8FAFC',
                     text: '#475569',
                     border: '#E2E8F0',
@@ -621,25 +606,6 @@ export default function FieldsPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <span
-                          className="inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium"
-                          style={{
-                            backgroundColor: roleStyle.bg,
-                            color: roleStyle.text,
-                            borderColor: roleStyle.border,
-                          }}
-                        >
-                          {f.responsible_role}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        {f.is_required ? (
-                          <span className="text-green-600">✅</span>
-                        ) : (
-                          <span className="text-slate-300">○</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span
                           className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${
                             f.is_active
                               ? 'bg-green-50 text-green-700 border-green-200'
@@ -679,6 +645,7 @@ export default function FieldsPage() {
           </div>
         )}
       </Card>
+      </>)}
 
       {modalOpen && (
         <FieldModal

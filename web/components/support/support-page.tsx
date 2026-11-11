@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { MultiSelectFilter } from '@/components/ui/multi-select-filter'
+import { PageLoading } from '@/components/ui/page-loading'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -278,7 +279,7 @@ export function SupportPage() {
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <div>
             <p className="font-semibold">O sistema de suporte não respondeu.</p>
-            <p className="mt-0.5">{loadError} Tente atualizar em alguns minutos; se continuar, avise o administrador do PRO-MAT.</p>
+            <p className="mt-0.5">{loadError.replace(/\.?$/, '.')} Tente atualizar em alguns minutos; se continuar, avise o administrador do PRO-MAT.</p>
           </div>
         </div>
       )}
@@ -372,7 +373,7 @@ export function SupportPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={COLS} className="py-8 text-center text-muted-foreground">Carregando chamados…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={COLS}><PageLoading label="Carregando chamados…" minHeight="min-h-[12rem]" /></TableCell></TableRow>
                 ) : pageTickets.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={COLS} className="py-8 text-center text-muted-foreground">
@@ -430,7 +431,7 @@ export function SupportPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setForm(EMPTY_FORM) }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto bg-card text-card-foreground sm:max-w-lg">
+        <DialogContent className="theme-valore max-h-[90vh] overflow-y-auto bg-card text-card-foreground sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Novo chamado</DialogTitle>
           </DialogHeader>
@@ -442,7 +443,7 @@ export function SupportPage() {
                 onValueChange={(value) => setForm((current) => ({ ...current, tipo: value as AxisDeskChamadoTipo, categoriaId: '', subcategoriaId: '' }))}
               >
                 <SelectTrigger id="tipo"><SelectValue /></SelectTrigger>
-                <SelectContent>
+                <SelectContent className="theme-valore">
                   {AXISDESK_TIPO_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -457,7 +458,7 @@ export function SupportPage() {
                 <SelectTrigger id="categoria">
                   <SelectValue placeholder={categoriasLoading ? 'Carregando categorias…' : 'Selecione a categoria'} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="theme-valore">
                   {categorias.map((item) => <SelectItem key={item.id} value={item.id}>{item.nome}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -470,7 +471,7 @@ export function SupportPage() {
                 disabled={!form.categoriaId || subcategorias.length === 0}
               >
                 <SelectTrigger id="subcategoria"><SelectValue placeholder="Selecione a subcategoria" /></SelectTrigger>
-                <SelectContent>
+                <SelectContent className="theme-valore">
                   {subcategorias.map((item) => <SelectItem key={item.id} value={item.id}>{item.nome}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -505,7 +506,7 @@ export function SupportPage() {
                 onValueChange={(value) => setForm((current) => ({ ...current, prioridade: value as AxisDeskChamadoPrioridade }))}
               >
                 <SelectTrigger id="prioridade"><SelectValue /></SelectTrigger>
-                <SelectContent>
+                <SelectContent className="theme-valore">
                   {AXISDESK_PRIORIDADE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                 </SelectContent>
               </Select>

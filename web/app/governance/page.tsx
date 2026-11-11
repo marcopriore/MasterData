@@ -10,7 +10,8 @@ import {
   getWorkflows,
   getPdms,
   getRequests,
-  getMyFields,
+  getStageFields,
+  getFieldRules,
   getFieldLabels,
   advanceWorkflow,
   updateRequestAttributes,
@@ -45,6 +46,7 @@ import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import { AlertTriangle, ChevronLeft, Check, X, Save, Loader2, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react'
 import { isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-status'
+import { fieldsForStage, type FieldRuleProfile } from '@/lib/field-rules'
 import { REJECTION_REASONS, type RejectionReason } from '@/lib/rejection-reasons'
 import { toErpText } from '@/lib/erp-text'
 import { Input } from '@/components/ui/input'
@@ -53,6 +55,7 @@ import { formatAttrValue } from '@/lib/format-attr-value'
 import { NumericUnitInput } from '@/components/ui/numeric-unit-input'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { Label } from '@/components/ui/label'
+import { PageLoading } from '@/components/ui/page-loading'
 import {
   Select,
   SelectContent,
@@ -220,6 +223,8 @@ export default function GovernancePage() {
   const [selectedRequest, setSelectedRequest] = useState<ApiRequest | null>(null)
   const [approveRejectLoading, setApproveRejectLoading] = useState(false)
   const [myFields, setMyFields] = useState<MyField[]>([])
+  const [fieldRules, setFieldRules] = useState<FieldRuleProfile[]>([])
+  const [stageRole, setStageRole] = useState<string | null>(null)
   const [fieldLabels, setFieldLabels] = useState<FieldLabelItem[]>([])
   const [attributeValues, setAttributeValues] = useState<Record<string, string | { value: string; unit: string }>>({})
   const measurementUnits = useMeasurementUnits()
@@ -273,12 +278,18 @@ export default function GovernancePage() {
     loadAll()
   }, [ready, pathname])
 
+  /** Fechadas só dos últimos N dias: com muito volume, o quadro não carrega o histórico inteiro. */
+  const [closedWindow, setClosedWindow] = useState('90')
+
   // Só a consulta mais recente atualiza o quadro (troca de workflow ou recarga depois de uma ação).
   const fetchSeq = useRef(0)
   const fetchRequests = useCallback((opts?: { silent?: boolean }): Promise<ApiRequest[]> => {
     const seq = ++fetchSeq.current
     if (!opts?.silent) setLoading(true)
-    return getRequests({ workflowId: selectedWorkflowId ?? undefined })
+    return getRequests({
+      workflowId: selectedWorkflowId ?? undefined,
+      closedSinceDays: closedWindow === 'all' ? null : Number(closedWindow),
+    })
       .then((data) => {
         const arr = (data ?? []) as ApiRequest[]
         if (seq === fetchSeq.current) setRequests(arr)
@@ -289,7 +300,7 @@ export default function GovernancePage() {
         return []
       })
       .finally(() => { if (!opts?.silent && seq === fetchSeq.current) setLoading(false) })
-  }, [selectedWorkflowId])
+  }, [selectedWorkflowId, closedWindow])
 
   useEffect(() => {
     if (!ready) return
@@ -564,22 +575,33 @@ export default function GovernancePage() {
 
     if (assignedToMe) {
       Promise.all([
-        getMyFields(selectedRequest.status),
+        getStageFields(selectedRequest.status),
         getFieldLabels(),
+        getFieldRules().catch(() => [] as FieldRuleProfile[]),
       ])
-        .then(([fields, labels]) => {
-          setMyFields(fields ?? [])
+        .then(([stage, labels, rules]) => {
+          setMyFields(stage.fields)
+          setStageRole(stage.role)
           setFieldLabels(labels ?? [])
+          setFieldRules(rules)
         })
         .catch(() => {
           setMyFields([])
+          setStageRole(null)
           setFieldLabels([])
         })
     } else {
       setMyFields([])
+      setStageRole(null)
       getFieldLabels().then(setFieldLabels).catch(() => setFieldLabels([]))
     }
   }, [detailsOpen, selectedRequest, user?.id])
+
+  /** Campos desta etapa para o material (regra por material); muda na hora quando o tipo muda. */
+  const stageFields = useMemo(
+    () => fieldsForStage(myFields, attributeValues, fieldRules, stageRole),
+    [myFields, attributeValues, fieldRules, stageRole]
+  )
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectJustification, setRejectJustification] = useState('')
@@ -638,8 +660,8 @@ export default function GovernancePage() {
   function validateRequiredFields(): boolean {
     const SKIP_FIELDS = ['descricao_basica'] // gerado automaticamente
     const invalid = new Set<string>()
-    for (const f of myFields) {
-      if (!f.is_required) continue
+    for (const f of stageFields) {
+      if (f.requirement !== 'required') continue
       if (SKIP_FIELDS.includes(f.field_name)) continue
       const raw = attributeValues[f.field_name]
       const val = typeof raw === 'string' ? (raw ?? '').trim() : (raw && typeof raw === 'object' ? (raw.value ?? '').trim() : '')
@@ -869,11 +891,13 @@ export default function GovernancePage() {
               pdms={pdms}
               stageLabel={stageFilter ? requestStatusLabel(stageFilter) : null}
               onClearStage={clearStageFilter}
+              closedWindow={closedWindow}
+              onClosedWindowChange={setClosedWindow}
             />
 
             <div className="mt-6 overflow-x-auto pb-2">
               {loading ? (
-                <p className="uppercase text-muted-foreground">Carregando solicitações...</p>
+                <PageLoading label="Carregando solicitações..." minHeight="min-h-[30vh]" />
               ) : filteredRequests.length === 0 ? (
                 <EmptyColumn message="Nenhuma solicitação encontrada com os filtros atuais." />
               ) : view === 'kanban' ? (
@@ -1153,19 +1177,19 @@ export default function GovernancePage() {
               )}
 
               {/* Meus Campos (editáveis) — somente quando assigned_to_id === current_user.id */}
-              {isAssignedToMe && myFields.length > 0 && (
+              {isAssignedToMe && stageFields.length > 0 && (
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-muted-foreground mb-2">
-                    CAMPOS DE RESPONSABILIDADE: {myFields[0]?.responsible_role ?? user?.role_name ?? '—'}
+                    CAMPOS DE RESPONSABILIDADE: {stageRole ?? user?.role_name ?? '—'}
                   </p>
                   <div className="space-y-3">
-                    {myFields
+                    {stageFields
                       .filter((f) => f.field_name !== 'descricao_basica')
                       .map((f) => (
                       <div key={f.id}>
                         <Label htmlFor={`attr-${f.field_name}`} className="text-sm font-medium">
                           {f.field_label}
-                          {f.is_required && ' *'}
+                          {f.requirement === 'required' && ' *'}
                         </Label>
                         {f.field_type === 'text' && (
                           <Input

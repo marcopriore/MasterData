@@ -30,6 +30,7 @@ import {
 } from '@/lib/my-requests'
 import { requestErpState, type RequestErpInfo } from '@/lib/request-erp-state'
 import { ErpStateBadge } from '@/components/governance/request-card'
+import { AttendedRequests } from '@/components/requests/attended-requests'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -194,6 +195,8 @@ function MyRequestsContent() {
   }
 
   const hasFilter = state.q.trim() !== '' || state.situacao !== 'todas' || state.etapa != null
+  const canAttend = can('can_attend')
+  const tab = canAttend && searchParams.get('aba') === 'atendidas' ? 'atendidas' : 'minhas'
 
   return (
     <div className="space-y-6">
@@ -203,13 +206,19 @@ function MyRequestsContent() {
             <FileText className="size-6" />
             Minhas Solicitações
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Acompanhe as solicitações de cadastro que você abriu</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {tab === 'atendidas'
+              ? 'Solicitações em que você iniciou o atendimento, aprovou, rejeitou ou moveu de etapa'
+              : 'Acompanhe as solicitações de cadastro que você abriu'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={handleExport} disabled={exporting || rows.length === 0}>
-            {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-            Exportar Excel
-          </Button>
+          {tab === 'minhas' && (
+            <Button variant="outline" className="gap-2" onClick={handleExport} disabled={exporting || rows.length === 0}>
+              {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              Exportar Excel
+            </Button>
+          )}
           {can('can_submit_request') && (
             <Link href="/requests/new">
               <Button className="gap-2 bg-[#C69A46] text-[#0F1C38] hover:bg-[#C69A46]/90">
@@ -221,6 +230,28 @@ function MyRequestsContent() {
         </div>
       </div>
 
+      {canAttend && (
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-zinc-700 dark:bg-card" role="tablist">
+          {([['minhas', 'Abertas por mim'], ['atendidas', 'Atendidas por mim']] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => router.replace(key === 'atendidas' ? '/requests?aba=atendidas' : '/requests', { scroll: false })}
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+                tab === key
+                  ? 'bg-[#0F1C38] text-white dark:bg-[#C69A46] dark:text-[#0F1C38]'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-muted/40'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'atendidas' ? <AttendedRequests /> : (<>
       <div className="grid gap-3 sm:grid-cols-5">
         {(['andamento', 'finalizada', 'rejeitada', 'cancelada'] as const).map((situation) => (
           <button
@@ -369,6 +400,7 @@ function MyRequestsContent() {
           </div>
         </div>
       </div>
+      </>)}
 
       <Dialog open={detailId != null} onOpenChange={(open) => { if (!open) closeDetail() }}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-slate-200 bg-white text-slate-900 dark:border-zinc-700/50 dark:bg-card dark:text-foreground">

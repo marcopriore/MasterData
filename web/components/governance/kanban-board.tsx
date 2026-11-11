@@ -19,6 +19,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
+import { PageLoading } from "@/components/ui/page-loading"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
 import type { RequestErpState } from "@/lib/request-erp-state"
 import { kanbanMoveBlock } from "@/lib/kanban-move"
@@ -305,9 +306,7 @@ export function KanbanBoard({
 
   if (columnsLoading) {
     return (
-      <div className="rounded-lg border border-dashed py-12 text-center text-sm" style={{ borderColor: 'var(--kanban-col-border)', color: 'var(--kanban-col-text)' }}>
-        Carregando colunas do Kanban…
-      </div>
+      <PageLoading label="Carregando colunas do Kanban…" minHeight="min-h-[30vh]" />
     )
   }
 

@@ -39,7 +39,17 @@ interface FiltersBarProps {
   /** Etapa filtrada vinda do gráfico da tela inicial */
   stageLabel?: string | null
   onClearStage?: () => void
+  /** Fechadas (finalizadas, rejeitadas, canceladas) nos últimos N dias; "all" traz todas. */
+  closedWindow?: string
+  onClosedWindowChange?: (value: string) => void
 }
+
+export const CLOSED_WINDOW_OPTIONS = [
+  { value: '30', label: 'Fechadas: 30 dias' },
+  { value: '90', label: 'Fechadas: 90 dias' },
+  { value: '365', label: 'Fechadas: 12 meses' },
+  { value: 'all', label: 'Fechadas: todas' },
+] as const
 
 export function FiltersBar({
   search,
@@ -54,6 +64,8 @@ export function FiltersBar({
   pdms = [],
   stageLabel = null,
   onClearStage,
+  closedWindow,
+  onClosedWindowChange,
 }: FiltersBarProps) {
   const hasFilters = search || category !== "all" || dateRange !== "all" || Boolean(stageLabel)
 
@@ -108,6 +120,21 @@ export function FiltersBar({
               <SelectItem value="quarter">Trimestre</SelectItem>
             </SelectContent>
           </Select>
+
+          {closedWindow && onClosedWindowChange && (
+            <Select value={closedWindow} onValueChange={onClosedWindowChange}>
+              <SelectTrigger
+                className="h-10 w-[180px] uppercase"
+                title="Finalizadas, rejeitadas e canceladas que fecharam neste prazo. As abertas aparecem sempre."
+                style={{ backgroundColor: 'var(--filter-input-bg)', color: 'var(--kanban-col-text)', borderColor: 'var(--kanban-col-border)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CLOSED_WINDOW_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
 
           {/* View toggle */}
           <div className="flex items-center rounded-lg border p-0.5" style={{ backgroundColor: 'var(--filter-input-bg)', borderColor: 'var(--kanban-col-border)' }}>
