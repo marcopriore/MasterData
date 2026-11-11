@@ -12,6 +12,9 @@ import {
   updateWorkflow,
   migrateRequestsToWorkflow,
   logAction,
+  invalidateApiCache,
+  REQUEST_TYPE_LABEL,
+  type RequestType,
 } from '@/lib/supabase-api'
 import { DEFAULT_STAGE_SLA_DAYS } from '@/lib/governance-stats'
 import { Button } from '@/components/ui/button'
@@ -77,6 +80,7 @@ type WorkflowHeader = {
   name: string
   description?: string | null
   is_active: boolean
+  request_type?: RequestType
 }
 
 type WorkflowStep = {
@@ -224,12 +228,15 @@ function SortableStepCard({
   onUpdate,
   expandedId,
   onToggleSettings,
+  readOnly = false,
 }: {
   step: WorkflowStep
   onDelete: (id: number) => void
   onUpdate: (id: number, data: StepUpdate) => void
   expandedId: number | null
   onToggleSettings: (id: number) => void
+  /** Sem "Editar Workflows": só vê. */
+  readOnly?: boolean
 }) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const {
@@ -239,7 +246,7 @@ function SortableStepCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: step.id })
+  } = useSortable({ id: step.id, disabled: readOnly })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -258,15 +265,17 @@ function SortableStepCard({
         }`}
       >
         <div className="flex items-center gap-3 px-4 py-3">
-          <button
-            type="button"
-            className="flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing dark:hover:bg-white/10 dark:hover:text-white"
-            {...attributes}
-            {...listeners}
-            aria-label="Arrastar para reordenar"
-          >
-            <GripVertical className="size-5" />
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing dark:hover:bg-white/10 dark:hover:text-white"
+              {...attributes}
+              {...listeners}
+              aria-label="Arrastar para reordenar"
+            >
+              <GripVertical className="size-5" />
+            </button>
+          )}
           <div className="min-w-0 flex-1">
             <p className="font-medium uppercase text-slate-900 dark:text-foreground">{step.step_name}</p>
             <p className="text-xs text-slate-500 dark:text-muted-foreground">
@@ -275,6 +284,7 @@ function SortableStepCard({
               {` • Prazo: ${step.sla_days ?? DEFAULT_STAGE_SLA_DAYS} dias`}
             </p>
           </div>
+          {!readOnly && (
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -295,9 +305,10 @@ function SortableStepCard({
               <Trash2 className="size-4" />
             </Button>
           </div>
+          )}
         </div>
 
-        {isExpanded ? (
+        {isExpanded && !readOnly ? (
           <StepSettingsPanel step={step} onUpdate={onUpdate} />
         ) : null}
       </div>
@@ -339,6 +350,9 @@ function SortableStepCard({
 
 export default function WorkflowConfigPage() {
   const pathname = usePathname()
+  const { can } = useUser()
+  /** Ver é can_view_workflows (a rota confere); mudar é can_edit_workflows (o banco também recusa). */
+  const canEdit = can('can_edit_workflows')
   const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [steps, setSteps] = useState<WorkflowStep[]>([])
@@ -365,18 +379,31 @@ export default function WorkflowConfigPage() {
   const [stepMapping, setStepMapping] = useState<Record<string, string>>({})
   const [mappingLoading, setMappingLoading] = useState(false)
 
+  /** Tipo de solicitação em edição (migration 043): um workflow ativo por tipo. */
+  const [requestType, setRequestType] = useState<RequestType>('cadastro')
+  const [allWorkflows, setAllWorkflows] = useState<WorkflowHeader[]>([])
+
   const fetchWorkflows = useCallback(() => {
+    invalidateApiCache()
     getWorkflows()
-      .then((list) => setWorkflows(list.map((w) => ({ ...w, is_active: w.is_active ?? true })) as WorkflowHeader[]))
-      .catch(() => setWorkflows([]))
+      .then((list) => setAllWorkflows(list.map((w) => ({ ...w, is_active: w.is_active ?? true, request_type: w.request_type ?? 'cadastro' })) as WorkflowHeader[]))
+      .catch(() => setAllWorkflows([]))
   }, [])
 
   useEffect(() => {
-    if (workflows.length > 0 && selectedWorkflowId === null) {
+    setWorkflows(allWorkflows.filter((w) => (w.request_type ?? 'cadastro') === requestType))
+  }, [allWorkflows, requestType])
+
+  useEffect(() => {
+    if (workflows.length === 0) {
+      if (selectedWorkflowId !== null && !allWorkflows.some((w) => w.id === selectedWorkflowId && w.request_type === requestType)) setSelectedWorkflowId(null)
+      return
+    }
+    if (selectedWorkflowId === null || !workflows.some((w) => w.id === selectedWorkflowId)) {
       const active = workflows.find((w) => w.is_active) ?? workflows[0]
       setSelectedWorkflowId(active.id)
     }
-  }, [workflows, selectedWorkflowId])
+  }, [workflows, selectedWorkflowId, allWorkflows, requestType])
 
   const fetchSteps = useCallback(() => {
     if (!selectedWorkflowId) {
@@ -594,7 +621,7 @@ export default function WorkflowConfigPage() {
       return
     }
     try {
-      const created = await createWorkflow({ name, description: undefined })
+      const created = await createWorkflow({ name, description: undefined, request_type: requestType })
       void logAction({
         category: 'workflows',
         action: 'workflow_created',
@@ -735,18 +762,46 @@ export default function WorkflowConfigPage() {
                 Configuração de Workflow
               </h1>
               <p className="text-sm text-slate-600 dark:text-muted-foreground">
-                Arraste a etapa para reordenar. Salve o workflow e clique em Salvar para aplicar no Kanban.
+                {canEdit
+                  ? 'Arraste a etapa para reordenar. Salve o workflow e clique em Salvar para aplicar no Kanban.'
+                  : 'Somente visualização: seu perfil não tem permissão para editar workflows.'}
               </p>
             </div>
           </div>
-          <Button
-            onClick={() => setNewWorkflowModalOpen(true)}
-            className="gap-2 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90 dark:bg-[#C69A46] dark:text-[#0F1C38] dark:hover:bg-[#C69A46]/90"
-          >
-            <Plus className="size-4" />
-            Novo Workflow
-          </Button>
+          {canEdit && (
+            <Button
+              onClick={() => setNewWorkflowModalOpen(true)}
+              className="gap-2 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90 dark:bg-[#C69A46] dark:text-[#0F1C38] dark:hover:bg-[#C69A46]/90"
+            >
+              <Plus className="size-4" />
+              Novo Workflow
+            </Button>
+          )}
         </div>
+
+        <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-zinc-700 dark:bg-card" role="tablist" aria-label="Tipo de solicitação">
+          {(Object.keys(REQUEST_TYPE_LABEL) as RequestType[]).map((type) => (
+            <button
+              key={type}
+              type="button"
+              role="tab"
+              aria-selected={requestType === type}
+              onClick={() => setRequestType(type)}
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+                requestType === type
+                  ? 'bg-[#0F1C38] text-white dark:bg-[#C69A46] dark:text-[#0F1C38]'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-muted/40'
+              }`}
+            >
+              {REQUEST_TYPE_LABEL[type]}
+            </button>
+          ))}
+        </div>
+        {workflows.length === 0 && (
+          <p className="mb-4 text-sm text-muted-foreground">
+            Nenhum workflow de {REQUEST_TYPE_LABEL[requestType]} ainda. Crie um em &quot;Novo Workflow&quot;; ele entra inativo e passa a valer quando for ativado.
+          </p>
+        )}
 
         <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-4 dark:border-zinc-400/40 dark:bg-zinc-400/30 md:p-6">
           {/* Workflow selector + Adicionar Nova Etapa + Active toggle + Archive */}
@@ -777,6 +832,7 @@ export default function WorkflowConfigPage() {
                 </SelectContent>
               </Select>
             </div>
+            {canEdit && (
             <Button
               onClick={() => setAddModalOpen(true)}
               disabled={!selectedWorkflowId}
@@ -785,7 +841,8 @@ export default function WorkflowConfigPage() {
               <Plus className="size-4" />
               Adicionar Nova Etapa
             </Button>
-            {selectedWorkflowId && (
+            )}
+            {selectedWorkflowId && canEdit && (
               <>
                 <div className="flex items-center gap-2">
                   <Switch
@@ -834,6 +891,7 @@ export default function WorkflowConfigPage() {
                       onUpdate={handleUpdateStep}
                       expandedId={expandedId}
                       onToggleSettings={handleToggleSettings}
+                      readOnly={!canEdit}
                     />
                   ))}
                 </div>
@@ -841,7 +899,7 @@ export default function WorkflowConfigPage() {
             </DndContext>
           )}
 
-          <div className="mt-6 flex justify-end">
+          {canEdit && <div className="mt-6 flex justify-end">
             <Button
               onClick={handleSave}
               disabled={loading || steps.length === 0 || saving || !selectedWorkflowId}
@@ -850,7 +908,7 @@ export default function WorkflowConfigPage() {
               <Save className="size-4" />
               Salvar Novo Fluxo
             </Button>
-          </div>
+          </div>}
         </div>
       </div>
 

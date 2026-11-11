@@ -100,7 +100,7 @@ async function makeFlow(tenantId) {
 
 async function cleanup() {
   for (const tenantId of created.tenants) {
-    for (const table of ['request_history', 'notifications', 'system_logs', 'material_database', 'material_requests', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_dictionary']) {
+    for (const table of ['request_history', 'notifications', 'system_logs', 'material_history', 'material_requests', 'material_database', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_dictionary']) {
       await admin.from(table).delete().eq('tenant_id', tenantId)
     }
   }
@@ -190,6 +190,23 @@ async function main() {
     async () => (await admin.from('material_requests').select('generated_description').eq('id', reqA.id).single()).data?.generated_description !== 'HACK')
   await denied('área não arrasta entre etapas (só Admin)', () => atend.rpc('move_request_stage', { p_request_id: reqA.id, p_status_key: 'x' }), () => reqStatus(reqA.id, 'cadastro'))
 
+  console.log('\nPermissão de ver não dá permissão de mudar (migration 044)')
+  const viewer = await makeUser(tA, 'VIEW', { can_view_workflows: true, can_view_pdm: true, can_view_database: true })
+  const pdmEditor = await makeUser(tA, 'PDMED', { can_view_pdm: true, can_edit_pdm: true, can_view_database: true })
+  const view = await signIn(viewer.email)
+  const pdmEd = await signIn(pdmEditor.email)
+  await denied('só ver workflows não cria workflow', () => view.from('workflow_header').insert({ tenant_id: tA, name: `HACK ${tag}`, is_active: false }).select('id'),
+    async () => ((await admin.from('workflow_header').select('id').eq('tenant_id', tA).eq('name', `HACK ${tag}`)).data ?? []).length === 0)
+  await denied('só ver workflows não muda etapa', () => view.from('workflow_config').update({ step_name: 'HACK' }).eq('workflow_id', flowA.workflowId).select('id'),
+    async () => ((await admin.from('workflow_config').select('id').eq('workflow_id', flowA.workflowId).eq('step_name', 'HACK')).data ?? []).length === 0)
+  await denied('só ver PDM não cria PDM', () => view.from('pdm_templates').insert({ tenant_id: tA, name: `HACKV ${tag}`, internal_code: 'HACKV01', attributes: [] }).select('id'),
+    async () => ((await admin.from('pdm_templates').select('id').eq('tenant_id', tA).eq('internal_code', 'HACKV01')).data ?? []).length === 0)
+  await denied('só ver a base não edita material', () => view.from('material_database').update({ technical_attributes: { hack: 'x' } }).eq('id', matA.id).select('id'),
+    async () => (await admin.from('material_database').select('technical_attributes').eq('id', matA.id).single()).data?.technical_attributes?.hack === undefined)
+  await denied('quem só edita PDM não edita o cadastro do material', () => pdmEd.from('material_database').update({ technical_attributes: { hack: 'x' } }).eq('id', matA.id).select('id'),
+    async () => (await admin.from('material_database').select('technical_attributes').eq('id', matA.id).single()).data?.technical_attributes?.hack === undefined)
+  await allowed('quem edita PDM refaz a descrição do material', () => pdmEd.from('material_database').update({ description: 'SONDA A REFEITA' }).eq('id', matA.id).select('id'))
+
   console.log('\nUsuário inativado')
   await must(admin.from('users').update({ is_active: false }).eq('id', requester.id), 'inativar')
   await denied('inativo não lê solicitações do próprio tenant', () => solic.from('material_requests').select('id').eq('tenant_id', tA))
@@ -259,6 +276,40 @@ async function main() {
   await denied('tipo de material de material cadastrado não muda pela tela', () => padr.from('material_database').update({ technical_attributes: { tipo_material: 'NLAG', sonda_campo: 'OK' } }).eq('id', matF.id).select('id'), tipoIsFert)
   const { error: lockErr } = await admin.from('material_database').update({ technical_attributes: { tipo_material: 'NLAG', sonda_campo: 'OK' } }).eq('id', matF.id)
   record(Boolean(lockErr) && (await tipoIsFert()), 'tipo de material não muda nem pelo servidor (importação, API)', lockErr ? '' : 'o banco aceitou a troca')
+  console.log('\nHistórico do material')
+  const { data: histF } = await admin.from('material_history').select('event_type').eq('material_id', matF.id)
+  record((histF ?? []).some((h) => h.event_type === 'created') && (histF ?? []).some((h) => h.event_type === 'edited'), 'o banco registra criação e alteração do material')
+  await denied('outro tenant não lê o histórico do material', () => relB.from('material_history').select('id').eq('material_id', matF.id))
+  await denied('ninguém grava histórico pela API', () => padr.from('material_history').insert({ tenant_id: tA, material_id: matF.id, event_type: 'status', event_data: { to: 'HACK' } }).select('id'),
+    async () => ((await admin.from('material_history').select('id').eq('material_id', matF.id).eq('event_data->>to', 'HACK')).data ?? []).length === 0)
+  console.log('\nAlteração de material')
+  await must(admin.rpc('ensure_request_type_workflows', { p_tenant_id: tA }), 'workflow de alteração A')
+  const { data: wfAlt } = await admin.from('workflow_header').select('id').eq('tenant_id', tA).eq('request_type', 'alteracao').eq('is_active', true).single()
+  const { data: pdmA } = await admin.from('pdm_templates').select('internal_code').eq('id', flowA.pdmId).single()
+  const [matG] = await must(admin.from('material_database').insert({ tenant_id: tA, id_sistema: `SONDA-${tag}-G`, description: 'SONDA ALT', status: 'Ativo', erp_status: 'integrado_erp', id_erp: `ERP-${tag}`, source: 'manual', pdm_code: pdmA.internal_code, technical_attributes: { sonda_campo: 'ANTIGO' } }).select('id'), 'material para alterar')
+  const altRow = (extra) => ({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: wfAlt.id, status: 'cadastro', requester: 'ALT', urgency: 'low', user_id: requester.id, request_type: 'alteracao', target_material_id: matG.id, change_fields: ['sonda_campo'], technical_attributes: { sonda_campo: 'NOVO' }, ...extra })
+  const altCount = async () => ((await admin.from('material_requests').select('id').eq('target_material_id', matG.id)).data ?? []).length
+  await denied('alteração não troca o Tipo de Material', () => solic.from('material_requests').insert(altRow({ change_fields: ['tipo_material'], technical_attributes: { tipo_material: 'NLAG' } })).select('id'), async () => (await altCount()) === 0)
+  await denied('alteração não aponta para material de outro tenant', () => solic.from('material_requests').insert(altRow({ target_material_id: matB.id })).select('id'),
+    async () => ((await admin.from('material_requests').select('id').eq('target_material_id', matB.id)).data ?? []).length === 0)
+  await denied('cadastro não aponta para material existente', () => solic.from('material_requests').insert(altRow({ request_type: 'cadastro', workflow_id: flowA.workflowId })).select('id'), async () => (await altCount()) === 0)
+  const { data: altCreated, error: altErr } = await solic.from('material_requests').insert(altRow({ change_previous: { sonda_campo: 'FORJADO' } })).select('id').single()
+  record(!altErr && Boolean(altCreated), 'solicitante abre a alteração do material', altErr?.message ?? '')
+  const altId = altCreated?.id
+  const { data: altSaved } = altId ? await admin.from('material_requests').select('change_previous').eq('id', altId).single() : { data: null }
+  record(altSaved?.change_previous?.sonda_campo === 'ANTIGO', 'o valor de antes vem do material, não do navegador')
+  await denied('não abre duas alterações do mesmo material', () => solic.from('material_requests').insert(altRow({})).select('id'), async () => (await altCount()) === 1)
+  if (altId) {
+    await allowed('atendente assume a alteração', () => atend.rpc('assign_request', { p_request_id: altId }))
+    await allowed('atendente aprova a alteração', () => atend.rpc('advance_workflow', { p_request_id: altId }))
+    const { data: matAfter } = await admin.from('material_database').select('technical_attributes, erp_status, id_erp').eq('id', matG.id).single()
+    record(matAfter?.technical_attributes?.sonda_campo === 'NOVO' && matAfter?.erp_status === 'pendente_erp' && matAfter?.id_erp === `ERP-${tag}`,
+      'a aprovação final aplica a alteração no mesmo material e ele volta para Pendente ERP')
+    const { count: newMaterials } = await admin.from('material_database').select('id', { count: 'exact', head: true }).eq('tenant_id', tA).eq('request_id', altId)
+    record((newMaterials ?? 0) === 0, 'a alteração não cria material novo')
+    const { data: altHist } = await admin.from('material_history').select('event_data').eq('material_id', matG.id).eq('event_type', 'edited')
+    record((altHist ?? []).some((h) => Number(h.event_data?.request_id) === altId), 'o histórico do material registra a solicitação de alteração')
+  }
   const { data: leak, error: leakErr } = await relB.rpc('material_missing_fields', { p_tenant_id: tA, p_attributes: { tipo_material: 'FERT' } })
   record(Boolean(leakErr) || leak == null, 'outro tenant não descobre os campos exigidos do A', leak ? `devolveu "${leak}"` : '')
 

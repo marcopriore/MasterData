@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { createPdm, getPdmById, getPdmMaterialsCount, getPdms, logAction, updatePdm } from "@/lib/supabase-api"
+import { useUser } from "@/contexts/user-context"
 import { toErpDeep, toErpPdmAttributes, toErpText } from "@/lib/erp-text"
 import { normalizePdmCode, PDM_CODE_MAX, pdmCodeProblem, pdmNameKey, suggestPdmCode } from "@/lib/pdm-code"
 
@@ -63,6 +64,9 @@ function attributesPayload(attributes: Attribute[]) {
 /** Detalhe de um PDM (pdmId) ou criação de um novo (pdmId null). */
 export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   const router = useRouter()
+  const { can } = useUser()
+  /** Ver PDM abre a tela; criar, editar e clonar pedem "Editar PDM" (o banco também recusa). */
+  const canEdit = can("can_edit_pdm")
   const isNew = pdmId == null
   const [loading, setLoading] = useState(!isNew)
   const [notFound, setNotFound] = useState(false)
@@ -219,12 +223,26 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   }
 
   const selectedAttribute = attributes.find((a) => a.id === selectedAttrId) || null
+  const editing = isEditMode && canEdit
+
+  if (isNew && !canEdit) {
+    return (
+      <div className="space-y-4">
+        <Link href={listHref} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-4" />
+          Voltar para a lista
+        </Link>
+        <p className="text-muted-foreground">Seu perfil não tem permissão para criar PDMs.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <DashboardHeader
         status={pdmActive ? "active" : "draft"}
-        isEditMode={isEditMode}
+        canEdit={canEdit}
+        isEditMode={editing}
         onEditClick={() => setIsEditMode(true)}
         onSave={handleSave}
         onClone={handleOpenCloneModal}
@@ -252,7 +270,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
           selectedPdmId={pdmId}
           isOpen={isDetailsOpen}
           onToggle={() => setIsDetailsOpen((prev) => !prev)}
-          readOnly={!isEditMode}
+          readOnly={!editing}
           attributes={attributes}
           materialsCount={materialsCount}
         />
@@ -265,7 +283,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
           selectedPdmId={pdmId}
           isOpen={isAttributesOpen}
           onToggle={() => setIsAttributesOpen((prev) => !prev)}
-          readOnly={!isEditMode}
+          readOnly={!editing}
         />
       </div>
 
@@ -274,7 +292,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
         onOpenChange={setValueDictOpen}
         attribute={selectedAttribute}
         onUpdateValues={handleUpdateValues}
-        readOnly={!isEditMode}
+        readOnly={!editing}
       />
 
       <Dialog open={cloneModalOpen} onOpenChange={setCloneModalOpen}>

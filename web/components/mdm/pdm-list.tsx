@@ -37,8 +37,10 @@ export function PdmList() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { can } = useUser()
-  const showExport = can("can_edit_pdm")
-  const showBulkImport = can("can_bulk_import")
+  const canEditPdm = can("can_edit_pdm")
+  const showExport = canEditPdm
+  // Importar cria PDMs: exige editar PDM, além da importação em massa.
+  const showBulkImport = canEditPdm && can("can_bulk_import")
 
   const [pdms, setPdms] = useState<PdmListRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -117,10 +119,12 @@ export function PdmList() {
                 Importação em Massa
               </Button>
             )}
-            <Button size="sm" className="h-9 shrink-0 gap-2" onClick={() => router.push("/admin-pdm/novo")}>
-              <Plus className="size-4" />
-              Novo PDM
-            </Button>
+            {canEditPdm && (
+              <Button size="sm" className="h-9 shrink-0 gap-2" onClick={() => router.push("/admin-pdm/novo")}>
+                <Plus className="size-4" />
+                Novo PDM
+              </Button>
+            )}
           </>
         }
         footer={

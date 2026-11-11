@@ -35,6 +35,7 @@ export interface TestState {
   materialId?: number
   materialCode?: string
   rejectedId?: number
+  changeRequestId?: number
 }
 
 export function getState(): TestState {

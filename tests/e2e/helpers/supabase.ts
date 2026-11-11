@@ -19,7 +19,8 @@ export async function deleteTenant(tenantId: number) {
   const { data: users } = await admin.from('users').select('id').eq('tenant_id', tenantId)
   const userIds = (users ?? []).map((u) => u.id as string)
 
-  for (const table of ['request_history', 'notifications', 'material_database', 'material_requests']) {
+  // Solicitação antes do material: a Alteração aponta para o material (RESTRICT); o material só guarda a solicitação de origem (SET NULL).
+  for (const table of ['request_history', 'notifications', 'material_history', 'material_requests', 'material_database']) {
     await admin.from(table).delete().eq('tenant_id', tenantId)
   }
   for (const table of ['pdm_templates', 'workflow_config', 'workflow_header', 'value_dictionary_dismissed', 'value_dictionary', 'field_dictionary', 'system_logs', 'integration_logs']) {

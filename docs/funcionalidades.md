@@ -11,12 +11,13 @@ Menu lateral em `web/components/app-sidebar.tsx`. Itens somem conforme as flags 
 | `/` | Dashboard: atalhos, contagens e atividades recentes. |
 | `/activity` | Lista completa das atividades do usuário. |
 | `/requests` | **Minhas Solicitações**: as solicitações que o usuário abriu, com etapa, atendente, motivo da rejeição, material e situação no ERP, anexos (download) e histórico no detalhe. Cancelar enquanto ninguém iniciou o atendimento. Exportar a lista filtrada em Excel. Contadores por situação (em andamento, finalizadas, rejeitadas, canceladas) filtram a lista; `?status=chave` filtra pela etapa (gráfico da tela inicial) e `?req=ID` abre o detalhe. Quem atende (`can_attend`) tem a aba **Atendidas por mim** (`?aba=atendidas`): as solicitações em que a pessoa iniciou o atendimento, aprovou, rejeitou ou moveu de etapa, com a última decisão dela, quando e onde a solicitação está agora; contadores por ação, busca, histórico no detalhe e exportação. Vem de `request_history` (`lib/attended-requests.ts`). |
+| `/requests/alteracao/[id]` | **Alteração** de material da base (migration 043): campos marcados com o valor atual e o novo, motivo e urgência; aberta pelo botão Alteração no detalhe da pesquisa da Nova Solicitação. |
 | `/requests/new` | Nova solicitação em 5 passos. Ao enviar, volta para Minhas Solicitações com a nova aberta. `/request` redireciona para cá. Com `?reenviar=ID`, abre a rejeitada preenchida, com o motivo da rejeição, e o envio a reabre na primeira etapa (botão **Corrigir e reenviar** no detalhe de Minhas Solicitações e no modal da governança). |
 | `/reports` | **Relatórios** (`can_view_reports`): Fluxo (entradas por etapa no período, tempo médio e maior tempo na etapa, quantas estão lá agora), Produtividade (por área e por pessoa: atendimentos, aprovações, rejeições, movimentos e tempo médio de decisão), Rejeições (no período, por etapa e por motivo padrão; migration 036), Integração ERP (no período, por dia: integrados, falhas, eliminados, falhas na eliminação e barrados por duplicidade, com a taxa de sucesso; e os materiais hoje com erro no ERP, agrupados pela mensagem; migration 037, eventos reais e simulados do log do sistema) e Base de materiais (por PDM: status, situação no ERP e duplicados). Exportação em Excel em cada aba. Consultas em `report_*` (migration 029). |
 | `/governance` | Kanban e lista. É aqui que assumir, aprovar e rejeitar chamam as RPCs. Os indicadores do topo (`lib/governance-stats.ts`) contam as solicitações que a tela mostra, já com workflow, busca, PDM e filtros aplicados, e se atualizam a cada ação: **em andamento** (nem finalizada nem rejeitada); **atrasadas** (paradas na etapa atual além do prazo dela); **taxa de rejeição** (rejeitadas sobre finalizadas + rejeitadas); **idade média em andamento** (há quantos dias, em média, as abertas estão no fluxo), com o **ciclo das finalizadas** embaixo (da abertura até a aprovação final, pelo histórico; finalizada sem esse registro fica de fora). Rejeitada fica na coluna Rejeitadas e cancelada na coluna Canceladas (só ADMIN e Master veem); finalizada, na última coluna. Rejeitar pede motivo padrão e justificativa; ADMIN e Master também cancelam pelo detalhe. |
 | `/governance/request/[id]` | Endereço antigo do e-mail; redireciona para `/governance?req=ID`. |
 | `/database` | Base de materiais: filtros, colunas, import/export, alteração de status em lote, status ERP. |
-| `/database/[id]` | Detalhe do material, descrições curta e detalhada. |
+| `/database/[id]` | Detalhe do material, descrições curta e detalhada. Seção **Histórico** (migration 042): criação, origem, solicitante e atendentes de cada etapa, mudanças de status, integrações com o ERP (com código ou erro) e alterações de campos, com quem fez e quando. |
 | `/admin-pdm` | Lista de todos os PDMs, 25 por página: busca por nome ou código, filtro de situação (ativo/inativo) e de uso (com/sem materiais), colunas Código, Nome, Materiais e Situação, ordenáveis. Filtros e página ficam na URL. Exportar, importação em massa e Novo PDM no cabeçalho. |
 | `/admin-pdm/[id]` e `/admin-pdm/novo` | Detalhe do PDM: dados, atributos, dicionário de valores, editar, salvar e clonar. Código até 10 caracteres; vazio recebe sugestão no padrão `PARA001`. Código ou nome já usado é recusado. Texto sem acento na digitação. Voltar retorna à lista com a mesma busca e página. |
 | `/support` | Chamados AxisDesk da empresa: abrir, acompanhar, responder, aprovar, reprovar ou cancelar. |
@@ -48,7 +49,7 @@ Anexos vão para o bucket `request-attachments`, no caminho `{tenant_id}/{reques
 
 ## Governança
 
-- Quadro por `status_key` do workflow ativo.
+- Quadro por `status_key` do workflow ativo. Na visão lista, uma barra por etapa do workflow escolhido: concluída, em andamento, pendente, ou interrompida para rejeitada e cancelada (`lib/stage-progress.ts`).
 - **Fechadas por prazo (migration 037):** as abertas aparecem sempre; finalizadas, rejeitadas e canceladas só se fecharam nos últimos 90 dias (seletor na barra de filtros: 30 dias, 90 dias, 12 meses ou todas). A data de fechamento é `stage_entered_at`; a consulta usa `material_requests.is_closed`. Os indicadores valem para o que o quadro mostra.
 - Arrastar o cartão entre etapas intermediárias chama a RPC `move_request_stage`: troca a coluna, libera o atendente e grava no histórico "Movida de X para Y pelo kanban", sem alterar dados. Arrastar para a última etapa ou para Rejeitadas, ou tirar de lá, é bloqueado na tela (`web/lib/kanban-move.ts`) e na RPC: finalizar exige **Aprovar** (cria o material e chama o ERP) e rejeitar exige **Rejeitar** com justificativa.
 - `/governance?req=ID` abre a solicitação no modal, trocando de workflow se preciso. É o destino do e-mail e do sino; o link antigo `/governance/request/ID` redireciona para cá.
@@ -58,7 +59,7 @@ Anexos vão para o bucket `request-attachments`, no caminho `{tenant_id}/{reques
 - Rejeitar chama `reject_request` com motivo.
 - Cada ação grava `request_history`.
 - Na última etapa, a RPC cria o registro em `material_database` ligado à solicitação.
-- Solicitação finalizada mostra a situação do material no ERP (`GET /api/requests/erp-status`, regra em `web/lib/request-erp-state.ts`). O cartão fica **vermelho** quando o material não chegou ao ERP: duplicado (ERP bloqueado), erro do ERP, pendente ou finalizada sem material na base. Integrado mostra o código do ERP em verde. No modal, o aviso traz o motivo, **Sincronizar com ERP** (pendente ou erro, para quem tem `can_standardize`) e **Abrir na Base de Dados**. Duplicado não tem botão de sincronizar: a correção é na base.
+- Solicitação finalizada mostra a situação do material no ERP (`GET /api/requests/erp-status`, regra em `web/lib/request-erp-state.ts`). O cartão fica **vermelho** quando o material não chegou ao ERP: duplicado (ERP bloqueado), erro do ERP, pendente ou finalizada sem material na base. Integrado mostra o código do ERP em verde. No modal, o aviso traz o motivo, **Sincronizar com ERP** (pendente ou erro, para quem tem `can_sync_erp`) e **Abrir na Base de Dados**. Duplicado não tem botão de sincronizar: a correção é na base.
 
 Fluxo padrão da Empresa Demo: Central de Cadastro → Compras → MRP → Fiscal → Contabilidade → Finalizado.
 
@@ -80,7 +81,7 @@ Template guarda atributos em JSON (`pdm_templates.attributes`): nome, tipo, obri
 
 ## Base de dados e ERP
 
-A base é o cadastro mestre local, com código interno (`id_sistema`), código ERP (`id_erp`), NCM, grupo, unidade, status e mensagem de erro de integração (`erp_error_message`). O dicionário de campos inclui o conjunto MM03 do SAP S/4HANA como metadado. A permissão `can_standardize` libera a padronização na tela, a sincronização ERP e a alteração de status em lote (**Alterar Status**: Ativo, Bloqueado ou Obsoleto). Material em `integrando` não entra na seleção.
+A base é o cadastro mestre local, com código interno (`id_sistema`), código ERP (`id_erp`), NCM, grupo, unidade, status e mensagem de erro de integração (`erp_error_message`). O dicionário de campos inclui o conjunto MM03 do SAP S/4HANA como metadado. Permissões da base (migration 044): `can_view_database` vê e exporta; `can_standardize` edita o material; `can_change_material_status` faz a alteração de status em lote (**Alterar Status**: Ativo, Bloqueado ou Obsoleto); `can_sync_erp` sincroniza, integra e elimina no ERP; `can_bulk_import` importa. Material em `integrando` não entra na seleção.
 
 **Status e ERP:** Bloqueado é só local. Obsoleto com `id_erp` marca `pendente_erp` para a próxima sincronização eliminar no ERP (DELETE). Obsoleto sem `id_erp` fica só local.
 
@@ -114,8 +115,8 @@ Tabela `notifications`, sino no topo e preferências por evento (criada, atendim
 | `GET /api/admin/tenants/[id]` | Nome e slug do tenant (master) |
 | `GET/POST /api/admin/tenants/[id]/erp-connections` | Listar e incluir integrações com o ERP. O segredo entra, mas nunca volta |
 | `PUT/PATCH/DELETE .../erp-connections/[connectionId]` | Modificar, ativar ou desativar, excluir |
-| `POST /api/database/materials/erp` | `sincronizar` (roteia create/update/delete), `integrar` ou `eliminar` — até 100 (`can_standardize`) |
-| `POST /api/database/materials/status` | Altera status; Obsoleto+`id_erp` → `pendente_erp` (`can_standardize`) |
+| `POST /api/database/materials/erp` | `sincronizar` (roteia create/update/delete), `integrar` ou `eliminar` — até 100 (`can_sync_erp`) |
+| `POST /api/database/materials/status` | Altera status; Obsoleto+`id_erp` → `pendente_erp` (`can_change_material_status`) |
 | `GET /api/database/materials/[id]/duplicates` | Se o material está travado por duplicidade e com quais códigos (`can_view_database`) |
 | `POST /api/requests/[id]/erp` | Criação no ERP do material de uma solicitação finalizada (`can_approve`) |
 | `GET /api/requests/erp-status?ids=` | Situação no ERP do material de até 200 solicitações, com a trava de duplicidade |

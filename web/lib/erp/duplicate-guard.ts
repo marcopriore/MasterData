@@ -63,9 +63,11 @@ async function requestDuplicates(tenantId: number, material: GuardMaterial): Pro
     supabaseAdmin.from('material_database')
       .select('id, id_sistema, status, technical_attributes')
       .eq('tenant_id', tenantId).eq('pdm_code', material.pdm_code).neq('id', material.id),
+    // A alteração aberta do próprio material (migration 043) não é duplicidade dele.
     supabaseAdmin.from('material_requests')
       .select('id, id_sistema, status, technical_attributes')
-      .eq('tenant_id', tenantId).eq('pdm_id', pdm.id).neq('id', material.request_id),
+      .eq('tenant_id', tenantId).eq('pdm_id', pdm.id).neq('id', material.request_id)
+      .or(`target_material_id.is.null,target_material_id.neq.${Number(material.id)}`),
   ])
 
   const codes: string[] = []

@@ -1,6 +1,47 @@
 import { describe, expect, it } from 'vitest'
 import { emptyPermissions, mergeRolePermissions, type RolePermissions } from './permissions'
-import { canSeeAdminHref, canSeeHomeShortcut, canSeeMainNav, canSeeSettingsHref, type NavAccess } from './nav-access'
+import { canOpenPath, canSeeAdminHref, canSeeHomeShortcut, canSeeMainNav, canSeeSettingsHref, type NavAccess } from './nav-access'
+
+describe('acesso pelo endereço da tela', () => {
+  const contabilidade = () => access({ can_view_pdm: true, can_view_database: true, can_attend: true, can_approve: true })
+
+  it('sem a permissão, a tela não abre pelo link', () => {
+    const user = contabilidade()
+    expect(canOpenPath('/settings/workflow', user)).toBe(false)
+    expect(canOpenPath('/admin/users', user)).toBe(false)
+    expect(canOpenPath('/admin/fields', user)).toBe(false)
+    expect(canOpenPath('/reports', user)).toBe(false)
+    expect(canOpenPath('/requests/new', user)).toBe(false)
+    expect(canOpenPath('/requests/alteracao/10', user)).toBe(false)
+    expect(canOpenPath('/admin/tenants', user)).toBe(false)
+    expect(canOpenPath('/teste', user)).toBe(false)
+    expect(canOpenPath('/admin-pdm/novo', user)).toBe(false)
+  })
+
+  it('com a permissão (ou só a de ver), abre', () => {
+    const user = contabilidade()
+    expect(canOpenPath('/admin-pdm', user)).toBe(true)
+    expect(canOpenPath('/admin-pdm/3', user)).toBe(true)
+    expect(canOpenPath('/database/12', user)).toBe(true)
+    expect(canOpenPath('/governance', user)).toBe(true)
+    expect(canOpenPath('/', user)).toBe(true)
+    expect(canOpenPath('/support/abc', user)).toBe(true)
+    expect(canOpenPath('/settings/profile', user)).toBe(true)
+    expect(canOpenPath('/settings/workflow', access({ can_view_workflows: true }))).toBe(true)
+  })
+
+  it('tela sem regra fica fechada; master abre tudo', () => {
+    expect(canOpenPath('/nova-tela', contabilidade())).toBe(false)
+    expect(canOpenPath('/nova-tela', access({}, true))).toBe(true)
+    expect(canOpenPath('/admin/tenants', access({}, true))).toBe(true)
+  })
+
+  it('o que o menu esconde, o endereço não abre', () => {
+    const user = contabilidade()
+    for (const href of MAIN) expect(canOpenPath(href, user), href).toBe(canSeeMainNav(href, user))
+    for (const href of ADMIN) expect(canOpenPath(href, user), href).toBe(canSeeAdminHref(href, user))
+  })
+})
 
 function access(partial: Partial<RolePermissions>, isMaster = false): NavAccess {
   return {

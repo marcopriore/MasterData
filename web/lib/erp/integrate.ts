@@ -221,8 +221,20 @@ export async function syncMaterial(tenantId: number, materialId: number, userId:
   return { result: 'failed', message: out.message, plan: plan.action }
 }
 
-/** Disparo da última etapa: cria no ERP o material nascido da solicitação, se houver integração ativa. */
+/**
+ * Disparo da última etapa: cadastro cria no ERP o material nascido da solicitação; alteração manda a
+ * alteração do material de origem (migration 043). Só com integração ativa.
+ */
 export async function integrateRequestMaterial(tenantId: number, requestId: number, userId: string | null) {
+  const { data: request } = await supabaseAdmin
+    .from('material_requests')
+    .select('request_type, target_material_id')
+    .eq('tenant_id', tenantId)
+    .eq('id', requestId)
+    .maybeSingle()
+  if (request?.request_type === 'alteracao' && request.target_material_id) {
+    return integrateMaterial(tenantId, request.target_material_id as number, userId)
+  }
   const { data: material } = await supabaseAdmin
     .from('material_database')
     .select('id, id_erp, erp_status')

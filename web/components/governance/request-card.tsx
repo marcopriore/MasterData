@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { RequestErpState } from "@/lib/request-erp-state"
 import { isClosedStatus } from "@/lib/request-status"
+import { progressPercent, STAGE_STATE_LABEL, type StageProgressItem, type StageState } from "@/lib/stage-progress"
 import {
   AlertTriangle,
   Calendar,
@@ -25,12 +26,6 @@ import {
   UserCheck,
 } from "lucide-react"
 
-
-export interface EnrichmentStep {
-  label: string
-  key: string
-  percent: number
-}
 
 export interface MaterialRequest {
   id: string
@@ -45,7 +40,8 @@ export interface MaterialRequest {
   urgency: "low" | "medium" | "high"
   status: string
   statusLabel: string
-  enrichment: EnrichmentStep[]
+  /** Andamento pelas etapas do workflow (lib/stage-progress). */
+  stages: StageProgressItem[]
   pendingAction?: string
   description: string
   generated_description?: string
@@ -190,33 +186,30 @@ function KanbanPriorityBadge({ urgency }: { urgency: "low" | "medium" | "high" }
   )
 }
 
-const enrichmentLabelMap: Record<string, string> = {
-  T: 'Técnico',
-  F: 'Fiscal',
-  M: 'Master',
-  MRP: 'MRP',
+const STAGE_BAR: Record<StageState, { width: string; color: string; text: string }> = {
+  done: { width: '100%', color: '#16a34a', text: 'text-green-700 dark:text-green-400' },
+  current: { width: '50%', color: '#2563eb', text: 'text-blue-700 dark:text-blue-300' },
+  pending: { width: '0%', color: 'transparent', text: 'text-muted-foreground' },
+  stopped: { width: '100%', color: '#94a3b8', text: 'text-muted-foreground' },
 }
 
-function MiniProgress({ label, percent }: { label: string; percent: number }) {
+/** Uma barra por etapa do workflow: concluída, em andamento, pendente ou interrompida. */
+function StageBar({ item }: { item: StageProgressItem }) {
+  const bar = STAGE_BAR[item.state]
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] truncate" style={{ color: 'var(--kanban-card-sub)' }}>{label}</span>
-              <span className="text-[10px] font-bold ml-1" style={{ color: 'var(--kanban-card-title)' }}>{percent}%</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="truncate text-xs font-medium text-muted-foreground">{item.label}</span>
+            <div className="h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'var(--muted)' }}>
+              <div className="h-2 rounded-full transition-all duration-500" style={{ width: bar.width, backgroundColor: bar.color }} />
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'var(--kanban-card-separator)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${percent}%`, backgroundColor: 'var(--kanban-card-accent)' }}
-              />
-            </div>
+            <span className={cn('truncate text-[11px]', bar.text)}>{STAGE_STATE_LABEL[item.state]}</span>
           </div>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          {enrichmentLabelMap[label] ?? label}: {percent}% concluído
+          {item.label}: {STAGE_STATE_LABEL[item.state].toLowerCase()}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -237,10 +230,7 @@ export function RequestCard({
   const erpAlert = erpState?.tone === "alert"
   const needsAction =
     request.status === "pending_fiscal" || request.status === "pending_mrp"
-  const totalProgress = Math.round(
-    request.enrichment.reduce((acc, s) => acc + s.percent, 0) /
-      (request.enrichment.length || 1)
-  )
+  const totalProgress = progressPercent(request.stages)
   const statusColor = statusColors[request.status] ?? statusColors[request.statusLabel] ?? statusColors.draft
 
   if (variant === "grid") {
@@ -329,36 +319,12 @@ export function RequestCard({
           {request.date}
         </div>
 
-        {/* Progress bars — trilho com hsl(--muted), preenchimento hex para ambos os temas */}
-        <div className="flex-1 min-w-0 hidden lg:grid grid-cols-4 gap-x-4 items-start">
-          {request.enrichment.map((step) => {
-            const p = Math.min(100, step.percent)
-            const fillBg =
-              p === 0
-                ? 'transparent'
-                : p < 50
-                  ? '#60a5fa'
-                  : p < 100
-                    ? '#2563eb'
-                    : '#16a34a'
-            return (
-              <div key={step.key} className="flex flex-col gap-1 min-w-0">
-                <span className="text-xs font-medium text-muted-foreground truncate">
-                  {enrichmentLabelMap[step.label] ?? step.label}
-                </span>
-                <div
-                  className="w-full h-2 overflow-hidden rounded-full"
-                  style={{ backgroundColor: 'var(--muted)' }}
-                >
-                  <div
-                    className="h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${p}%`, backgroundColor: fillBg }}
-                  />
-                </div>
-                <span className="text-xs tabular-nums text-muted-foreground">{step.percent}%</span>
-              </div>
-            )
-          })}
+        {/* Uma barra por etapa do workflow escolhido */}
+        <div
+          className="flex-1 min-w-0 hidden lg:grid gap-x-4 items-start"
+          style={{ gridTemplateColumns: `repeat(${Math.max(1, request.stages.length)}, minmax(0, 1fr))` }}
+        >
+          {request.stages.map((item) => <StageBar key={item.key} item={item} />)}
         </div>
 
         {/* Overall progress for smaller screens */}

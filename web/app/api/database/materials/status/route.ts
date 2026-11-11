@@ -17,7 +17,7 @@ const MAX_IDS = 100
 export async function POST(request: Request) {
   const ctx = await getCallerAccess()
   if ('error' in ctx) return ctx.error
-  if (!ctx.isMaster && !ctx.permissions.can_standardize) {
+  if (!ctx.isMaster && !ctx.permissions.can_change_material_status) {
     return NextResponse.json({ error: 'Sem permissão para alterar status na base.' }, { status: 403 })
   }
 

@@ -17,6 +17,8 @@ export type MyRequestRow = {
   rejection_reason: string | null
   /** Ainda na primeira etapa e sem atendente: o próprio solicitante pode cancelar (cancel_request). */
   can_cancel: boolean
+  /** Tipo de solicitação (migration 043); ausente vale cadastro. */
+  request_type?: 'cadastro' | 'alteracao' | 'ampliacao'
 }
 
 export type MyRequestSituation = 'andamento' | 'finalizada' | 'rejeitada' | 'cancelada'

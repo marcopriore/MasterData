@@ -18,14 +18,31 @@ export async function GET(request: Request) {
   const ids = [...new Set(raw.split(',').map(Number).filter(Number.isInteger))].slice(0, MAX_IDS)
   if (ids.length === 0) return NextResponse.json({ items: [] })
 
+  const cols = 'id, id_sistema, id_erp, status, erp_status, erp_error_message, description, detailed_description, pdm_code, technical_attributes, request_id'
   const { data, error } = await supabaseAdmin
     .from('material_database')
-    .select('id, id_sistema, id_erp, status, erp_status, erp_error_message, description, detailed_description, pdm_code, technical_attributes, request_id')
+    .select(cols)
     .eq('tenant_id', ctx.tenantId)
     .in('request_id', ids)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const byRequest = new Map((data ?? []).map((row) => [row.request_id as number, row]))
+  // Alteração (migration 043): o material é o de origem, não um nascido da solicitação.
+  const { data: changes } = await supabaseAdmin
+    .from('material_requests')
+    .select('id, target_material_id')
+    .eq('tenant_id', ctx.tenantId)
+    .in('id', ids)
+    .not('target_material_id', 'is', null)
+  const targetIds = [...new Set((changes ?? []).map((c) => c.target_material_id as number))]
+  if (targetIds.length) {
+    const { data: targets } = await supabaseAdmin.from('material_database').select(cols).eq('tenant_id', ctx.tenantId).in('id', targetIds)
+    const byId = new Map((targets ?? []).map((row) => [row.id as number, row]))
+    for (const c of changes ?? []) {
+      const row = byId.get(c.target_material_id as number)
+      if (row) byRequest.set(c.id as number, row)
+    }
+  }
   const items: RequestErpInfo[] = []
   for (const requestId of ids) {
     const row = byRequest.get(requestId)

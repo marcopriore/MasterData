@@ -172,7 +172,10 @@ export default function DatabasePage() {
   const [visibleCols, setVisibleCols] = useState<Set<string>>(new Set(VISIBLE_BY_DEFAULT))
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
 
-  const showStandardizeActions = can('can_standardize')
+  // Ver a base não dá ação nenhuma; status e ERP têm permissão própria (migration 044).
+  const canChangeStatus = can('can_change_material_status')
+  const canSyncErp = can('can_sync_erp')
+  const showStandardizeActions = canChangeStatus || canSyncErp
   const showBulkImport = can('can_bulk_import')
   const showExport = can('can_view_database')
 
@@ -600,6 +603,7 @@ export default function DatabasePage() {
           )}
           {showStandardizeActions && selectedIds.length > 0 && (
             <>
+              {canChangeStatus && (
               <Button
                 variant="outline"
                 size="sm"
@@ -609,6 +613,8 @@ export default function DatabasePage() {
                 <RefreshCw className="size-4" />
                 Alterar Status ({selectedIds.length})
               </Button>
+              )}
+              {canSyncErp && (
               <Button
                 size="sm"
                 onClick={handleOpenIntegrateModal}
@@ -622,6 +628,7 @@ export default function DatabasePage() {
                 <Upload className="size-4" />
                 Sincronizar com ERP ({selectedSyncIds.length || selectedIds.length})
               </Button>
+              )}
             </>
           )}
           <DropdownMenu>

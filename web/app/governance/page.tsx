@@ -22,8 +22,10 @@ import {
   getRequestsErpStatus,
   erpSyncMaterial,
   requestStatusLabel,
+  REQUEST_TYPE_LABEL,
   type MyField,
   type FieldLabelItem,
+  type RequestType,
 } from '@/lib/supabase-api'
 import { canSyncFromRequest, requestErpState, type RequestErpInfo, type RequestErpState } from '@/lib/request-erp-state'
 import { KanbanBoard } from '@/components/governance/kanban-board'
@@ -47,6 +49,7 @@ import { useUser } from '@/contexts/user-context'
 import { AlertTriangle, ChevronLeft, Check, X, Save, Loader2, RefreshCw, ExternalLink, RotateCcw } from 'lucide-react'
 import { isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-status'
 import { fieldsForStage, type FieldRuleProfile } from '@/lib/field-rules'
+import { stageProgress, type WorkflowStepLite } from '@/lib/stage-progress'
 import { REJECTION_REASONS, type RejectionReason } from '@/lib/rejection-reasons'
 import { toErpText } from '@/lib/erp-text'
 import { Input } from '@/components/ui/input'
@@ -81,6 +84,7 @@ type WorkflowHeader = {
   name: string
   description?: string | null
   is_active: boolean
+  request_type?: RequestType
 }
 
 type RequestValue = { label: string; value: string }
@@ -112,9 +116,13 @@ type ApiRequest = {
   assigned_to_name?: string | null
   pdm_attributes?: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
   stage_entered_at?: string | null
+  request_type?: RequestType
+  target_material_id?: number | null
+  change_fields?: string[]
+  change_previous?: Record<string, unknown>
 }
 
-function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
+function mapToMaterialRequest(r: ApiRequest, steps: WorkflowStepLite[]): MaterialRequest {
   const isoDate = r.date ? new Date(r.date) : new Date()
   const dateStr =
     isoDate.getDate().toString().padStart(2, '0') +
@@ -147,12 +155,7 @@ function mapToMaterialRequest(r: ApiRequest): MaterialRequest {
     generated_description: r.generated_description ?? '',
     assigned_to_id: r.assigned_to_id ?? null,
     assigned_to_name: r.assigned_to_name ?? null,
-    enrichment: [
-      { label: 'T', key: 'technical', percent: r.values?.length > 0 ? 100 : 0 },
-      { label: 'F', key: 'fiscal', percent: 0 },
-      { label: 'M', key: 'master', percent: 0 },
-      { label: 'MRP', key: 'mrp', percent: 0 },
-    ],
+    stages: stageProgress(steps, r.status),
     description: r.generated_description ?? '',
   }
 }
@@ -250,6 +253,20 @@ export default function GovernancePage() {
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyFetched, setHistoryFetched] = useState(false)
+  /** Aba por tipo de solicitação (migration 043): cada tipo tem o seu workflow ativo. */
+  const [requestType, setRequestType] = useState<RequestType>('cadastro')
+  const requestTypeRef = useRef<RequestType>('cadastro')
+  const changeRequestType = (type: RequestType) => {
+    requestTypeRef.current = type
+    setRequestType(type)
+    const ofType = workflows.filter((w) => (w.request_type ?? 'cadastro') === type)
+    const active = ofType.find((w) => w.is_active) ?? ofType[0]
+    if (active) setSelectedWorkflowId(active.id)
+    else {
+      setSelectedWorkflowId(null)
+      setRequests([])
+    }
+  }
   useEffect(() => {
     if (!ready) return
     const loadAll = async () => {
@@ -260,7 +277,8 @@ export default function GovernancePage() {
         ;[wfList, pdmList] = await Promise.all([getWorkflows(), getPdms()])
         setWorkflows((wfList ?? []) as WorkflowHeader[])
         if (wfList && wfList.length > 0) {
-          const active = wfList.find((w) => w.is_active) ?? wfList[0]
+          const ofType = wfList.filter((w) => (w.request_type ?? 'cadastro') === requestTypeRef.current)
+          const active = ofType.find((w) => w.is_active) ?? ofType[0] ?? wfList.find((w) => w.is_active) ?? wfList[0]
           setSelectedWorkflowId(active.id)
         }
         setPdms(
@@ -344,13 +362,20 @@ export default function GovernancePage() {
     getRequestsFinishedAt(done).then(setFinishedAt).catch(() => setFinishedAt({}))
   }, [requests])
 
-  // Prazo de cada etapa do workflow escolhido, para "atrasadas".
+  // Etapas do workflow escolhido: prazo de cada uma ("atrasadas") e andamento na visão lista.
   const [slaByStage, setSlaByStage] = useState<Record<string, number | null>>({})
+  const [workflowSteps, setWorkflowSteps] = useState<WorkflowStepLite[]>([])
   useEffect(() => {
     if (selectedWorkflowId == null) return
     getWorkflowConfig(selectedWorkflowId)
-      .then((steps) => setSlaByStage(Object.fromEntries(steps.map((s) => [s.status_key.toLowerCase(), s.sla_days ?? null]))))
-      .catch(() => setSlaByStage({}))
+      .then((steps) => {
+        setSlaByStage(Object.fromEntries(steps.map((s) => [s.status_key.toLowerCase(), s.sla_days ?? null])))
+        setWorkflowSteps(steps.map((s) => ({ status_key: s.status_key, step_name: s.step_name, order: s.order, is_active: s.is_active !== false })))
+      })
+      .catch(() => {
+        setSlaByStage({})
+        setWorkflowSteps([])
+      })
   }, [selectedWorkflowId])
 
   /** A chamada ao ERP da última etapa roda em segundo plano; reconsulta depois que ela tem tempo de voltar. */
@@ -378,8 +403,8 @@ export default function GovernancePage() {
   const showActionButtons = can('can_attend')
 
   const materialRequests = useMemo(
-    () => requests.map(mapToMaterialRequest),
-    [requests]
+    () => requests.map((r) => mapToMaterialRequest(r, workflowSteps)),
+    [requests, workflowSteps]
   )
 
   /** ?status=chave vem do gráfico da tela inicial. */
@@ -457,6 +482,9 @@ export default function GovernancePage() {
     linkedWorkflowTried.current = true
     void getRequestById(linkedRequestId).then((req) => {
       if (req && req.workflow_id && req.workflow_id !== selectedWorkflowId) {
+        const type = req.request_type ?? 'cadastro'
+        requestTypeRef.current = type
+        setRequestType(type)
         setSelectedWorkflowId(req.workflow_id)
       } else {
         toast.error(`Solicitação REQ-${String(linkedRequestId).padStart(4, '0')} não encontrada.`)
@@ -494,7 +522,9 @@ export default function GovernancePage() {
     selectedRequest.assigned_to_id === user.id
 
   const isCadastroPhase = (selectedRequest?.status ?? '').toLowerCase() === 'cadastro'
-  const canEditTechnicalAttributes = isAssignedToMe && isCadastroPhase
+  /** Alteração: os atributos do PDM vêm propostos pelo solicitante; a área revisa e aprova ou rejeita. */
+  const isChangeRequest = selectedRequest?.request_type === 'alteracao'
+  const canEditTechnicalAttributes = isAssignedToMe && isCadastroPhase && !isChangeRequest
 
   const isSelectedFinal = isClosedStatus(selectedRequest?.status)
 
@@ -598,10 +628,13 @@ export default function GovernancePage() {
   }, [detailsOpen, selectedRequest, user?.id])
 
   /** Campos desta etapa para o material (regra por material); muda na hora quando o tipo muda. */
-  const stageFields = useMemo(
-    () => fieldsForStage(myFields, attributeValues, fieldRules, stageRole),
-    [myFields, attributeValues, fieldRules, stageRole]
-  )
+  const stageFields = useMemo(() => {
+    const all = fieldsForStage(myFields, attributeValues, fieldRules, stageRole)
+    // Alteração: a etapa revisa só os campos escolhidos que são dela.
+    return selectedRequest?.request_type === 'alteracao'
+      ? all.filter((f) => (selectedRequest.change_fields ?? []).includes(f.field_name))
+      : all
+  }, [myFields, attributeValues, fieldRules, stageRole, selectedRequest])
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false)
   const [rejectJustification, setRejectJustification] = useState('')
@@ -750,11 +783,14 @@ export default function GovernancePage() {
         generated_description: canEditTechnicalAttributes ? generatedDescription : undefined,
       })
       const freshRequest = await getRequestById(selectedRequest.id)
+      // Na Alteração, o próprio material e a própria solicitação não contam como duplicado.
       const dupCheck = await checkDuplicateRequest({
         pdm_id: selectedRequest.pdm_id,
         formData: (freshRequest?.technical_attributes ?? {}) as Record<string, unknown>,
+        excludeMaterialId: selectedRequest.target_material_id ?? null,
+        excludeRequestId: selectedRequest.id,
       })
-      if (dupCheck.isDuplicate && dupCheck.existingId !== selectedRequest.id) {
+      if (dupCheck.isDuplicate && !(dupCheck.source === 'request' && dupCheck.existingId === selectedRequest.id)) {
         setDupInfo({ existingCode: dupCheck.existingCode, source: dupCheck.source })
         setDupModalOpen(true)
         setSaveLoading(false)
@@ -874,10 +910,32 @@ export default function GovernancePage() {
             {/* Section header bar */}
             <div className="flex h-8 min-h-8 items-center justify-between gap-4 px-6 py-1 rounded-t-2xl bg-[#192D50]">
               <h2 className="text-base font-semibold uppercase !text-white">
-                Solicitações de Cadastro
+                Solicitações de {REQUEST_TYPE_LABEL[requestType]}
               </h2>
             </div>
             <div className="p-4 md:p-6">
+            <div className="mb-4 inline-flex rounded-xl border p-1" role="tablist" aria-label="Tipo de solicitação" style={{ borderColor: 'var(--kanban-col-border)', backgroundColor: 'var(--filter-input-bg)' }}>
+              {(['cadastro', 'alteracao'] as RequestType[]).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  role="tab"
+                  aria-selected={requestType === type}
+                  onClick={() => changeRequestType(type)}
+                  className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
+                    requestType === type ? 'bg-[#0F1C38] text-white dark:bg-[#C69A46] dark:text-[#0F1C38]' : 'hover:bg-white/60 dark:hover:bg-white/10'
+                  }`}
+                  style={requestType === type ? undefined : { color: 'var(--kanban-col-text)' }}
+                >
+                  {REQUEST_TYPE_LABEL[type]}
+                </button>
+              ))}
+            </div>
+            {!workflows.some((w) => (w.request_type ?? 'cadastro') === requestType && w.is_active) && (
+              <p className="mb-4 text-sm text-muted-foreground">
+                Nenhum workflow de {REQUEST_TYPE_LABEL[requestType]} ativo. Configure em Configurações → Workflows.
+              </p>
+            )}
             <FiltersBar
               search={search}
               onSearchChange={setSearch}
@@ -938,6 +996,11 @@ export default function GovernancePage() {
           <DialogHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4 pb-2 dark:border-zinc-700/50 dark:bg-card">
             <DialogTitle className="text-slate-900 dark:text-[#C69A46]">
               REQ-{String(selectedRequest?.id).padStart(4, '0')} — {selectedRequest?.pdm_name ?? '—'}
+              {selectedRequest?.request_type && selectedRequest.request_type !== 'cadastro' && (
+                <span className="ml-2 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 align-middle text-xs font-medium text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+                  {REQUEST_TYPE_LABEL[selectedRequest.request_type]}
+                </span>
+              )}
             </DialogTitle>
           </DialogHeader>
           {selectedRequest && (
@@ -972,7 +1035,31 @@ export default function GovernancePage() {
                 </div>
               )}
 
-              {isRejectedStatus(selectedRequest.status) && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
+              {isChangeRequest && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3 dark:border-blue-900/60 dark:bg-blue-950/20">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-blue-800 dark:text-blue-300">
+                    Alteração solicitada{selectedRequest.target_material_id ? ` · material #${selectedRequest.target_material_id}` : ''}
+                  </p>
+                  <ul className="space-y-1.5 text-sm">
+                    {(selectedRequest.change_fields ?? []).map((key) => {
+                      const label = fieldLabels.find((f) => f.field_name === key)?.field_label ?? selectedRequest.pdm_attributes?.[key]?.label ?? key
+                      const before = selectedRequest.change_previous?.[key]
+                      const after = selectedRequest.technical_attributes?.[key]
+                      return (
+                        <li key={key} className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="font-medium">{label}:</span>
+                          <span className="text-muted-foreground line-through">{before != null && before !== '' ? formatAttrValue(before) : '—'}</span>
+                          <span aria-hidden="true">→</span>
+                          <span className="font-semibold text-blue-800 dark:text-blue-300">{after != null && after !== '' ? formatAttrValue(after) : '—'}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  {selectedRequest.justification && <p className="mt-2 text-xs text-muted-foreground">Motivo: {selectedRequest.justification}</p>}
+                </div>
+              )}
+
+              {isRejectedStatus(selectedRequest.status) && !isChangeRequest && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                   <p>Solicitação rejeitada. Ela pode ser corrigida e reenviada para a primeira etapa.</p>
                   <Link href={`/requests/new?reenviar=${selectedRequest.id}`}>
@@ -1003,7 +1090,7 @@ export default function GovernancePage() {
                   {selectedErpState.tone === 'alert' && <p className="mt-1 text-sm">{selectedErpState.detail}</p>}
                   {selectedErpState.tone === 'alert' && selectedErpInfo?.material && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {can('can_standardize') && canSyncFromRequest(selectedErpState) && (
+                      {can('can_sync_erp') && canSyncFromRequest(selectedErpState) && (
                         <Button
                           size="sm"
                           onClick={handleSyncFromRequest}

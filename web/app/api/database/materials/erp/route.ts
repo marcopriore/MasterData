@@ -17,7 +17,7 @@ const MAX_IDS = 100
 export async function POST(request: Request) {
   const ctx = await getCallerAccess()
   if ('error' in ctx) return ctx.error
-  if (!ctx.isMaster && !ctx.permissions.can_standardize) {
+  if (!ctx.isMaster && !ctx.permissions.can_sync_erp) {
     return NextResponse.json({ error: 'Sem permissão para sincronizar com o ERP.' }, { status: 403 })
   }
 

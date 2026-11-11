@@ -138,6 +138,9 @@ async function checkSupabase(env) {
     ['tenant_erp_connections', 'response_code_field', '022/023'],
     ['material_requests', 'is_closed', '037'],
     ['field_rule_profiles', 'rules', '038'],
+    ['material_history', 'event_type', '042'],
+    ['material_requests', 'target_material_id', '043'],
+    ['workflow_header', 'request_type', '043'],
   ]
   for (const [table, column, migration] of tables) {
     const { error } = await admin.from(table).select(column).limit(1)
@@ -152,6 +155,14 @@ async function checkSupabase(env) {
   if (rolesErr) fail(`migration 025: não consultou papéis (${rolesErr.message})`)
   else if (rolesWithoutAttend) fail(`migration 025: ${rolesWithoutAttend} papel(éis) sem can_attend — rode supabase/migrations/025_can_attend_default.sql`)
   else ok('migration 025: todo papel tem can_attend')
+
+  const { count: rolesWithoutErp, error: rolesErpErr } = await admin
+    .from('roles')
+    .select('id', { count: 'exact', head: true })
+    .is('permissions->can_sync_erp', null)
+  if (rolesErpErr) fail(`migration 044: não consultou papéis (${rolesErpErr.message})`)
+  else if (rolesWithoutErp) fail(`migration 044: ${rolesWithoutErp} papel(éis) sem can_sync_erp — rode supabase/migrations/044_database_permissions.sql`)
+  else ok('migration 044: todo papel tem as permissões novas da base')
 
   const { error: moveErr } = await admin.rpc('move_request_stage', { p_request_id: -1, p_status_key: '-' })
   if (moveErr && /não encontrada/i.test(moveErr.message)) ok('migration 026: move_request_stage')

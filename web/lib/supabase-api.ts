@@ -18,6 +18,7 @@ import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
 import { safeSearchTerm } from '@/lib/search-term'
 import { type MyRequestRow } from '@/lib/my-requests'
 import { toProfile, type FieldRuleProfile } from '@/lib/field-rules'
+import type { MaterialHistoryRow } from '@/lib/material-timeline'
 import {
   ATTENDED_EVENT_TYPES,
   summarizeAttended,
@@ -519,6 +520,11 @@ export type ApiRequest = {
   pdm_attributes?: Record<string, { label: string; type: string; options: string[] }>
   /** Quando entrou na etapa atual (migration 036). */
   stage_entered_at?: string | null
+  /** Tipo e material de origem (migration 043). */
+  request_type?: RequestType
+  target_material_id?: number | null
+  change_fields?: string[]
+  change_previous?: Record<string, unknown>
 }
 
 export async function getRequests(params?: {
@@ -612,6 +618,10 @@ export async function getRequests(params?: {
       assigned_to_name: assignedName,
       pdm_attributes: pdmAttributes,
       stage_entered_at: r.stage_entered_at ?? null,
+      request_type: (r.request_type ?? 'cadastro') as RequestType,
+      target_material_id: r.target_material_id ?? null,
+      change_fields: (r.change_fields ?? []) as string[],
+      change_previous: (r.change_previous ?? {}) as Record<string, unknown>,
     })
   }
   return result
@@ -768,7 +778,7 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
   const rows = await allPages((from, to) =>
     supabase
       .from('material_requests')
-      .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, pdm_templates(name, internal_code)')
+      .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, request_type, pdm_templates(name, internal_code)')
       .eq('tenant_id', tenantId)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
@@ -828,6 +838,7 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
       assigned_to_name: r.assigned_to_id ? names.get(r.assigned_to_id) ?? null : null,
       rejection_reason: reasons.get(r.id) || null,
       can_cancel: !r.assigned_to_id && firstStep.get(r.workflow_id) === status.toLowerCase(),
+      request_type: ((r as { request_type?: string }).request_type ?? 'cadastro') as MyRequestRow['request_type'],
     }
   })
 }
@@ -847,8 +858,7 @@ export async function createRequest(body: {
   const { data: { user } } = await supabase.auth.getUser()
   const tenantId = await getCurrentUserTenantId()
 
-  const { data: wf } = await supabase.from('workflow_header').select('id').eq('is_active', true).limit(1).single()
-  const wfId = body.workflow_id ?? wf?.id
+  const wfId = body.workflow_id ?? (await getActiveWorkflowId('cadastro'))
   if (!wfId) handleError(new Error('Nenhum workflow ativo configurado'))
 
   const { data: firstStep } = await supabase.from('workflow_config').select('status_key').eq('workflow_id', wfId).eq('is_active', true).order('order').limit(1).single()
@@ -891,6 +901,64 @@ export async function createRequest(body: {
   return { id: data.id }
 }
 
+/**
+ * Alteração de material da base (migration 043). A solicitação nasce com os valores atuais do material
+ * e os novos por cima; só os campos escolhidos voltam para o material na aprovação final.
+ */
+export async function createChangeRequest(body: {
+  material_id: number
+  pdm_id: number
+  requester: string
+  change_fields: string[]
+  technical_attributes: Record<string, unknown>
+  generated_description?: string | null
+  urgency?: string
+  justificativa?: string
+}): Promise<{ id: number }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const tenantId = await getCurrentUserTenantId()
+  const wfId = await getActiveWorkflowId('alteracao')
+  if (!wfId) handleError(new Error('Nenhum workflow de Alteração ativo. Configure em Configurações → Workflows.'))
+  const { data: firstStep } = await supabase.from('workflow_config').select('status_key').eq('workflow_id', wfId).eq('is_active', true).order('order').limit(1).single()
+  const initialStatus = firstStep?.status_key ?? 'cadastro'
+
+  const { data, error } = await supabase.from('material_requests').insert({
+    tenant_id: tenantId,
+    pdm_id: body.pdm_id,
+    workflow_id: wfId,
+    status: initialStatus,
+    request_type: 'alteracao',
+    target_material_id: body.material_id,
+    change_fields: body.change_fields,
+    requester: body.requester,
+    urgency: body.urgency ?? 'low',
+    justification: body.justificativa ?? null,
+    generated_description: body.generated_description != null ? toErpText(body.generated_description) : null,
+    technical_attributes: toErpDeep(body.technical_attributes),
+    user_id: user?.id ?? null,
+  }).select('id').single()
+  if (error) handleError(error)
+
+  await supabase.from('request_history').insert({
+    tenant_id: tenantId,
+    request_id: data.id,
+    user_id: user?.id ?? null,
+    event_type: 'created',
+    message: 'Solicitação de alteração criada',
+    stage: initialStatus,
+    event_data: { request_type: 'alteracao', material_id: body.material_id, fields: body.change_fields },
+  })
+  void logAction({
+    category: 'requests',
+    action: 'request_created',
+    description: 'Solicitação de alteração criada',
+    event_data: { request_id: data.id, material_id: body.material_id, request_type: 'alteracao' },
+  })
+  queueRequestNotice(data.id)
+  return { id: data.id }
+}
+
 function queueRequestNotice(requestId: number) {
   if (typeof window === 'undefined') return
   void fetch('/api/notifications/request', {
@@ -917,6 +985,9 @@ const DUPLICATE_CHECK_NEGATIVE: {
 export async function checkDuplicateRequest(params: {
   pdm_id: number
   formData: Record<string, unknown>
+  /** Alteração: o próprio material (e a própria solicitação) não contam como duplicado. */
+  excludeMaterialId?: number | null
+  excludeRequestId?: number | null
 }): Promise<{
   isDuplicate: boolean
   existingCode: string | null
@@ -952,6 +1023,7 @@ export async function checkDuplicateRequest(params: {
 
     for (const row of materials ?? []) {
       if (!countsForDuplicate(row)) continue
+      if (params.excludeMaterialId != null && row.id === params.excludeMaterialId) continue
       if (attrsMatch(target, pickDescriptionAttrs(row.technical_attributes, descriptionKeys))) {
         const code = row.id_sistema != null ? String(row.id_sistema) : null
         return {
@@ -971,7 +1043,7 @@ export async function checkDuplicateRequest(params: {
     if (reqErr) throw reqErr
 
     // Fechada (finalizada, rejeitada — gravada "Rejected" — ou cancelada) não conta como duplicada.
-    for (const row of (openRequests ?? []).filter((r) => !isClosedStatus(r.status))) {
+    for (const row of (openRequests ?? []).filter((r) => !isClosedStatus(r.status) && r.id !== params.excludeRequestId)) {
       if (attrsMatch(target, pickDescriptionAttrs(row.technical_attributes, descriptionKeys))) {
         return {
           isDuplicate: true,
@@ -1193,6 +1265,37 @@ export async function getRequestHistory(requestId: number): Promise<HistoryEvent
   return result
 }
 
+/** Momentos do material (migration 042), com o nome de quem fez. */
+export async function getMaterialHistory(materialId: number): Promise<MaterialHistoryRow[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('material_history')
+    .select('id, event_type, event_data, user_id, created_at')
+    .eq('material_id', materialId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(500)
+  if (error) handleError(error)
+  const rows = data ?? []
+  const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[]
+  const { data: users } = userIds.length ? await supabase.from('users').select('id, name').in('id', userIds) : { data: [] }
+  const names = new Map(((users ?? []) as Array<{ id: string; name: string | null }>).map((u) => [u.id, u.name ?? '']))
+  return rows.map((r) => ({
+    id: r.id as number,
+    event_type: r.event_type as string,
+    event_data: (r.event_data ?? {}) as Record<string, unknown>,
+    user_name: r.user_id ? names.get(r.user_id as string) ?? null : null,
+    created_at: r.created_at as string,
+  }))
+}
+
+/** Solicitação de origem do material: quem pediu e quando. */
+export async function getRequestOrigin(requestId: number): Promise<{ id: number; requester: string | null; created_at: string | null } | null> {
+  const supabase = createClient()
+  const { data } = await supabase.from('material_requests').select('id, requester, created_at').eq('id', requestId).maybeSingle()
+  return data ? { id: data.id as number, requester: (data.requester as string | null) ?? null, created_at: (data.created_at as string | null) ?? null } : null
+}
+
 export async function getRequestById(id: number): Promise<ApiRequest | null> {
   const supabase = createClient()
   const { data, error } = await supabase
@@ -1229,12 +1332,25 @@ export async function getRequestById(id: number): Promise<ApiRequest | null> {
     assigned_to_id: data.assigned_to_id,
     assigned_to_name: assignedName,
     pdm_attributes: {},
+    request_type: (data.request_type ?? 'cadastro') as RequestType,
+    target_material_id: data.target_material_id ?? null,
+    change_fields: (data.change_fields ?? []) as string[],
+    change_previous: (data.change_previous ?? {}) as Record<string, unknown>,
   }
 }
 
 // ─── Workflows ───────────────────────────────────────────────────────────────
 
-export type WorkflowHeader = { id: number; name: string; description?: string | null; is_active?: boolean }
+/** Tipo de solicitação (migration 043): cada tipo tem o seu workflow ativo. */
+export type RequestType = 'cadastro' | 'alteracao' | 'ampliacao'
+
+export const REQUEST_TYPE_LABEL: Record<RequestType, string> = {
+  cadastro: 'Cadastro',
+  alteracao: 'Alteração',
+  ampliacao: 'Ampliação',
+}
+
+export type WorkflowHeader = { id: number; name: string; description?: string | null; is_active?: boolean; request_type?: RequestType }
 export type WorkflowStep = {
   id: number
   workflow_id: number
@@ -1251,27 +1367,40 @@ export async function getWorkflows(): Promise<WorkflowHeader[]> {
     return cachedWorkflows as WorkflowHeader[]
   }
   const supabase = createClient()
-  const { data, error } = await supabase.from('workflow_header').select('id, name, description, is_active').order('id')
+  const { data, error } = await supabase.from('workflow_header').select('id, name, description, is_active, request_type').order('id')
   if (error) handleError(error)
   cachedWorkflows = data ?? []
   cachedWorkflowsTime = Date.now()
   return cachedWorkflows as WorkflowHeader[]
 }
 
+/** Workflow ativo do tipo no tenant em uso (um por tipo, migration 043). */
+export async function getActiveWorkflowId(requestType: RequestType = 'cadastro'): Promise<number | null> {
+  const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
+  const { data } = await supabase
+    .from('workflow_header')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .eq('request_type', requestType)
+    .order('id')
+    .limit(1)
+    .maybeSingle()
+  return (data?.id as number | undefined) ?? null
+}
+
 export async function getWorkflowConfig(workflowId?: number): Promise<WorkflowStep[]> {
   const supabase = createClient()
-  let wfId = workflowId
-  if (wfId == null) {
-    const { data: active } = await supabase.from('workflow_header').select('id').eq('is_active', true).limit(1).single()
-    wfId = active?.id
-  }
+  let wfId: number | null | undefined = workflowId
+  if (wfId == null) wfId = await getActiveWorkflowId('cadastro')
   if (!wfId) return []
   const { data, error } = await supabase.from('workflow_config').select('*').eq('workflow_id', wfId).order('order')
   if (error) handleError(error)
   return data ?? []
 }
 
-export async function createWorkflow(payload: { name: string; description?: string }): Promise<WorkflowHeader> {
+export async function createWorkflow(payload: { name: string; description?: string; request_type?: RequestType }): Promise<WorkflowHeader> {
   const supabase = createClient()
   const tenantId = await getCurrentUserTenantId()
   const { data, error } = await supabase.from('workflow_header').insert({ ...payload, tenant_id: tenantId, is_active: false }).select().single()

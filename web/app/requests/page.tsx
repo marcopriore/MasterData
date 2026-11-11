@@ -13,6 +13,7 @@ import {
   getRequestHistory,
   getRequestsErpStatus,
   requestStatusLabel,
+  REQUEST_TYPE_LABEL,
   type HistoryEvent,
   type RequestAttachment,
 } from '@/lib/supabase-api'
@@ -358,7 +359,14 @@ function MyRequestsContent() {
                         erp?.tone === 'alert' ? 'bg-red-50/60 dark:bg-red-950/20' : ''
                       }`}
                     >
-                      <td className="px-4 py-3 font-mono text-xs font-semibold text-[#0F1C38] dark:text-[#C69A46]">{row.code}</td>
+                      <td className="px-4 py-3 font-mono text-xs font-semibold text-[#0F1C38] dark:text-[#C69A46]">
+                        {row.code}
+                        {row.request_type && row.request_type !== 'cadastro' && (
+                          <span className="mt-1 block w-fit rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-sans text-[10px] font-medium text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+                            {REQUEST_TYPE_LABEL[row.request_type]}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-slate-900 dark:text-foreground">{row.pdm_name}</p>
                         <p className="line-clamp-1 font-mono text-xs text-muted-foreground">{row.description || '—'}</p>

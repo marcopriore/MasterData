@@ -19,6 +19,8 @@ import {
 } from '@/lib/supabase-api'
 import { resolveField, type FieldRuleProfile } from '@/lib/field-rules'
 import { hiddenMaterialFields, materialAttributes, missingMaterialFields, missingMessage, type RuleField } from '@/lib/material-rules'
+import { MaterialHistory } from '@/components/database/material-history'
+import { pdmShortDescription } from '@/lib/pdm-description'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
 import { NumericUnitInput } from '@/components/ui/numeric-unit-input'
@@ -74,6 +76,7 @@ type MaterialDetail = {
   stock_account: string | null
   price_control: string | null
   source: string | null
+  request_id?: number | null
   erp_status: string | null
   erp_integrated_at: string | null
   erp_error_message?: string | null
@@ -303,29 +306,7 @@ export default function DatabaseDetailPage() {
       attrs: Record<string, string | { value: string; unit?: string }>,
       template: { name: string; attributes?: Array<{ id: string; dataType?: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string } | string> }> } | null
     ) => {
-      if (!template) return ''
-      const parts = [template.name.toUpperCase()]
-      const sorted = [...(template.attributes || [])].sort(
-        (a, b) => ((a as { order?: number }).order ?? 0) - ((b as { order?: number }).order ?? 0)
-      )
-      sorted.forEach((attr) => {
-        if (!attr.includeInDescription) return
-        const val = attrs[attr.id]
-        if (!val) return
-        if (typeof val === 'object' && val !== null && 'value' in val) {
-          const v = val as { value: string; unit?: string }
-          parts.push(`${v.value || ''}${v.unit || ''}`.toUpperCase().trim())
-          return
-        }
-        const strVal = String(val)
-        const allowed = attr.allowedValues || []
-        const lov = allowed.find((av) =>
-          typeof av === 'object' && av !== null && 'value' in av ? (av as { value: string }).value === strVal : String(av) === strVal
-        )
-        const abbr = typeof lov === 'object' && lov !== null && 'abbreviation' in lov ? (lov as { abbreviation?: string }).abbreviation : null
-        parts.push((abbr || strVal).toUpperCase())
-      })
-      return toErpText(parts.join(' '))
+      return pdmShortDescription(template, attrs)
     },
     []
   )
@@ -393,6 +374,14 @@ export default function DatabaseDetailPage() {
   const requiredNow = useMemo(
     () => new Set(ruleFields.filter((f) => resolveField(f, draftAttrs, ruleProfiles).requirement === 'required').map((f) => f.field_name)),
     [ruleFields, draftAttrs, ruleProfiles]
+  )
+
+  /** Nome do campo para o histórico: dicionário ou atributo do PDM. */
+  const labelOfField = useCallback(
+    (name: string) =>
+      ruleFields.find((f) => f.field_name === name)?.field_label ??
+      pdmTemplate?.attributes?.find((a) => a.id === name)?.name,
+    [ruleFields, pdmTemplate]
   )
 
   /** O banco recusa material incompleto; a tela avisa antes, com os campos que faltam. */
@@ -629,7 +618,10 @@ export default function DatabaseDetailPage() {
     }
   }
 
-  const showActionBar = can('can_standardize')
+  // Ver a base não dá ação; editar e ERP têm permissão própria (migration 044).
+  const canEditMaterial = can('can_standardize')
+  const canSyncErp = can('can_sync_erp')
+  const showActionBar = canEditMaterial || canSyncErp
 
   const handleIntegrate = useCallback(async () => {
     if (!material) return
@@ -847,7 +839,7 @@ export default function DatabaseDetailPage() {
         </div>
         {showActionBar && (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {(material.erp_status === 'pendente_erp' || material.erp_status === 'erro_erp' || material.erp_status === 'integrando') && (
+            {canSyncErp && (material.erp_status === 'pendente_erp' || material.erp_status === 'erro_erp' || material.erp_status === 'integrando') && (
               <div className="relative group inline-block">
                 <button
                   type="button"
@@ -884,7 +876,7 @@ export default function DatabaseDetailPage() {
                 )}
               </div>
             )}
-            {material.id_erp && material.status !== 'Obsoleto' && material.erp_status !== 'integrando' && (
+            {canSyncErp && material.id_erp && material.status !== 'Obsoleto' && material.erp_status !== 'integrando' && (
               <button
                 type="button"
                 disabled={isEliminating}
@@ -901,7 +893,7 @@ export default function DatabaseDetailPage() {
                 )}
               </button>
             )}
-              {!editMode ? (
+              {!canEditMaterial ? null : !editMode ? (
               <button
                 type="button"
                 onClick={() => {
@@ -1230,6 +1222,13 @@ export default function DatabaseDetailPage() {
             </SectionCard>
           ))
         })()}
+
+        <MaterialHistory
+          materialId={material.id}
+          requestId={material.request_id ?? null}
+          createdAt={material.created_at}
+          labelOf={labelOfField}
+        />
       </div>
     </div>
   )

@@ -14,10 +14,15 @@ export type RolePermissions = {
   can_view_database: boolean
   can_manage_roles: boolean
   can_manage_value_dictionary: boolean
+  /** Editar materiais da base (cadastro e atributos). Nome antigo: Padronização. */
   can_standardize: boolean
   can_bulk_import: boolean
   can_attend: boolean
   can_view_reports: boolean
+  /** Bloquear, obsoletar e reativar material (migration 044). */
+  can_change_material_status: boolean
+  /** Sincronizar, integrar e eliminar no ERP (migration 044). */
+  can_sync_erp: boolean
 }
 
 export type PermissionKey = keyof RolePermissions
@@ -40,6 +45,8 @@ export const PERMISSION_KEYS: PermissionKey[] = [
   'can_bulk_import',
   'can_attend',
   'can_view_reports',
+  'can_change_material_status',
+  'can_sync_erp',
 ]
 
 export const PERMISSION_GROUPS: {
@@ -75,16 +82,18 @@ export const PERMISSION_GROUPS: {
       { key: 'can_manage_users', label: 'Gestão de Usuários', description: 'Criar, editar e desativar usuários' },
       { key: 'can_view_logs', label: 'Gestão de Logs', description: 'Visualizar log de auditoria do sistema' },
       { key: 'can_manage_fields', label: 'Dicionário de Dados', description: 'Gerir dicionário de campos e metadados' },
-      { key: 'can_view_database', label: 'Base de Dados', description: 'Visualizar base de dados de materiais' },
       { key: 'can_manage_roles', label: 'Grupos de perfil', description: 'Gerir grupos e permissões de acesso' },
       { key: 'can_manage_value_dictionary', label: 'Dicionário de Valores', description: 'Centralizar e unificar valores de atributos tipo lista' },
     ],
   },
   {
-    title: 'Operações',
+    title: 'Base de Dados',
     items: [
-      { key: 'can_standardize', label: 'Padronização de Materiais', description: 'Padronizar materiais e integrar com ERP' },
-      { key: 'can_bulk_import', label: 'Importação em Massa', description: 'Importação em massa de materiais' },
+      { key: 'can_view_database', label: 'Visualizar Base de Dados', description: 'Ver materiais e exportar a lista (sem nenhuma ação)' },
+      { key: 'can_standardize', label: 'Editar Materiais', description: 'Editar o cadastro e os atributos do material' },
+      { key: 'can_change_material_status', label: 'Alterar Status', description: 'Bloquear, obsoletar e reativar materiais' },
+      { key: 'can_sync_erp', label: 'Integrar com ERP', description: 'Sincronizar, integrar e eliminar materiais no ERP' },
+      { key: 'can_bulk_import', label: 'Importação em Massa', description: 'Importar materiais por planilha' },
     ],
   },
   {
@@ -139,6 +148,8 @@ export function emptyPermissions(): RolePermissions {
     can_bulk_import: false,
     can_attend: false,
     can_view_reports: false,
+    can_change_material_status: false,
+    can_sync_erp: false,
   }
 }
 

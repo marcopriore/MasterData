@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { getMaterialById, getFieldDictionary, getPdms, getPdmById } from '@/lib/supabase-api'
 import { formatAttrValue } from '@/lib/format-attr-value'
 import { erpViewLabel } from '@/lib/erp-views'
@@ -376,6 +377,23 @@ export function PhaseSearch({
                   </SectionCard>
                 </>
               )}
+
+              {/* Novo tipo de solicitação a partir do material encontrado (migration 043) */}
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-zinc-700">
+                {m.status === 'Obsoleto' ? (
+                  <p className="mr-auto text-xs text-muted-foreground">Material obsoleto não pode ser alterado nem ampliado.</p>
+                ) : null}
+                <Button variant="outline" size="sm" disabled title="Em desenvolvimento: próxima fase">
+                  Ampliação
+                </Button>
+                {m.status === 'Obsoleto' ? (
+                  <Button size="sm" disabled>Alteração</Button>
+                ) : (
+                  <Button size="sm" asChild>
+                    <Link href={`/requests/alteracao/${m.id}`}>Alteração</Link>
+                  </Button>
+                )}
+              </div>
             </div>
           ) : null}
         </DialogContent>

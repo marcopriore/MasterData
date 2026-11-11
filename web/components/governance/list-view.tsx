@@ -25,7 +25,7 @@ export function ListView({ requests, onCompleteData, onViewDetails, erpStates = 
         <div className="hidden md:block w-24 shrink-0">Prioridade</div>
         <div className="hidden lg:block w-36 shrink-0">Solicitante</div>
         <div className="hidden sm:block w-24 shrink-0">Data</div>
-        <div className="flex-1 hidden lg:block">Progresso (T/F/M/MRP)</div>
+        <div className="flex-1 hidden lg:block">Andamento por etapa</div>
         <div className="lg:hidden w-20 shrink-0">Progresso</div>
         <div className="w-48 shrink-0 text-right">Status</div>
       </div>

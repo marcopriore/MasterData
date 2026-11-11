@@ -23,7 +23,7 @@
   | Dicionário e funções do dicionário | `can_manage_value_dictionary` |
   | Abrir solicitação | `can_submit_request` |
   | Alterar solicitação | `can_attend` (ou `can_edit_workflows` para migrar de workflow) |
-  | Alterar material | `can_standardize` ou `can_edit_pdm` |
+  | Alterar material | `can_standardize`; quem só tem `can_edit_pdm` muda apenas descrição, descrição detalhada e PDM (a edição do PDM refaz as descrições; trava `guard_material_database`, migration 044) |
   | Ler log | `can_view_logs` |
   | `assign_request` e `move_request_stage` | `can_attend` |
   | `advance_workflow` | `can_approve` |
@@ -52,6 +52,15 @@
   - Importação por planilha: uma coluna por campo ativo do dicionário, com o identificador do campo no cabeçalho (o modelo e a exportação já trazem). Linha que não cumpre a regra vira erro com a lista dos campos; campo que não se aplica ao material é ignorado com aviso; na edição, vale o material como fica depois. Código inexistente vira erro; falha de gravação volta na resposta.
   - API de materiais: campos do dicionário em `atributos`, pela chave do campo. Falta obrigatório: 422 com "chave (nome)" em `detalhes`; campo que não se aplica volta em `avisos` e não é gravado.
   - ERP: campo que não aparece para o material não vai no JSON.
+- **Tipos de solicitação (migration 043):** Cadastro (material novo), Alteração (material já cadastrado) e Ampliação (próxima fase). Cada tipo tem o seu workflow, **um ativo por tipo e tenant**, configurado em Configurações → Workflows (seletor de tipo; ativar um desativa só o outro do mesmo tipo). Todo tenant ganhou o "Fluxo de Alteração" (cópia das etapas do workflow de cadastro), e o onboarding já cria. A Governança tem uma aba por tipo.
+- **Alteração (migration 043):**
+  - Abre pelo botão **Alteração** no detalhe do material encontrado na pesquisa da Nova Solicitação (`/requests/alteracao/[id]`). O solicitante marca os campos que mudam (atributos do PDM e campos do dicionário que aparecem para o material) e informa os valores novos e o motivo.
+  - Não muda: Tipo de Material (o ERP não permite), descrição básica gerada. Material Obsoleto não é alterado. Uma alteração aberta por material de cada vez. Mesmo PDM do material.
+  - A solicitação nasce com os valores atuais do material e os novos por cima; `change_previous` guarda os de antes, gravado pelo banco (o navegador não define).
+  - Cada etapa revisa e aprova só os campos escolhidos que são dela (a cobrança de obrigatório na aprovação também). Os atributos do PDM não são editados na governança: a área aprova ou rejeita o que foi pedido.
+  - Mexeu em atributo do PDM: a descrição é refeita e passa de novo pela checagem de duplicidade (o próprio material não conta).
+  - Aprovação final: o banco aplica só os campos escolhidos no **mesmo material** (não cria outro), que volta para Pendente ERP; com integração ativa, sai como "alterar material". O histórico do material registra a solicitação. Rejeitada não é reenviada: abre-se outra alteração.
+- **Histórico do material (migration 042):** `material_history`, gravado por gatilho em `material_database` em qualquer caminho (tela, importação, API, aprovação, ERP real ou simulado): criação (origem e solicitação), mudança de status, mudança da situação no ERP (com código ou mensagem de erro) e alteração de campos (quais). Quem fez é o usuário logado; no servidor fica "Sistema". Lê quem tem `can_view_database` no tenant; ninguém grava pela API. A tela junta a solicitação de origem (solicitante, atendentes de cada etapa e os eventos dela). A 042 preencheu o passado: criação de todo material e os eventos de ERP e de status em lote que já estavam no log.
 - **Tipo de Material não muda em material da base (migration 041):** o ERP não permite trocar o tipo de um material existente. Uma vez definido (atributo `tipo_material` ou coluna `material_type`), o gatilho `guard_material_type_lock` recusa a troca em qualquer gravação: tela, importação, API e scripts. Material antigo sem tipo pode receber o primeiro. Na tela o campo fica só leitura; a importação marca a linha com erro; a API responde 422.
 - **Dicionário de campos do tenant novo:** o onboarding copia o dicionário completo, com opções, do tenant modelo (`copy_default_fields`). Opções de campo ficam no texto aceito pelo ERP, sem acento.
 - **ERP simulado:** sem integração ativa, a simulação roda no servidor (`lib/erp/simulate.ts`), depois da permissão e da trava de duplicidade.
@@ -88,7 +97,10 @@ Ficam em `roles.permissions` (JSONB). A UI está em `web/app/admin/roles/page.ts
 | `can_manage_fields` | Dicionário de campos |
 | `can_manage_value_dictionary` | Dicionário de valores |
 | `can_view_logs` | Auditoria |
-| `can_standardize` | Padronização na base, integração/eliminação ERP e alteração de status em lote (Ativo / Bloqueado / Obsoleto) |
+| `can_view_database` | Ver a Base de Dados e exportar a lista, sem nenhuma ação |
+| `can_standardize` | **Editar materiais** na base (cadastro e atributos) |
+| `can_change_material_status` | Alterar status em lote (Ativo / Bloqueado / Obsoleto) — migration 044 |
+| `can_sync_erp` | Sincronizar, integrar e eliminar no ERP — migration 044 |
 | `can_view_reports` | Tela de Relatórios. Ligada em ADMIN e MASTER (migration 029, também em papel novo) |
 
 Papéis semeados no onboarding e na Empresa Demo: ADMIN e MASTER (quase tudo), SOLICITANTE (abre pedido, vê PDM, base e workflow), CADASTRO (atende, edita PDM, campos e importação), COMPRAS, MRP, FISCAL e CONTABILIDADE (aprovam, rejeitam, consultam).
@@ -101,7 +113,9 @@ Grupos de sistema (ADMIN, SOLICITANTE, CADASTRO, COMPRAS, MRP, FISCAL, CONTABILI
 
 `can_attend` vale para ADMIN, CADASTRO, COMPRAS, MRP, FISCAL e CONTABILIDADE; MASTER e SOLICITANTE ficam sem. A migration 025 põe a chave em todo papel inserido sem ela (gatilho `trg_roles_default_can_attend`, que cobre o onboarding e o script da Empresa Demo) e corrigiu os papéis criados depois da 008. Papel que já chega com a chave, como os da tela de grupos, mantém o valor escolhido. Para o usuário master a flag não importa: `can()` é sempre verdadeiro para ele.
 
-Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/permissions.ts` e no filtro do `app-sidebar.tsx`. O menu usa só `can()`. Master continua vendo o menu inteiro.
+**Acesso pelo endereço (link colado, favorito):** o `AppShell` só monta a tela se `canOpenPath` (`web/lib/nav-access.ts`) deixar; senão mostra "Acesso negado". A regra é a mesma do menu: o que o menu esconde, o endereço não abre. Tela sem regra em `canOpenPath` fica fechada para todos menos o Master. Dentro da tela, **ver não dá ação**: criar, editar, importar e excluir pedem a permissão de editar (Workflows `can_edit_workflows`, PDM `can_edit_pdm`, Base `can_standardize` / `can_change_material_status` / `can_sync_erp` / `can_bulk_import`); sem ela, a tela fica só leitura. O banco (RLS e gatilhos) e as rotas do servidor recusam de novo.
+
+Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/permissions.ts`, no filtro do `app-sidebar.tsx` **e em `canOpenPath`**, e os botões de ação conferem a permissão de editar. O menu usa só `can()`. Master continua vendo o menu inteiro.
 
 ## Workflow
 
@@ -209,7 +223,7 @@ Com integração ativa para a operação, o PRO-MAT chama o ERP de verdade. Sem 
 - **Sistema externo na base:** criação e alteração gravam o material e deixam **Pendente ERP**. A consulta só lê. Uma pessoa integra, um a um ou em lote. Sem `id_erp`, a chamada é criação; com `id_erp`, é alteração. Eliminação não entra por essa porta.
 - **Chave de API:** uma por sistema externo e por tenant, gerada pelo Master em Tenants → Configuração → Chaves de API. A base guarda só o hash; o texto aparece uma vez. Chave revogada para na hora. Material em `integrando` não aceita alteração (409).
 - **Integrações com o ERP:** várias por tenant, só o Master edita, em Tenants → Configuração. Cada uma tem operação (criação, alteração ou eliminação de material), tipo (POST, PATCH, DELETE ou GET), URL, tempo limite e autenticação. Só uma fica ativa por operação; a nova nasce desativada se já houver outra ativa. A URL aceita `{id_erp}` e `{id_sistema}` e precisa ser `https` em produção. O segredo é cifrado no servidor com `INTEGRATION_SECRET_KEY` e nunca volta para o browser; em branco mantém o atual. Incluir, modificar, ativar, desativar e excluir gravam registro no log do sistema, sem o segredo.
-- **Chamada ao ERP:** o material vai para `integrando` antes da chamada; outra chamada ao mesmo material é recusada até voltar. Na criação, o código sai do campo da resposta configurado na integração (padrão `productId`); sem código, conta como erro. Sucesso deixa `integrado_erp` com `id_erp`; erro deixa `erro_erp` com a mensagem do ERP, e o botão tenta de novo. Alteração usa a integração de alteração e mantém o `id_erp`. Eliminação exige `id_erp` e integração de eliminação ativa; com sucesso, o material fica **Obsoleto** e `integrado_erp` (sincronizado). **Sincronizar** na base roteia pelo status de negócio: Ativo → criar/alterar; Obsoleto com `id_erp` → eliminar; Bloqueado → não envia. Marcar Obsoleto em lote (com `id_erp`) deixa `pendente_erp` para a sincronização eliminar. Integrar/sincronizar/eliminar pedem `can_standardize`; o disparo da última etapa pede `can_approve`. OAuth2 pede o token na URL configurada e reaproveita até expirar.
+- **Chamada ao ERP:** o material vai para `integrando` antes da chamada; outra chamada ao mesmo material é recusada até voltar. Na criação, o código sai do campo da resposta configurado na integração (padrão `productId`); sem código, conta como erro. Sucesso deixa `integrado_erp` com `id_erp`; erro deixa `erro_erp` com a mensagem do ERP, e o botão tenta de novo. Alteração usa a integração de alteração e mantém o `id_erp`. Eliminação exige `id_erp` e integração de eliminação ativa; com sucesso, o material fica **Obsoleto** e `integrado_erp` (sincronizado). **Sincronizar** na base roteia pelo status de negócio: Ativo → criar/alterar; Obsoleto com `id_erp` → eliminar; Bloqueado → não envia. Marcar Obsoleto em lote (com `id_erp`) deixa `pendente_erp` para a sincronização eliminar. Integrar/sincronizar/eliminar pedem `can_sync_erp` (migration 044); o disparo da última etapa pede `can_approve`. OAuth2 pede o token na URL configurada e reaproveita até expirar.
 - **Documentação:** a tela `/admin/integration-docs` e o OpenAPI saem de `web/lib/integration-docs/catalog.ts`. Os exemplos de entrada passam pela validação das rotas e o JSON do ERP de exemplo é montado por `buildErpPayload`, ambos checados em teste. Mudou campo, rota ou erro: atualizar o catálogo no mesmo trabalho. O OpenAPI é gerado na tela, sem rota pública.
 - **JSON do ERP:** o PRO-MAT monta o formato do ERP a partir do material (`web/lib/erp/payload.ts`). `contentID` é o `id_sistema` e `productId` é o `id_erp`. Do material saem `type`, `unitMeasure`, `ncmCode`, `internalGroup` (grupo de mercadoria) e `descriptions`. `eans`, `dimensions`, `sales` e `characteristics` são listas porque o mesmo nome pode repetir. Campo do cabeçalho sem coluna própria fica em `additional_fields`. Campo do dicionário vai para o bloco de `erp_block` com o nome de `erp_field`; sem bloco, vai para `characteristics`.
 

@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       .select('id')
       .eq('tenant_id', client.tenantId)
       .eq('is_active', true)
+      .eq('request_type', 'cadastro')
       .order('id', { ascending: true })
       .limit(1)
       .maybeSingle()
