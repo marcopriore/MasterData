@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
-import { buildErpDeletePayload, buildErpPayload, type DictionaryField } from './payload'
+import { buildErpDeletePayload, buildErpPayload, type DictionaryField, type MaterialSite } from './payload'
 import { callErp } from './client'
 import { classifyErpSyncAction } from './sync-action'
 import { findDuplicateBlock } from './duplicate-guard'
@@ -28,10 +28,22 @@ export type SyncOutcome =
 
 const RETRYABLE = ['pendente_erp', 'erro_erp']
 
+async function materialSites(tenantId: number, materialId: number): Promise<MaterialSite[]> {
+  const { data } = await supabaseAdmin
+    .from('material_centers')
+    .select('is_origin, attributes, centers(code)')
+    .eq('tenant_id', tenantId)
+    .eq('material_id', materialId)
+  return (data ?? []).map((r) => {
+    const c = (Array.isArray(r.centers) ? r.centers[0] : r.centers) as { code?: string } | null
+    return { code: c?.code ?? '', is_origin: r.is_origin === true, attributes: (r.attributes ?? {}) as Record<string, unknown> }
+  }).filter((s) => s.code)
+}
+
 async function dictionaryFields(tenantId: number): Promise<DictionaryField[]> {
   const { data, error } = await supabaseAdmin
     .from('field_dictionary')
-    .select('field_name, erp_field, erp_block')
+    .select('field_name, erp_field, erp_block, per_center')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
     .not('erp_field', 'is', null)
@@ -111,9 +123,13 @@ export async function integrateMaterial(tenantId: number, materialId: number, us
     .maybeSingle()
   if (!claimed) return { result: 'skipped', reason: 'material já está em integração' }
 
-  const [erpFields, rules] = await Promise.all([dictionaryFields(tenantId), loadMaterialRuleContext(tenantId)])
+  const [erpFields, rules, sites] = await Promise.all([
+    dictionaryFields(tenantId),
+    loadMaterialRuleContext(tenantId),
+    materialSites(tenantId, materialId),
+  ])
   const hidden = hiddenMaterialFields(rules.fields, materialAttributes(claimed), rules.profiles)
-  const payload = buildErpPayload(claimed, erpFields, hidden)
+  const payload = buildErpPayload(claimed, erpFields, hidden, sites)
   const call = await callErp({
     tenantId,
     operation,
@@ -222,8 +238,8 @@ export async function syncMaterial(tenantId: number, materialId: number, userId:
 }
 
 /**
- * Disparo da última etapa: cadastro cria no ERP o material nascido da solicitação; alteração manda a
- * alteração do material de origem (migration 043). Só com integração ativa.
+ * Disparo da última etapa: cadastro cria no ERP o material nascido da solicitação; alteração e
+ * ampliação mandam a alteração do material de origem (migrations 043 e 045). Só com integração ativa.
  */
 export async function integrateRequestMaterial(tenantId: number, requestId: number, userId: string | null) {
   const { data: request } = await supabaseAdmin
@@ -232,7 +248,7 @@ export async function integrateRequestMaterial(tenantId: number, requestId: numb
     .eq('tenant_id', tenantId)
     .eq('id', requestId)
     .maybeSingle()
-  if (request?.request_type === 'alteracao' && request.target_material_id) {
+  if ((request?.request_type === 'alteracao' || request?.request_type === 'ampliacao') && request.target_material_id) {
     return integrateMaterial(tenantId, request.target_material_id as number, userId)
   }
   const { data: material } = await supabaseAdmin

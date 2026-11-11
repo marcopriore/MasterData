@@ -7,6 +7,14 @@ export type DictionaryField = {
   field_name: string
   erp_field: string | null
   erp_block?: string | null
+  per_center?: boolean | null
+}
+
+/** Centro do material (migration 045). O inicial usa os campos do material; os outros, os dele. */
+export type MaterialSite = {
+  code: string
+  is_origin: boolean
+  attributes?: Json | null
 }
 
 export type ErpPayload = Json
@@ -42,8 +50,15 @@ function compact(obj: Json): Json {
  * Ordem de precedência no cabeçalho: colunas do material, campos_adicionais, campos do dicionário.
  * productId e contentID são sempre do PRO-MAT.
  * hidden: campos que a regra por material esconde para este material (não vão para o ERP).
+ * centers: com centro, sai também "sites", um item por centro com siteCode e os campos por centro
+ * (formato a confirmar com o ERP real).
  */
-export function buildErpPayload(material: Json, fields: DictionaryField[] = [], hidden: ReadonlySet<string> = new Set()): ErpPayload {
+export function buildErpPayload(
+  material: Json,
+  fields: DictionaryField[] = [],
+  hidden: ReadonlySet<string> = new Set(),
+  centers: MaterialSite[] = []
+): ErpPayload {
   const attributes = map(material.technical_attributes)
   const header: Json = compact({
     type: material.material_type,
@@ -79,8 +94,24 @@ export function buildErpPayload(material: Json, fields: DictionaryField[] = [], 
     dimensions: list(material.dimensions).map((item) => ({ name: item.name, quantity: item.quantity, unit: item.unit })),
     characteristics,
     site: Object.keys(site).length ? site : undefined,
+    sites: centers.length ? buildSites(attributes, fields, hidden, centers) : undefined,
     sales: list(material.sales),
   }))
+}
+
+function buildSites(attributes: Json, fields: DictionaryField[], hidden: ReadonlySet<string>, centers: MaterialSite[]): Json[] {
+  const perCenter = fields.filter((f) => f.per_center && f.erp_field?.trim() && !hidden.has(f.field_name))
+  return [...centers]
+    .sort((a, b) => Number(b.is_origin) - Number(a.is_origin) || a.code.localeCompare(b.code))
+    .map((center) => {
+      const source = center.is_origin ? attributes : map(center.attributes)
+      const entry: Json = { siteCode: center.code }
+      for (const field of perCenter) {
+        const value = attributeText(source[field.field_name])
+        if (value) entry[field.erp_field!.trim()] = value
+      }
+      return entry
+    })
 }
 
 /** Corpo da eliminação: só os códigos. */

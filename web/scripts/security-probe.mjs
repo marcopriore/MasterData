@@ -100,7 +100,7 @@ async function makeFlow(tenantId) {
 
 async function cleanup() {
   for (const tenantId of created.tenants) {
-    for (const table of ['request_history', 'notifications', 'system_logs', 'material_history', 'material_requests', 'material_database', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_dictionary']) {
+    for (const table of ['request_history', 'notifications', 'system_logs', 'material_history', 'material_centers', 'material_requests', 'material_database', 'centers', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_dictionary']) {
       await admin.from(table).delete().eq('tenant_id', tenantId)
     }
   }
@@ -318,6 +318,84 @@ async function main() {
   await allowed('solicitante registra log em nome próprio', () => solic.from('system_logs').insert({ tenant_id: tA, user_id: requester.id, category: 'system', action: 'sonda', description: 'ok' }))
   await allowed('atendente assume a solicitação', () => atend.rpc('assign_request', { p_request_id: reqA.id }))
   await allowed('atendente aprova a solicitação', () => atend.rpc('advance_workflow', { p_request_id: reqA.id }))
+
+  // Depois do uso legítimo: com centro ativo, o cadastro passa a exigir centro.
+  console.log('\nCentros e Ampliação (migration 045)')
+  const centerAdmin = await makeUser(tA, 'CENT', { can_manage_fields: true, can_view_database: true })
+  const cent = await signIn(centerAdmin.email)
+  const centerCount = async (tenantId) => ((await admin.from('centers').select('id').eq('tenant_id', tenantId)).data ?? []).length
+  await denied('sem "Dicionário de Dados" não cadastra centro', () => solic.from('centers').insert({ tenant_id: tA, code: 'H1', name: 'HACK' }).select('id'), async () => (await centerCount(tA)) === 0)
+  const [c1, c2] = (await must(cent.from('centers').insert([{ tenant_id: tA, code: '1001', name: 'SONDA UM' }, { tenant_id: tA, code: '1002', name: 'SONDA DOIS' }]).select('id, code'), 'centros A'))
+    .sort((a, b) => a.code.localeCompare(b.code))
+  record(Boolean(c1 && c2), 'quem tem "Dicionário de Dados" cadastra centros')
+  const [cB] = await must(admin.from('centers').insert({ tenant_id: tB, code: '9001', name: 'SONDA B' }).select('id'), 'centro B')
+  await denied('não cadastra centro em outro tenant', () => cent.from('centers').insert({ tenant_id: tB, code: 'H2', name: 'HACK' }).select('id'), async () => (await centerCount(tB)) === 1)
+  await denied('outro tenant não lê os centros do A', () => relB.from('centers').select('id').eq('tenant_id', tA))
+  await denied('não altera centro de outro tenant', () => cent.from('centers').update({ name: 'HACK' }).eq('id', cB.id).select('id'),
+    async () => (await admin.from('centers').select('name').eq('id', cB.id).single()).data?.name === 'SONDA B')
+
+  await must(admin.from('field_dictionary').insert({ tenant_id: tA, field_name: 'sonda_centro', field_label: 'Campo por centro', erp_view: 'mrp', field_type: 'text', responsible_role: 'MRP', is_required: false, display_order: 3 }), 'campo por centro A')
+  const { data: perCenterField } = await admin.from('field_dictionary').select('per_center').eq('tenant_id', tA).eq('field_name', 'sonda_centro').single()
+  record(perCenterField?.per_center === true, 'campo de MRP criado sem dizer vem marcado "Por centro"')
+
+  const [matH] = await must(admin.from('material_database').insert({ tenant_id: tA, id_sistema: `SONDA-${tag}-H`, description: 'SONDA AMP', status: 'Ativo', erp_status: 'integrado_erp', id_erp: `ERPH-${tag}`, source: 'manual', pdm_code: pdmA.internal_code, technical_attributes: { sonda_centro: 'ORIGEM' } }).select('id'), 'material para ampliar')
+  const centersOf = async (materialId) => (await admin.from('material_centers').select('center_id, is_origin, attributes, request_id').eq('material_id', materialId)).data ?? []
+  await denied('ninguém grava centro do material direto pela API', () => padr.from('material_centers').insert({ tenant_id: tA, material_id: matH.id, center_id: c1.id, is_origin: true }).select('id'), async () => (await centersOf(matH.id)).length === 0)
+  await denied('centro inicial pede "Editar Materiais"', () => solic.rpc('set_material_origin_center', { p_material_id: matH.id, p_center_id: c1.id }), async () => (await centersOf(matH.id)).length === 0)
+  await denied('centro de outro tenant não vira centro do material', () => padr.rpc('set_material_origin_center', { p_material_id: matH.id, p_center_id: cB.id }), async () => (await centersOf(matH.id)).length === 0)
+  await denied('não informa centro em material de outro tenant', () => padr.rpc('set_material_origin_center', { p_material_id: matB.id, p_center_id: c1.id }), async () => (await centersOf(matB.id)).length === 0)
+  await allowed('quem edita materiais informa o centro inicial de material antigo', () => padr.rpc('set_material_origin_center', { p_material_id: matH.id, p_center_id: c1.id }))
+  const { data: matHAfter } = await admin.from('material_database').select('erp_status').eq('id', matH.id).single()
+  record(matHAfter?.erp_status === 'pendente_erp', 'com centro novo, o material volta para Pendente ERP')
+  await denied('material com centro não recebe outro centro inicial', () => padr.rpc('set_material_origin_center', { p_material_id: matH.id, p_center_id: c2.id }), async () => (await centersOf(matH.id)).length === 1)
+
+  const { data: wfAmp } = await admin.from('workflow_header').select('id').eq('tenant_id', tA).eq('request_type', 'ampliacao').eq('is_active', true).single()
+  record(Boolean(wfAmp), 'o tenant recebe o workflow de Ampliação')
+  const ampRow = (extra) => ({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: wfAmp?.id, status: 'cadastro', requester: 'AMP', urgency: 'low', user_id: requester.id, request_type: 'ampliacao', target_material_id: matH.id, center_id: c2.id, change_fields: ['forjado'], technical_attributes: { sonda_centro: 'NOVO' }, ...extra })
+  const ampCount = async () => ((await admin.from('material_requests').select('id').eq('target_material_id', matH.id).eq('request_type', 'ampliacao')).data ?? []).length
+  await denied('ampliação não pede centro que o material já tem', () => solic.from('material_requests').insert(ampRow({ center_id: c1.id })).select('id'), async () => (await ampCount()) === 0)
+  await denied('ampliação exige centro', () => solic.from('material_requests').insert(ampRow({ center_id: null })).select('id'), async () => (await ampCount()) === 0)
+  await denied('ampliação não usa centro de outro tenant', () => solic.from('material_requests').insert(ampRow({ center_id: cB.id })).select('id'), async () => (await ampCount()) === 0)
+  await denied('ampliação não aponta para material de outro tenant', () => solic.from('material_requests').insert(ampRow({ target_material_id: matB.id })).select('id'),
+    async () => ((await admin.from('material_requests').select('id').eq('target_material_id', matB.id)).data ?? []).length === 0)
+  const { data: ampCreated, error: ampErr } = await solic.from('material_requests').insert(ampRow({})).select('id').single()
+  record(!ampErr && Boolean(ampCreated), 'solicitante abre a ampliação para o centro novo', ampErr?.message ?? '')
+  const ampId = ampCreated?.id
+  const { data: ampSaved } = ampId ? await admin.from('material_requests').select('change_fields, change_previous').eq('id', ampId).single() : { data: null }
+  record(JSON.stringify(ampSaved?.change_fields) === JSON.stringify(['sonda_centro']) && ampSaved?.change_previous?.sonda_centro === 'ORIGEM',
+    'os campos da ampliação vêm do dicionário (por centro), não do navegador')
+  await denied('não abre duas ampliações do mesmo material para o mesmo centro', () => solic.from('material_requests').insert(ampRow({})).select('id'), async () => (await ampCount()) === 1)
+  if (ampId) {
+    await allowed('atendente assume a ampliação', () => atend.rpc('assign_request', { p_request_id: ampId }))
+    await denied('o centro da ampliação não muda depois de aberta', () => atend.from('material_requests').update({ center_id: c1.id }).eq('id', ampId).select('id'),
+      async () => (await admin.from('material_requests').select('center_id').eq('id', ampId).single()).data?.center_id === c2.id)
+    await allowed('atendente aprova a ampliação', () => atend.rpc('advance_workflow', { p_request_id: ampId }))
+    const rows = await centersOf(matH.id)
+    const added = rows.find((r) => r.center_id === c2.id)
+    record(Boolean(added) && !added.is_origin && added.attributes?.sonda_centro === 'NOVO' && added.request_id === ampId,
+      'a aprovação final acrescenta o centro ao material com os valores do centro')
+    const { data: matHFinal } = await admin.from('material_database').select('technical_attributes, erp_status').eq('id', matH.id).single()
+    record(matHFinal?.technical_attributes?.sonda_centro === 'ORIGEM' && matHFinal?.erp_status === 'pendente_erp', 'o material mantém os seus campos e fica Pendente ERP')
+    const { count: ampMaterials } = await admin.from('material_database').select('id', { count: 'exact', head: true }).eq('tenant_id', tA).eq('request_id', ampId)
+    record((ampMaterials ?? 0) === 0, 'a ampliação não cria material novo')
+    const { data: ampHist } = await admin.from('material_history').select('event_data').eq('material_id', matH.id).eq('event_type', 'center')
+    record((ampHist ?? []).some((h) => Number(h.event_data?.request_id) === ampId), 'o histórico do material registra o centro acrescentado')
+  }
+  await denied('outro tenant não lê os centros dos materiais do A', () => relB.from('material_centers').select('id').eq('material_id', matH.id))
+
+  const cadRow = (extra) => ({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: flowA.workflowId, status: 'cadastro', requester: `CENTRO-${tag}`, urgency: 'low', user_id: requester.id, ...extra })
+  const cadCount = async () => ((await admin.from('material_requests').select('id').eq('requester', `CENTRO-${tag}`)).data ?? []).length
+  await denied('com centro cadastrado, o cadastro exige o centro', () => solic.from('material_requests').insert(cadRow({})).select('id'), async () => (await cadCount()) === 0)
+  await denied('cadastro não usa centro de outro tenant', () => solic.from('material_requests').insert(cadRow({ center_id: cB.id })).select('id'), async () => (await cadCount()) === 0)
+  const { data: cadCreated, error: cadErr } = await solic.from('material_requests').insert(cadRow({ center_id: c1.id })).select('id').single()
+  record(!cadErr && Boolean(cadCreated), 'cadastro com o centro inicial é aberto', cadErr?.message ?? '')
+  if (cadCreated) {
+    await allowed('atendente assume o cadastro com centro', () => atend.rpc('assign_request', { p_request_id: cadCreated.id }))
+    await allowed('atendente aprova o cadastro com centro', () => atend.rpc('advance_workflow', { p_request_id: cadCreated.id }))
+    const { data: born } = await admin.from('material_database').select('id').eq('tenant_id', tA).eq('request_id', cadCreated.id).maybeSingle()
+    const bornCenters = born ? await centersOf(born.id) : []
+    record(bornCenters.length === 1 && bornCenters[0].center_id === c1.id && bornCenters[0].is_origin, 'o material novo nasce com o centro inicial')
+  }
 }
 
 try {

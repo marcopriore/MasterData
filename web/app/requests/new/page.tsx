@@ -13,6 +13,8 @@ import {
   getRequestById,
   getRequestHistory,
   resubmitRequest,
+  getCenters,
+  type Center,
 } from '@/lib/supabase-api'
 import { isRejectedStatus } from '@/lib/my-requests'
 import { toErpDeep, toErpText } from '@/lib/erp-text'
@@ -126,6 +128,8 @@ function NewMaterialRequestForm() {
   const [requesterName, setRequesterName] = useState(user?.name ? user.name.toUpperCase() : '')
   const [costCenter, setCostCenter] = useState('')
   const [urgency, setUrgency] = useState<'low' | 'medium' | 'high'>('low')
+  const [centers, setCenters] = useState<Center[]>([])
+  const [centerId, setCenterId] = useState<number | null>(null)
 
   // Phase 2 – Specs
   const [pdms, setPdms] = useState<PDMTemplate[]>([])
@@ -170,12 +174,17 @@ function NewMaterialRequestForm() {
       setFormData((req.technical_attributes ?? {}) as Record<string, string | { value: string; unit: string }>)
       if (req.urgency === 'low' || req.urgency === 'medium' || req.urgency === 'high') setUrgency(req.urgency)
       setJustificativa(req.justification ?? '')
+      setCenterId(req.center_id ?? null)
       if (req.requester) setRequesterName(req.requester)
       setCurrentStep(2)
       setResubmitReady(true)
     })()
     return () => { cancelled = true }
   }, [resubmitId, router])
+
+  useEffect(() => {
+    getCenters({ activeOnly: true }).then(setCenters).catch(() => setCenters([]))
+  }, [])
 
   // Fetch PDM templates on mount
   useEffect(() => {
@@ -254,6 +263,7 @@ function NewMaterialRequestForm() {
   const validateStep = (step: number): boolean => {
     if (step === 1) {
       if (!requesterName.trim()) { toast.error('Informe o nome do solicitante.'); return false }
+      if (resubmitId == null && centers.length > 0 && centerId == null) { toast.error('Escolha o centro do material.'); return false }
       return true
     }
     if (step === 2) {
@@ -315,6 +325,7 @@ function NewMaterialRequestForm() {
         generated_description: generatedDescription,
         values: formData,
         attachments: uploadedFiles.map((f) => f.file.name),
+        center_id: centerId,
       }
 
       const dupCheck = await checkDuplicateRequest({
@@ -467,6 +478,10 @@ function NewMaterialRequestForm() {
                 requesterEmail={user?.email ?? ''}
                 urgency={urgency}
                 onUrgencyChange={setUrgency}
+                centers={centers}
+                centerId={centerId}
+                onCenterChange={setCenterId}
+                centerLocked={resubmitId != null}
               />
             )}
 
@@ -507,6 +522,10 @@ function NewMaterialRequestForm() {
                 justificativa={justificativa}
                 files={uploadedFiles}
                 descriptionNote={descriptionNote}
+                centerLabel={(() => {
+                  const c = centers.find((x) => x.id === centerId)
+                  return c ? `${c.code} · ${c.name}` : ''
+                })()}
               />
             )}
 
@@ -619,6 +638,7 @@ type ReviewPhaseProps = {
   justificativa: string
   files: UploadedFile[]
   descriptionNote: string
+  centerLabel?: string
 }
 
 const urgencyLabel = { low: 'Baixa', medium: 'Média', high: 'Alta' }
@@ -655,7 +675,7 @@ function getAttrDisplayValue(val: unknown): string {
   return String(val).trim() || "—"
 }
 
-function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costCenter, urgency, justificativa, files, descriptionNote }: ReviewPhaseProps) {
+function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costCenter, urgency, justificativa, files, descriptionNote, centerLabel }: ReviewPhaseProps) {
   // Build description preview
   // Revisão final: mostra exatamente a descrição que será gravada (sem acento, sem atributo vazio)
   const preview = pdm
@@ -693,6 +713,7 @@ function ReviewPhase({ pdm, attributes, formData, quantity, requesterName, costC
         <ReviewSection title="Informações Administrativas" />
         <div className="rounded-xl border border-[#B4B9BE]/60 bg-white px-4">
           <ReviewRow label="Solicitante" value={requesterName} />
+          {centerLabel && <ReviewRow label="Centro" value={centerLabel} mono />}
           <div className="flex items-start justify-between gap-4 py-2">
             <span className="text-sm text-muted-foreground">Urgência</span>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${urgencyClass[urgency]}`}>

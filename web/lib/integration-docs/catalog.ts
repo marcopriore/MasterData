@@ -310,8 +310,13 @@ export function outboundOperations(): OutboundDoc[] {
       operation: 'alterar_material',
       title: ERP_OPERATION_LABEL.alterar_material,
       defaultMethod: DEFAULT_METHOD.alterar_material,
-      when: 'Material Ativo com id_erp em Pendente ERP ou Erro ERP: Sincronizar com ERP depois de padronização ou alteração por API. Material marcado como duplicado não é enviado.',
-      payload: buildErpPayload(integrated),
+      when: 'Material Ativo com id_erp em Pendente ERP ou Erro ERP: Sincronizar com ERP depois de padronização, alteração por API ou aprovação final de Alteração ou Ampliação. Material com centro leva "sites", um item por centro com siteCode e os campos marcados "Por centro" no dicionário (o centro inicial com os valores do material). Material marcado como duplicado não é enviado.',
+      payload: buildErpPayload(
+        { ...integrated, technical_attributes: { ...(integrated.technical_attributes as Record<string, unknown>), tipo_mrp: 'PD' } },
+        [{ field_name: 'tipo_mrp', erp_field: 'mrpType', erp_block: 'characteristics', per_center: true }],
+        new Set(),
+        [{ code: '1001', is_origin: true }, { code: '1002', is_origin: false, attributes: { tipo_mrp: 'VB' } }]
+      ),
       success: 'Resposta 2xx. O corpo da resposta é ignorado.',
       responseExample: { productId: '91' },
     },

@@ -33,6 +33,7 @@ export function canSeeAdminHref(href: string, access: NavAccess): boolean {
   if (href === '/admin/users') return access.permissions.can_manage_users
   if (href === '/admin/roles') return access.permissions.can_manage_roles
   if (href === '/admin/fields') return access.permissions.can_manage_fields
+  if (href === '/admin/centers') return access.permissions.can_manage_fields
   if (href === '/admin/value-dictionary') return access.permissions.can_manage_value_dictionary
   if (href === '/admin/logs') return access.permissions.can_view_logs
   if (href === '/admin/integrations') return access.permissions.can_view_logs
@@ -53,7 +54,7 @@ export function canOpenPath(pathname: string, access: NavAccess): boolean {
   if (access.isMaster) return true
   const perms = access.permissions
   if (p === '/' || under('/support') || under('/settings/profile') || under('/login') || under('/reset-password')) return true
-  if (under('/requests/new') || under('/requests/alteracao') || (under('/request') && !under('/requests'))) return perms.can_submit_request
+  if (under('/requests/new') || under('/requests/alteracao') || under('/requests/ampliacao') || (under('/request') && !under('/requests'))) return perms.can_submit_request
   if (under('/requests')) return perms.can_submit_request || perms.can_attend
   if (under('/governance')) return perms.can_approve || perms.can_reject || perms.can_attend
   if (under('/database')) return perms.can_view_database
@@ -62,7 +63,7 @@ export function canOpenPath(pathname: string, access: NavAccess): boolean {
   if (under('/reports')) return perms.can_view_reports
   if (under('/settings/workflow')) return perms.can_view_workflows || perms.can_edit_workflows
   if (under('/activity')) return perms.can_view_logs
-  if (under('/admin')) return canSeeAdminHref(['/admin/users', '/admin/roles', '/admin/fields', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/integration-docs'].find((h) => under(h)) ?? p, access)
+  if (under('/admin')) return canSeeAdminHref(['/admin/users', '/admin/roles', '/admin/fields', '/admin/centers', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/integration-docs'].find((h) => under(h)) ?? p, access)
   // Tela nova sem regra aqui fica fechada até alguém decidir quem abre.
   return false
 }

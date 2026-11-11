@@ -12,6 +12,7 @@ import {
   ArrowRight,
   ArrowUp,
   Asterisk,
+  Factory,
 } from "lucide-react"
 
 interface PhaseAdminProps {
@@ -19,6 +20,11 @@ interface PhaseAdminProps {
   requesterEmail: string | null
   urgency: "low" | "medium" | "high"
   onUrgencyChange: (v: "low" | "medium" | "high") => void
+  /** Centros ativos da empresa; sem nenhum, o cadastro não pede centro (migration 045). */
+  centers?: Array<{ id: number; code: string; name: string }>
+  centerId?: number | null
+  onCenterChange?: (id: number | null) => void
+  centerLocked?: boolean
 }
 
 const urgencyOptions = [
@@ -53,6 +59,10 @@ export function PhaseAdmin({
   requesterEmail,
   urgency,
   onUrgencyChange,
+  centers = [],
+  centerId = null,
+  onCenterChange,
+  centerLocked = false,
 }: PhaseAdminProps) {
   return (
     <div className="space-y-5">
@@ -94,6 +104,36 @@ export function PhaseAdmin({
           </div>
         </CardContent>
       </Card>
+
+      {centers.length > 0 && (
+        <Card className="border-border/60 shadow-sm">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <Factory className="size-4 text-primary" />
+              Centro
+              <Asterisk className="size-2.5 text-destructive" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            <select
+              id="request-center"
+              aria-label="Centro do material"
+              value={centerId ?? ""}
+              disabled={centerLocked}
+              onChange={(e) => onCenterChange?.(e.target.value ? Number(e.target.value) : null)}
+              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm disabled:opacity-70"
+            >
+              <option value="">Selecione o centro…</option>
+              {centers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name ? `${c.code} · ${c.name}` : c.code}</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Centro inicial do material. Os campos por centro (MRP, Compras, Contabilidade) valem para ele; outro centro entra depois por Ampliação.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-border/60 shadow-sm">
         <CardHeader className="pb-4">

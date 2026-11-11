@@ -20,6 +20,7 @@ import {
 import { resolveField, type FieldRuleProfile } from '@/lib/field-rules'
 import { hiddenMaterialFields, materialAttributes, missingMaterialFields, missingMessage, type RuleField } from '@/lib/material-rules'
 import { MaterialHistory } from '@/components/database/material-history'
+import { MaterialCenters } from '@/components/database/material-centers'
 import { pdmShortDescription } from '@/lib/pdm-description'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
@@ -1222,6 +1223,18 @@ export default function DatabaseDetailPage() {
             </SectionCard>
           ))
         })()}
+
+        <MaterialCenters
+          materialId={material.id}
+          canEdit={canEditMaterial}
+          obsolete={material.status === 'Obsoleto'}
+          labelOf={labelOfField}
+          onChanged={() => {
+            getMaterialById(material.id)
+              .then((m) => setMaterial((prev) => (prev ? { ...prev, erp_status: (m as MaterialDetail).erp_status } : prev)))
+              .catch(() => {})
+          }}
+        />
 
         <MaterialHistory
           materialId={material.id}

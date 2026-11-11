@@ -23,6 +23,7 @@ import { PageLoading } from "@/components/ui/page-loading"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
 import type { RequestErpState } from "@/lib/request-erp-state"
 import { kanbanMoveBlock } from "@/lib/kanban-move"
+import { seesAllStages, stageScope } from "@/lib/stage-scope"
 import { CANCELLED_STATUSES, DONE_STATUSES, REJECTED_STATUSES, statusGroup } from "@/lib/request-status"
 import { getWorkflowConfig, assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
 import { cn } from "@/lib/utils"
@@ -139,14 +140,6 @@ interface KanbanBoardProps {
   canManageAllStages?: boolean
   /** Situação no ERP por id da solicitação (só finalizadas) */
   erpStates?: Record<string, RequestErpState>
-}
-
-const ROLE_TO_STATUS: Record<string, string> = {
-  CADASTRO: "cadastro",
-  COMPRAS: "compras",
-  MRP: "mrp",
-  FISCAL: "fiscal",
-  CONTABILIDADE: "contabilidade",
 }
 
 export function KanbanBoard({
@@ -319,19 +312,9 @@ export function KanbanBoard({
   }
 
   // ADMIN e MASTER veem todas as colunas. Roles operacionais/etapa veem apenas a coluna correspondente.
-  const showAllColumns =
-    canManageAllStages ||
-    currentUserRoleName === "ADMIN" ||
-    currentUserRoleName === "MASTER" ||
-    currentUserRoleType === "sistema"
-
-  let baseColumns = columns
-  if (!showAllColumns && currentUserRoleName) {
-    const myStatusKey = ROLE_TO_STATUS[currentUserRoleName.toUpperCase()]
-    if (myStatusKey) {
-      baseColumns = columns.filter((c) => c.id.toLowerCase() === myStatusKey)
-    }
-  }
+  const showAllColumns = seesAllStages({ canManageAllStages, roleName: currentUserRoleName, roleType: currentUserRoleType })
+  const myStatusKey = stageScope(currentUserRoleName, showAllColumns)
+  const baseColumns = myStatusKey ? columns.filter((c) => c.id.toLowerCase() === myStatusKey) : columns
 
   const hasRejeitadas = localRequests.some((r) => columnKeyOf(r.status) === "rejeitado")
   const rejeitadasColumn: KanbanColumn | null =

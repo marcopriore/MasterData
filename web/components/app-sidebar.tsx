@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
   Home, FileText, ShieldCheck, Database, LayoutGrid, Headphones, BarChart3,
   Settings, GitBranch, Sun, Moon,
-  UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2, Plug, FileCode2,
+  UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2, Plug, FileCode2, Factory,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -45,6 +45,7 @@ const CONFIG_ADMIN: NavItem[] = [
   { href: '/admin/users', label: 'Gestão de Usuários', icon: Users },
   { href: '/admin/roles', label: 'Grupos de perfil', icon: ShieldHalf },
   { href: '/admin/fields', label: 'Dicionário de Campos', icon: BookOpen },
+  { href: '/admin/centers', label: 'Centros', icon: Factory },
   { href: '/admin/value-dictionary', label: 'Dicionário de Valores', icon: BookMarked },
   { href: '/admin/logs', label: 'Log do Sistema', icon: ScrollText },
   { href: '/admin/integrations', label: 'Monitor de integrações', icon: Plug },

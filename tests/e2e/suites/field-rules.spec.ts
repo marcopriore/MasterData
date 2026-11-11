@@ -42,7 +42,7 @@ test.describe.serial('10 - Regras de campos por material', () => {
     }).select('id'), 'regra') as { id: number }[]
     profileId = profile.id
 
-    const { data: wf } = await admin.from('workflow_header').select('id').eq('tenant_id', state.tenantId).eq('is_active', true).single()
+    const { data: wf } = await admin.from('workflow_header').select('id').eq('tenant_id', state.tenantId).eq('is_active', true).eq('request_type', 'cadastro').single()
     const [req] = await must(admin.from('material_requests').insert({
       tenant_id: state.tenantId,
       pdm_id: state.pdm.id,

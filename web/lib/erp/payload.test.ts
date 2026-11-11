@@ -76,6 +76,24 @@ describe('JSON do ERP', () => {
     expect(accented.formatTaxICMS).toBe('ISENCAO')
   })
 
+  it('com centros, manda um site por centro com os campos por centro de cada um', () => {
+    const perCenter = [
+      ...fields,
+      { field_name: 'tipo_mrp', erp_field: 'mrpType', erp_block: null, per_center: true },
+      { field_name: 'centro_lucro', erp_field: 'profitCenter', erp_block: 'site', per_center: true },
+    ]
+    const withMrp = { ...material, technical_attributes: { ...material.technical_attributes, tipo_mrp: 'PD' } }
+    const out = buildErpPayload(withMrp, perCenter, new Set(), [
+      { code: '1002', is_origin: false, attributes: { tipo_mrp: 'VB', centro_lucro: '' } },
+      { code: '1001', is_origin: true },
+    ])
+    expect(out.sites).toEqual([
+      { siteCode: '1001', mrpType: 'PD', profitCenter: '41113' },
+      { siteCode: '1002', mrpType: 'VB' },
+    ])
+    expect(buildErpPayload(material, fields)).not.toHaveProperty('sites')
+  })
+
   it('alteração e eliminação levam o código do ERP', () => {
     expect(buildErpPayload({ ...material, id_erp: '91' }).productId).toBe('91')
     expect(buildErpDeletePayload({ ...material, id_erp: '91' })).toEqual({ productId: '91', contentID: 'MDM-000123' })

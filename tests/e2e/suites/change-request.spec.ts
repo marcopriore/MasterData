@@ -30,7 +30,7 @@ test.describe.serial('11 - Alteração de material', () => {
     try {
       await page.goto('/requests/new')
       await page.getByPlaceholder('Digite a descrição ou código do material...').fill(state.materialCode!)
-      await page.getByRole('button', { name: 'Pesquisar' }).click()
+      await page.getByRole('button', { name: 'Pesquisar', exact: true }).click()
       await page.getByRole('button', { name: new RegExp(state.materialCode!) }).click()
       await page.getByRole('link', { name: 'Alteração' }).click()
       await expect(page).toHaveURL(new RegExp(`/requests/alteracao/${state.materialId}`))

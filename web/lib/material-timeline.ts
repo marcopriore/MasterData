@@ -96,9 +96,20 @@ export function buildTimeline(
       const labels = [...new Set(fields.map((f) => opts.labelOf(f) ?? COLUMN_LABEL[f] ?? f))]
       items.push({
         ...base,
-        title: 'Cadastro alterado',
+        title: data.request_id ? `Cadastro alterado pela solicitação ${requestCode(data.request_id as number)}` : 'Cadastro alterado',
         detail: labels.length > 6 ? `${labels.slice(0, 6).join(', ')} e mais ${labels.length - 6}` : labels.join(', '),
         tone: 'muted',
+      })
+    } else if (row.event_type === 'center') {
+      const center = [text(data.code), text(data.name)].filter(Boolean).join(' · ')
+      items.push({
+        ...base,
+        title: data.origin
+          ? `Centro inicial: ${center}`
+          : data.request_id
+            ? `Ampliado para o centro ${center} pela solicitação ${requestCode(data.request_id as number)}`
+            : `Ampliado para o centro ${center}`,
+        tone: 'info',
       })
     }
   }

@@ -45,6 +45,8 @@ export default defineConfig({
     { name: 'access', testMatch: 'access.spec.ts', dependencies: ['setup'] },
     // Por último: a regra criada nela mudaria os campos das outras suítes no mesmo tenant.
     { name: 'field-rules', testMatch: 'field-rules.spec.ts', dependencies: ['database', 'users', 'fields', 'pdm', 'roles', 'value-dictionary', 'change-request'] },
+    // Depois de todas: com centro cadastrado, o cadastro de material passa a exigir centro.
+    { name: 'expansion', testMatch: 'expansion.spec.ts', dependencies: ['field-rules', 'access'] },
   ],
   reporter: [['list'], ['html', { outputFolder: 'report', open: 'never' }]],
 })

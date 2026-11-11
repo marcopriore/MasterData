@@ -525,6 +525,8 @@ export type ApiRequest = {
   target_material_id?: number | null
   change_fields?: string[]
   change_previous?: Record<string, unknown>
+  /** Centro escolhido: inicial no cadastro, novo na Ampliação (migration 045). */
+  center_id?: number | null
 }
 
 export async function getRequests(params?: {
@@ -622,6 +624,7 @@ export async function getRequests(params?: {
       target_material_id: r.target_material_id ?? null,
       change_fields: (r.change_fields ?? []) as string[],
       change_previous: (r.change_previous ?? {}) as Record<string, unknown>,
+      center_id: (r.center_id as number | null) ?? null,
     })
   }
   return result
@@ -853,6 +856,8 @@ export async function createRequest(body: {
   values?: Record<string, string | { value: string; unit?: string }>
   attachments?: string[]
   workflow_id?: number
+  /** Centro inicial do material (migration 045). */
+  center_id?: number | null
 }): Promise<{ id: number }> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -876,6 +881,7 @@ export async function createRequest(body: {
     generated_description: body.generated_description != null ? toErpText(body.generated_description) : null,
     technical_attributes: body.values ? toErpDeep(body.values) : null,
     user_id: user?.id ?? null,
+    center_id: body.center_id ?? null,
   }
 
   const { data, error } = await supabase.from('material_requests').insert(row).select('id').single()
@@ -959,6 +965,160 @@ export async function createChangeRequest(body: {
   return { id: data.id }
 }
 
+/**
+ * Ampliação de material para outro centro (migration 045). Os campos da solicitação são os campos por
+ * centro do dicionário (o banco define); o valor proposto parte do material.
+ */
+export async function createExpansionRequest(body: {
+  material_id: number
+  pdm_id: number
+  center_id: number
+  requester: string
+  technical_attributes: Record<string, unknown>
+  urgency?: string
+  justificativa?: string
+}): Promise<{ id: number }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const tenantId = await getCurrentUserTenantId()
+  const wfId = await getActiveWorkflowId('ampliacao')
+  if (!wfId) handleError(new Error('Nenhum workflow de Ampliação ativo. Configure em Configurações → Workflows.'))
+  const { data: firstStep } = await supabase.from('workflow_config').select('status_key').eq('workflow_id', wfId).eq('is_active', true).order('order').limit(1).single()
+  const initialStatus = firstStep?.status_key ?? 'cadastro'
+
+  const { data, error } = await supabase.from('material_requests').insert({
+    tenant_id: tenantId,
+    pdm_id: body.pdm_id,
+    workflow_id: wfId,
+    status: initialStatus,
+    request_type: 'ampliacao',
+    target_material_id: body.material_id,
+    center_id: body.center_id,
+    requester: body.requester,
+    urgency: body.urgency ?? 'low',
+    justification: body.justificativa ?? null,
+    technical_attributes: toErpDeep(body.technical_attributes),
+    user_id: user?.id ?? null,
+  }).select('id').single()
+  if (error) handleError(error)
+
+  await supabase.from('request_history').insert({
+    tenant_id: tenantId,
+    request_id: data.id,
+    user_id: user?.id ?? null,
+    event_type: 'created',
+    message: 'Solicitação de ampliação criada',
+    stage: initialStatus,
+    event_data: { request_type: 'ampliacao', material_id: body.material_id, center_id: body.center_id },
+  })
+  void logAction({
+    category: 'requests',
+    action: 'request_created',
+    description: 'Solicitação de ampliação criada',
+    event_data: { request_id: data.id, material_id: body.material_id, center_id: body.center_id, request_type: 'ampliacao' },
+  })
+  queueRequestNotice(data.id)
+  return { id: data.id }
+}
+
+// ─── Centros (migration 045) ─────────────────────────────────────────────────
+
+export type Center = { id: number; code: string; name: string; is_active: boolean }
+
+export async function getCenters(opts?: { activeOnly?: boolean }): Promise<Center[]> {
+  const supabase = createClient()
+  let q = supabase.from('centers').select('id, code, name, is_active').order('code')
+  if (opts?.activeOnly) q = q.eq('is_active', true)
+  const { data, error } = await q
+  if (error) handleError(error)
+  return (data ?? []) as Center[]
+}
+
+export async function createCenter(body: { code: string; name: string }): Promise<Center> {
+  const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
+  const { data, error } = await supabase
+    .from('centers')
+    .insert({ tenant_id: tenantId, code: toErpText(body.code.trim().toUpperCase()), name: toErpText(body.name.trim().toUpperCase()) })
+    .select('id, code, name, is_active')
+    .single()
+  if (error) {
+    if (error.code === '23505') throw new Error('Já existe um centro com esse código.')
+    handleError(error)
+  }
+  void logAction({ category: 'fields', action: 'center_created', description: 'Centro cadastrado', event_data: { center_id: data.id, code: data.code } })
+  return data as Center
+}
+
+export async function updateCenter(id: number, body: Partial<{ code: string; name: string; is_active: boolean }>): Promise<Center> {
+  const supabase = createClient()
+  const row: Record<string, unknown> = {}
+  if (body.code !== undefined) row.code = toErpText(body.code.trim().toUpperCase())
+  if (body.name !== undefined) row.name = toErpText(body.name.trim().toUpperCase())
+  if (body.is_active !== undefined) row.is_active = body.is_active
+  const { data, error } = await supabase.from('centers').update(row).eq('id', id).select('id, code, name, is_active').single()
+  if (error) {
+    if (error.code === '23505') throw new Error('Já existe um centro com esse código.')
+    handleError(error)
+  }
+  void logAction({ category: 'fields', action: 'center_updated', description: 'Centro alterado', event_data: { center_id: id, ...row } })
+  return data as Center
+}
+
+/** Centro em uso (material ou solicitação) não sai: desative. */
+export async function deleteCenter(id: number): Promise<void> {
+  const supabase = createClient()
+  const { error } = await supabase.from('centers').delete().eq('id', id)
+  if (error) {
+    if (error.code === '23503') throw new Error('Centro em uso por material ou solicitação; desative em vez de excluir.')
+    handleError(error)
+  }
+  void logAction({ category: 'fields', action: 'center_deleted', description: 'Centro excluído', event_data: { center_id: id } })
+}
+
+export type MaterialCenter = {
+  id: number
+  center_id: number
+  code: string
+  name: string
+  is_origin: boolean
+  attributes: Record<string, unknown>
+  request_id: number | null
+  created_at: string
+}
+
+export async function getMaterialCenters(materialId: number): Promise<MaterialCenter[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('material_centers')
+    .select('id, center_id, is_origin, attributes, request_id, created_at, centers(code, name)')
+    .eq('material_id', materialId)
+    .order('is_origin', { ascending: false })
+    .order('created_at')
+  if (error) handleError(error)
+  return (data ?? []).map((r) => {
+    const c = (Array.isArray(r.centers) ? r.centers[0] : r.centers) as { code?: string; name?: string } | null
+    return {
+      id: r.id as number,
+      center_id: r.center_id as number,
+      code: c?.code ?? '',
+      name: c?.name ?? '',
+      is_origin: r.is_origin === true,
+      attributes: (r.attributes ?? {}) as Record<string, unknown>,
+      request_id: (r.request_id as number | null) ?? null,
+      created_at: r.created_at as string,
+    }
+  })
+}
+
+/** Material antigo sem centro recebe o centro inicial (Editar Materiais). */
+export async function setMaterialOriginCenter(materialId: number, centerId: number): Promise<void> {
+  const supabase = createClient()
+  const { error } = await supabase.rpc('set_material_origin_center', { p_material_id: materialId, p_center_id: centerId })
+  if (error) throw new Error(error.message)
+  void logAction({ category: 'database', action: 'material_origin_center', description: 'Centro inicial informado', event_data: { material_id: materialId, center_id: centerId } })
+}
+
 function queueRequestNotice(requestId: number) {
   if (typeof window === 'undefined') return
   void fetch('/api/notifications/request', {
@@ -1037,13 +1197,14 @@ export async function checkDuplicateRequest(params: {
 
     const { data: openRequests, error: reqErr } = await supabase
       .from('material_requests')
-      .select('id, status, technical_attributes, generated_description')
+      .select('id, status, technical_attributes, generated_description, request_type')
       .eq('pdm_id', params.pdm_id)
 
     if (reqErr) throw reqErr
 
     // Fechada (finalizada, rejeitada — gravada "Rejected" — ou cancelada) não conta como duplicada.
-    for (const row of (openRequests ?? []).filter((r) => !isClosedStatus(r.status) && r.id !== params.excludeRequestId)) {
+    // Ampliação repete os atributos do material, que já entrou na conta acima.
+    for (const row of (openRequests ?? []).filter((r) => !isClosedStatus(r.status) && r.id !== params.excludeRequestId && r.request_type !== 'ampliacao')) {
       if (attrsMatch(target, pickDescriptionAttrs(row.technical_attributes, descriptionKeys))) {
         return {
           isDuplicate: true,
@@ -1336,6 +1497,7 @@ export async function getRequestById(id: number): Promise<ApiRequest | null> {
     target_material_id: data.target_material_id ?? null,
     change_fields: (data.change_fields ?? []) as string[],
     change_previous: (data.change_previous ?? {}) as Record<string, unknown>,
+    center_id: (data.center_id as number | null) ?? null,
   }
 }
 

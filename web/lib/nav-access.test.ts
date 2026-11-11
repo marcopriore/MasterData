@@ -13,6 +13,8 @@ describe('acesso pelo endereço da tela', () => {
     expect(canOpenPath('/reports', user)).toBe(false)
     expect(canOpenPath('/requests/new', user)).toBe(false)
     expect(canOpenPath('/requests/alteracao/10', user)).toBe(false)
+    expect(canOpenPath('/requests/ampliacao/10', user)).toBe(false)
+    expect(canOpenPath('/admin/centers', user)).toBe(false)
     expect(canOpenPath('/admin/tenants', user)).toBe(false)
     expect(canOpenPath('/teste', user)).toBe(false)
     expect(canOpenPath('/admin-pdm/novo', user)).toBe(false)
@@ -28,6 +30,8 @@ describe('acesso pelo endereço da tela', () => {
     expect(canOpenPath('/support/abc', user)).toBe(true)
     expect(canOpenPath('/settings/profile', user)).toBe(true)
     expect(canOpenPath('/settings/workflow', access({ can_view_workflows: true }))).toBe(true)
+    expect(canOpenPath('/requests/ampliacao/10', access({ can_submit_request: true }))).toBe(true)
+    expect(canOpenPath('/admin/centers', access({ can_manage_fields: true }))).toBe(true)
   })
 
   it('tela sem regra fica fechada; master abre tudo', () => {
@@ -51,7 +55,7 @@ function access(partial: Partial<RolePermissions>, isMaster = false): NavAccess 
 }
 
 const MAIN = ['/', '/requests', '/governance', '/database', '/admin-pdm', '/reports']
-const ADMIN = ['/admin/users', '/admin/roles', '/admin/fields', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/integration-docs', '/admin/tenants']
+const ADMIN = ['/admin/users', '/admin/roles', '/admin/fields', '/admin/centers', '/admin/value-dictionary', '/admin/logs', '/admin/integrations', '/admin/integration-docs', '/admin/tenants']
 
 describe('simulador de menu', () => {
   it('master vê menu, administração e atalhos', () => {
@@ -95,6 +99,7 @@ describe('simulador de menu', () => {
       [{ can_manage_users: true }, '/admin/users', 'admin'],
       [{ can_manage_roles: true }, '/admin/roles', 'admin'],
       [{ can_manage_fields: true }, '/admin/fields', 'admin'],
+      [{ can_manage_fields: true }, '/admin/centers', 'admin'],
       [{ can_manage_value_dictionary: true }, '/admin/value-dictionary', 'admin'],
       [{ can_view_logs: true }, '/admin/logs', 'admin'],
       [{ can_view_logs: true }, '/admin/integrations', 'admin'],

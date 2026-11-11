@@ -76,7 +76,7 @@ test.describe.serial('04 - Governança: fluxo completo até o material', () => {
 test.describe('04 - Governança: rejeição', () => {
   test('cadastro rejeita com justificativa e a solicitação sai do fluxo', async ({ browser }) => {
     const state = getState()
-    const { data: wf } = await admin.from('workflow_header').select('id').eq('tenant_id', state.tenantId).eq('is_active', true).single()
+    const { data: wf } = await admin.from('workflow_header').select('id').eq('tenant_id', state.tenantId).eq('is_active', true).eq('request_type', 'cadastro').single()
     const [req] = await must(admin.from('material_requests').insert({
       tenant_id: state.tenantId,
       pdm_id: state.pdm.id,

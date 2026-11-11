@@ -141,6 +141,10 @@ async function checkSupabase(env) {
     ['material_history', 'event_type', '042'],
     ['material_requests', 'target_material_id', '043'],
     ['workflow_header', 'request_type', '043'],
+    ['centers', 'code', '045'],
+    ['material_centers', 'center_id', '045'],
+    ['material_requests', 'center_id', '045'],
+    ['field_dictionary', 'per_center', '045'],
   ]
   for (const [table, column, migration] of tables) {
     const { error } = await admin.from(table).select(column).limit(1)

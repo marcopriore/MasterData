@@ -40,6 +40,23 @@ describe('histórico do material', () => {
     expect(items[1].title).toBe('Material criado pela API de integração')
   })
 
+  it('centro inicial, ampliação e alteração por solicitação', () => {
+    const items = buildTimeline(
+      [
+        { id: 1, event_type: 'center', event_data: { code: '1001', name: 'SAO PAULO', origin: true }, user_name: 'Ana', created_at: '2026-10-01T10:00:00Z' },
+        { id: 2, event_type: 'center', event_data: { code: '1002', name: 'MANAUS', request_id: 41 }, user_name: 'Bia', created_at: '2026-10-02T10:00:00Z' },
+        { id: 3, event_type: 'edited', event_data: { fields: ['tipo_mrp'], request_id: 42 }, user_name: 'Bia', created_at: '2026-10-03T10:00:00Z' },
+      ],
+      [],
+      { labelOf }
+    )
+    expect(items.map((i) => i.title)).toEqual([
+      'Cadastro alterado pela solicitação REQ-0042',
+      'Ampliado para o centro 1002 · MANAUS pela solicitação REQ-0041',
+      'Centro inicial: 1001 · SAO PAULO',
+    ])
+  })
+
   it('atendentes: o último atendimento de cada etapa, na ordem', () => {
     expect(originAttendants([
       { id: 1, event_type: 'assigned', stage: 'cadastro', user_name: 'Ana', created_at: '2026-10-01T10:00:00Z', message: '' },

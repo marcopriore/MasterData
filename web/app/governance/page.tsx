@@ -23,6 +23,8 @@ import {
   erpSyncMaterial,
   requestStatusLabel,
   REQUEST_TYPE_LABEL,
+  getCenters,
+  type Center,
   type MyField,
   type FieldLabelItem,
   type RequestType,
@@ -50,6 +52,7 @@ import { AlertTriangle, ChevronLeft, Check, X, Save, Loader2, RefreshCw, Externa
 import { isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-status'
 import { fieldsForStage, type FieldRuleProfile } from '@/lib/field-rules'
 import { stageProgress, type WorkflowStepLite } from '@/lib/stage-progress'
+import { requestsInStageScope, seesAllStages, stageScope } from '@/lib/stage-scope'
 import { REJECTION_REASONS, type RejectionReason } from '@/lib/rejection-reasons'
 import { toErpText } from '@/lib/erp-text'
 import { Input } from '@/components/ui/input'
@@ -120,6 +123,7 @@ type ApiRequest = {
   target_material_id?: number | null
   change_fields?: string[]
   change_previous?: Record<string, unknown>
+  center_id?: number | null
 }
 
 function mapToMaterialRequest(r: ApiRequest, steps: WorkflowStepLite[]): MaterialRequest {
@@ -253,6 +257,8 @@ export default function GovernancePage() {
   const [historyEvents, setHistoryEvents] = useState<HistoryEvent[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyFetched, setHistoryFetched] = useState(false)
+  const [centers, setCenters] = useState<Center[]>([])
+  useEffect(() => { getCenters().then(setCenters).catch(() => setCenters([])) }, [])
   /** Aba por tipo de solicitação (migration 043): cada tipo tem o seu workflow ativo. */
   const [requestType, setRequestType] = useState<RequestType>('cadastro')
   const requestTypeRef = useRef<RequestType>('cadastro')
@@ -419,9 +425,23 @@ export default function GovernancePage() {
     router.replace('/governance', { scroll: false })
   }
 
+  /** Usuário de etapa vê só a coluna dele: kanban, lista, contador e indicadores com a mesma regra. */
+  const myStageScope = stageScope(
+    user?.role_name,
+    seesAllStages({ canManageAllStages: !!user?.is_master || isAdmin, roleName: user?.role_name, roleType: user?.role_type })
+  )
+  const scopedRequests = useMemo(
+    () => requestsInStageScope(
+      materialRequests,
+      workflowSteps.filter((s) => s.is_active).sort((a, b) => a.order - b.order).map((s) => s.status_key),
+      myStageScope
+    ),
+    [materialRequests, workflowSteps, myStageScope]
+  )
+
   const filteredRequests = useMemo(
-    () => filterRequests(materialRequests, search, category, dateRange, stageFilter),
-    [materialRequests, search, category, dateRange, stageFilter]
+    () => filterRequests(scopedRequests, search, category, dateRange, stageFilter),
+    [scopedRequests, search, category, dateRange, stageFilter]
   )
 
   /** Indicadores das solicitações que a tela mostra: workflow escolhido e filtros aplicados. */
@@ -524,7 +544,10 @@ export default function GovernancePage() {
   const isCadastroPhase = (selectedRequest?.status ?? '').toLowerCase() === 'cadastro'
   /** Alteração: os atributos do PDM vêm propostos pelo solicitante; a área revisa e aprova ou rejeita. */
   const isChangeRequest = selectedRequest?.request_type === 'alteracao'
-  const canEditTechnicalAttributes = isAssignedToMe && isCadastroPhase && !isChangeRequest
+  /** Ampliação (migration 045): só os campos por centro do centro novo; o PDM não muda. */
+  const isExpansionRequest = selectedRequest?.request_type === 'ampliacao'
+  const canEditTechnicalAttributes = isAssignedToMe && isCadastroPhase && !isChangeRequest && !isExpansionRequest
+  const selectedCenter = selectedRequest?.center_id ? centers.find((c) => c.id === selectedRequest.center_id) ?? null : null
 
   const isSelectedFinal = isClosedStatus(selectedRequest?.status)
 
@@ -630,8 +653,8 @@ export default function GovernancePage() {
   /** Campos desta etapa para o material (regra por material); muda na hora quando o tipo muda. */
   const stageFields = useMemo(() => {
     const all = fieldsForStage(myFields, attributeValues, fieldRules, stageRole)
-    // Alteração: a etapa revisa só os campos escolhidos que são dela.
-    return selectedRequest?.request_type === 'alteracao'
+    // Alteração e Ampliação: a etapa revisa só os campos da solicitação que são dela.
+    return selectedRequest?.request_type === 'alteracao' || selectedRequest?.request_type === 'ampliacao'
       ? all.filter((f) => (selectedRequest.change_fields ?? []).includes(f.field_name))
       : all
   }, [myFields, attributeValues, fieldRules, stageRole, selectedRequest])
@@ -784,12 +807,15 @@ export default function GovernancePage() {
       })
       const freshRequest = await getRequestById(selectedRequest.id)
       // Na Alteração, o próprio material e a própria solicitação não contam como duplicado.
-      const dupCheck = await checkDuplicateRequest({
-        pdm_id: selectedRequest.pdm_id,
-        formData: (freshRequest?.technical_attributes ?? {}) as Record<string, unknown>,
-        excludeMaterialId: selectedRequest.target_material_id ?? null,
-        excludeRequestId: selectedRequest.id,
-      })
+      // A Ampliação não muda a descrição: não há o que comparar.
+      const dupCheck = selectedRequest.request_type === 'ampliacao'
+        ? { isDuplicate: false, existingCode: null, existingId: null, source: null }
+        : await checkDuplicateRequest({
+            pdm_id: selectedRequest.pdm_id,
+            formData: (freshRequest?.technical_attributes ?? {}) as Record<string, unknown>,
+            excludeMaterialId: selectedRequest.target_material_id ?? null,
+            excludeRequestId: selectedRequest.id,
+          })
       if (dupCheck.isDuplicate && !(dupCheck.source === 'request' && dupCheck.existingId === selectedRequest.id)) {
         setDupInfo({ existingCode: dupCheck.existingCode, source: dupCheck.source })
         setDupModalOpen(true)
@@ -915,7 +941,7 @@ export default function GovernancePage() {
             </div>
             <div className="p-4 md:p-6">
             <div className="mb-4 inline-flex rounded-xl border p-1" role="tablist" aria-label="Tipo de solicitação" style={{ borderColor: 'var(--kanban-col-border)', backgroundColor: 'var(--filter-input-bg)' }}>
-              {(['cadastro', 'alteracao'] as RequestType[]).map((type) => (
+              {(['cadastro', 'alteracao', 'ampliacao'] as RequestType[]).map((type) => (
                 <button
                   key={type}
                   type="button"
@@ -1059,7 +1085,37 @@ export default function GovernancePage() {
                 </div>
               )}
 
-              {isRejectedStatus(selectedRequest.status) && !isChangeRequest && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
+              {isExpansionRequest && (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3 dark:border-indigo-900/60 dark:bg-indigo-950/20">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
+                    Ampliação solicitada{selectedRequest.target_material_id ? ` · material #${selectedRequest.target_material_id}` : ''}
+                  </p>
+                  <p className="text-sm">
+                    <span className="font-medium">Centro novo:</span>{' '}
+                    <span className="font-mono font-semibold">{selectedCenter ? `${selectedCenter.code} · ${selectedCenter.name}` : `#${selectedRequest.center_id ?? '—'}`}</span>
+                  </p>
+                  {(selectedRequest.change_fields ?? []).length > 0 && (
+                    <ul className="mt-2 space-y-1.5 text-sm">
+                      {(selectedRequest.change_fields ?? []).map((key) => {
+                        const label = fieldLabels.find((f) => f.field_name === key)?.field_label ?? key
+                        const before = selectedRequest.change_previous?.[key]
+                        const after = selectedRequest.technical_attributes?.[key]
+                        return (
+                          <li key={key} className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="font-medium">{label}:</span>
+                            <span className="text-muted-foreground">no material {before != null && before !== '' ? formatAttrValue(before) : '—'}</span>
+                            <span aria-hidden="true">→</span>
+                            <span className="font-semibold text-indigo-800 dark:text-indigo-300">no centro novo {after != null && after !== '' ? formatAttrValue(after) : '—'}</span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                  {selectedRequest.justification && <p className="mt-2 text-xs text-muted-foreground">Motivo: {selectedRequest.justification}</p>}
+                </div>
+              )}
+
+              {isRejectedStatus(selectedRequest.status) && !isChangeRequest && !isExpansionRequest && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                   <p>Solicitação rejeitada. Ela pode ser corrigida e reenviada para a primeira etapa.</p>
                   <Link href={`/requests/new?reenviar=${selectedRequest.id}`}>

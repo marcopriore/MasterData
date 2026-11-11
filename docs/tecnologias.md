@@ -120,6 +120,9 @@ npm run check     # o mesmo + auditoria de dependências + tipos
 - **Governança:** fluxo completo pelas 5 etapas, cada uma com o usuário da área, até o material nascer na base; e rejeição com justificativa.
 - **Base de dados:** busca, inclusive com caractere de filtro.
 - **Dicionário, grupos e usuários:** dicionário, grupos e usuários, incluindo senha fraca recusada e conta inativada sem acesso.
+- **Alteração (suíte 11):** da pesquisa à Alteração e à aba Alteração da Governança.
+- **Acesso (suíte 12):** tela sem permissão dá "Acesso negado" pelo link; só ver PDM ou workflows não mostra criar nem editar.
+- **Centros e Ampliação (suíte 13, a última):** cadastro de centro, Ampliação pela pesquisa, aba Ampliação da Governança e o cadastro passando a pedir centro.
 
 ```powershell
 cd C:\Dev\MasterData\tests
@@ -178,3 +181,4 @@ Enquanto o banco for único, a rodada grava em produção, sempre num tenant pr�
 | 042 | `material_history` (criação, status, ERP, edição) gravado pelo gatilho `record_material_history`, com backfill do log; leitura com `can_view_database` |
 | 043 | Tipos de solicitação: `workflow_header.request_type` (um ativo por tipo), `material_requests.request_type`, `target_material_id`, `change_fields`, `change_previous` (gatilho `set_change_previous`); `ensure_request_type_workflows` (Fluxo de Alteração, também no onboarding); `guard_material_requests` e `advance_workflow` com a Alteração (aplica no material existente); `stage_missing_fields` com lista de campos |
 | 044 | Permissões da base separadas: `can_change_material_status` e `can_sync_erp` (herdam `can_standardize`), padrão no gatilho de papéis; `guard_material_database` limita quem só edita PDM à descrição e ao PDM |
+| 045 | Centros e Ampliação: `centers` (RLS, grava `can_manage_fields`), `field_dictionary.per_center` (padrão MRP, Compras e Contabilidade), `material_centers` (centro inicial e acrescentados; só funções gravam), `material_requests.center_id`; workflow de Ampliação; guarda do cadastro com centro e da Ampliação; `advance_workflow` grava o centro inicial e acrescenta o centro da Ampliação; `set_material_origin_center`; evento `center` no histórico |

@@ -41,6 +41,8 @@ type FieldDictionary = {
   erp_field: string | null
   erp_view: string
   erp_block?: string | null
+  /** Vale por centro: a Ampliação pede o campo para o centro novo (migration 045). */
+  per_center?: boolean | null
   field_type: string
   options: string[] | Record<string, unknown> | null
   responsible_role: string
@@ -68,6 +70,8 @@ const ERP_BLOCKS = [
   { value: 'header', label: 'Cabeçalho' },
   { value: 'site', label: 'Site / centro' },
 ] as const
+
+const PER_CENTER_VIEWS: string[] = ['mrp', 'compras', 'contabilidade']
 
 const FIELD_TYPES = [
   { value: 'text', label: 'Texto', icon: Type },
@@ -135,7 +139,10 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
   const [erpField, setErpField] = useState(initial?.erp_field ?? '')
   const [erpView, setErpView] = useState(erpViewCode(initial?.erp_view) || 'dados_basicos')
   const [erpBlock, setErpBlock] = useState(initial?.erp_block ?? '')
+  const [perCenter, setPerCenter] = useState<boolean | null>(initial ? initial.per_center === true : null)
   const [fieldType, setFieldType] = useState(initial?.field_type ?? 'text')
+  // Campo novo segue a visão (MRP, Compras e Contabilidade valem por centro) até alguém marcar.
+  const perCenterChecked = perCenter ?? PER_CENTER_VIEWS.includes(erpView)
   const [optionsJson, setOptionsJson] = useState(() => {
     const o = initial?.options
     if (Array.isArray(o)) return JSON.stringify(o, null, 2)
@@ -189,6 +196,7 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
         erp_field: erpField.trim() || null,
         erp_view: erpView,
         ...(erpBlock || initial?.erp_block !== undefined ? { erp_block: erpBlock || null } : {}),
+        per_center: perCenterChecked,
         field_type: fieldType,
         options: fieldType === 'select'
           ? (parseOptionsJson(optionsJson) ?? []).map((v) => v.trim()).filter(Boolean)
@@ -301,6 +309,21 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
               O valor sai com o nome do Campo ERP dentro deste bloco.
             </p>
           </div>
+          <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              aria-label="Por centro"
+              checked={perCenterChecked}
+              onChange={(e) => setPerCenter(e.target.checked)}
+              className="mt-0.5 size-4"
+            />
+            <span>
+              <span className="font-medium">Por centro</span>
+              <span className="block text-xs text-muted-foreground">
+                O valor pode ser diferente em cada centro do material. A Ampliação pede este campo para o centro novo.
+              </span>
+            </span>
+          </label>
           <div>
             <Label htmlFor="field_type">Tipo *</Label>
             <select
@@ -575,6 +598,11 @@ export default function FieldsPage() {
                         <div>
                           <p className="font-semibold text-foreground">{f.field_label}</p>
                           <p className="text-xs text-muted-foreground font-mono">{f.field_name}</p>
+                          {f.per_center && (
+                            <span className="mt-1 inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+                              Por centro
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-5 py-3.5">
