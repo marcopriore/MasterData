@@ -27,6 +27,14 @@ describe('andamento pelas etapas do workflow', () => {
     expect(stageProgress(steps, 'cancelado').every((s) => s.state === 'stopped')).toBe(true)
   })
 
+  it('etapa pulada pelo banco aparece como pulada e conta como feita', () => {
+    const items = stageProgress(steps, 'mrp', ['compras'])
+    expect(items.map((s) => s.state)).toEqual(['done', 'skipped', 'current'])
+    expect(progressPercent(items)).toBe(83)
+    expect(stageProgress(steps, 'finalizado', ['compras']).map((s) => s.state)).toEqual(['done', 'skipped', 'done'])
+    expect(stageProgress(steps, 'Rejected', ['compras'])[1].state).toBe('skipped')
+  })
+
   it('status fora do workflow deixa tudo pendente; sem etapas, nada', () => {
     expect(stageProgress(steps, 'pending').every((s) => s.state === 'pending')).toBe(true)
     expect(progressPercent([])).toBe(0)

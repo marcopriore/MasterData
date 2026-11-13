@@ -191,6 +191,7 @@ const STAGE_BAR: Record<StageState, { width: string; color: string; text: string
   current: { width: '50%', color: '#2563eb', text: 'text-blue-700 dark:text-blue-300' },
   pending: { width: '0%', color: 'transparent', text: 'text-muted-foreground' },
   stopped: { width: '100%', color: '#94a3b8', text: 'text-muted-foreground' },
+  skipped: { width: '100%', color: '#e2e8f0', text: 'text-muted-foreground italic' },
 }
 
 /** Uma barra por etapa do workflow: concluída, em andamento, pendente ou interrompida. */

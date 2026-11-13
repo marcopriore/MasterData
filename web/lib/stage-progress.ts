@@ -3,7 +3,7 @@ import { statusGroup } from '@/lib/request-status'
 
 export type WorkflowStepLite = { status_key: string; step_name: string; order: number; is_active: boolean }
 
-export type StageState = 'done' | 'current' | 'pending' | 'stopped'
+export type StageState = 'done' | 'current' | 'pending' | 'stopped' | 'skipped'
 
 export type StageProgressItem = { key: string; label: string; state: StageState }
 
@@ -12,6 +12,7 @@ export const STAGE_STATE_LABEL: Record<StageState, string> = {
   current: 'Em andamento',
   pending: 'Pendente',
   stopped: 'Interrompida',
+  skipped: 'Pulada',
 }
 
 /** Etapas de trabalho, na ordem; a etapa final (finalizado) é o destino, não uma etapa a cumprir. */
@@ -21,16 +22,19 @@ export function workStages(steps: WorkflowStepLite[]): WorkflowStepLite[] {
     .sort((a, b) => a.order - b.order)
 }
 
-export function stageProgress(steps: WorkflowStepLite[], status: string | null | undefined): StageProgressItem[] {
+/** skipped: chaves das etapas que o banco pulou por não ter campo para revisar (migration 049). */
+export function stageProgress(steps: WorkflowStepLite[], status: string | null | undefined, skipped: string[] = []): StageProgressItem[] {
   const stages = workStages(steps)
   const group = statusGroup(status)
   const current = (status ?? '').trim().toLowerCase()
   const index = stages.findIndex((s) => s.status_key.trim().toLowerCase() === current)
+  const skippedKeys = new Set(skipped.map((k) => k.trim().toLowerCase()))
   return stages.map((s, i) => ({
     key: s.status_key,
     label: s.step_name,
     state:
-      group === 'done' ? 'done'
+      skippedKeys.has(s.status_key.trim().toLowerCase()) && i !== index ? 'skipped'
+      : group === 'done' ? 'done'
       : group !== 'open' ? 'stopped'
       : index < 0 ? 'pending'
       : i < index ? 'done'
@@ -39,9 +43,9 @@ export function stageProgress(steps: WorkflowStepLite[], status: string | null |
   }))
 }
 
-/** Percentual de etapas concluídas (a atual conta meia). */
+/** Percentual de etapas concluídas (a atual conta meia; a pulada conta como feita). */
 export function progressPercent(items: StageProgressItem[]): number {
   if (items.length === 0) return 0
-  const score = items.reduce((acc, item) => acc + (item.state === 'done' ? 1 : item.state === 'current' ? 0.5 : 0), 0)
+  const score = items.reduce((acc, item) => acc + (item.state === 'done' || item.state === 'skipped' ? 1 : item.state === 'current' ? 0.5 : 0), 0)
   return Math.round((score / items.length) * 100)
 }

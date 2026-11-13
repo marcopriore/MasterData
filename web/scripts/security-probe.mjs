@@ -434,6 +434,30 @@ async function main() {
     record(back?.status === 'cadastro' && back?.center_id === c4.id && JSON.stringify(back?.change_fields) === JSON.stringify(['sonda_centro']),
       'a ampliação volta para a primeira etapa no centro escolhido, com os campos por centro do dicionário')
   }
+
+  console.log('\nEtapa sem campo para revisar é pulada (migration 049)')
+  // Workflow de cadastro com Compras (sem campo no dicionário do A) e MRP (campo sonda_centro).
+  await must(admin.from('workflow_header').update({ is_active: false }).eq('id', flowA.workflowId), 'desativa o fluxo da sonda')
+  const [wfSkip] = await must(admin.from('workflow_header').insert({ tenant_id: tA, name: `Sonda pula ${tag}`, is_active: true }).select('id'), 'fluxo com etapas')
+  await must(admin.from('workflow_config').insert([
+    { tenant_id: tA, workflow_id: wfSkip.id, step_name: 'Cadastro', status_key: 'cadastro', order: 1, is_active: true },
+    { tenant_id: tA, workflow_id: wfSkip.id, step_name: 'Compras', status_key: 'compras', order: 2, is_active: true },
+    { tenant_id: tA, workflow_id: wfSkip.id, step_name: 'MRP', status_key: 'mrp', order: 3, is_active: true },
+    { tenant_id: tA, workflow_id: wfSkip.id, step_name: 'Finalizado', status_key: 'finalizado', order: 4, is_active: true },
+  ]), 'etapas do fluxo com pulo')
+  const { data: skipReq, error: skipErr } = await solic.from('material_requests').insert({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: wfSkip.id, status: 'cadastro', requester: 'PULA', urgency: 'low', user_id: requester.id, center_id: c1.id, technical_attributes: {} }).select('id, status, skipped_stages').single()
+  record(!skipErr && skipReq?.status === 'cadastro', 'a Central de Cadastro nunca é pulada', skipErr?.message ?? '')
+  if (skipReq) {
+    await denied('ninguém grava as etapas puladas pela API', () => atend.from('material_requests').update({ skipped_stages: ['cadastro'] }).eq('id', skipReq.id).select('id'),
+      async () => ((await admin.from('material_requests').select('skipped_stages').eq('id', skipReq.id).single()).data?.skipped_stages ?? []).length === 0)
+    await must(atend.rpc('assign_request', { p_request_id: skipReq.id }), 'assumir')
+    await allowed('Cadastro aprova a solicitação', () => atend.rpc('advance_workflow', { p_request_id: skipReq.id }))
+    const { data: afterSkip } = await admin.from('material_requests').select('status, skipped_stages').eq('id', skipReq.id).single()
+    record(afterSkip?.status === 'mrp' && JSON.stringify(afterSkip?.skipped_stages) === JSON.stringify(['compras']),
+      'Compras, sem campo para revisar, é pulada e a solicitação vai para MRP', `${afterSkip?.status} ${JSON.stringify(afterSkip?.skipped_stages)}`)
+    const { data: approvedEvt } = await admin.from('request_history').select('message').eq('request_id', skipReq.id).eq('event_type', 'approved').single()
+    record(String(approvedEvt?.message ?? '').includes('Compras'), 'o histórico registra a etapa pulada')
+  }
 }
 
 try {

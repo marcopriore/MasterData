@@ -125,6 +125,7 @@ type ApiRequest = {
   change_fields?: string[]
   change_previous?: Record<string, unknown>
   center_id?: number | null
+  skipped_stages?: string[]
 }
 
 function mapToMaterialRequest(r: ApiRequest, steps: WorkflowStepLite[]): MaterialRequest {
@@ -160,7 +161,7 @@ function mapToMaterialRequest(r: ApiRequest, steps: WorkflowStepLite[]): Materia
     generated_description: r.generated_description ?? '',
     assigned_to_id: r.assigned_to_id ?? null,
     assigned_to_name: r.assigned_to_name ?? null,
-    stages: stageProgress(steps, r.status),
+    stages: stageProgress(steps, r.status, r.skipped_stages ?? []),
     description: r.generated_description ?? '',
   }
 }

@@ -527,6 +527,8 @@ export type ApiRequest = {
   change_previous?: Record<string, unknown>
   /** Centro escolhido: inicial no cadastro, novo na Ampliação (migration 045). */
   center_id?: number | null
+  /** Etapas puladas por não ter campo para revisar (migration 049). */
+  skipped_stages?: string[]
 }
 
 export async function getRequests(params?: {
@@ -625,6 +627,7 @@ export async function getRequests(params?: {
       change_fields: (r.change_fields ?? []) as string[],
       change_previous: (r.change_previous ?? {}) as Record<string, unknown>,
       center_id: (r.center_id as number | null) ?? null,
+      skipped_stages: (r.skipped_stages ?? []) as string[],
     })
   }
   return result
@@ -885,7 +888,7 @@ export async function createRequest(body: {
     center_id: body.center_id ?? null,
   }
 
-  const { data, error } = await supabase.from('material_requests').insert(row).select('id').single()
+  const { data, error } = await supabase.from('material_requests').insert(row).select('id, status').single()
   if (error) handleError(error)
 
   await supabase.from('request_history').insert({
@@ -894,7 +897,7 @@ export async function createRequest(body: {
     user_id: user?.id ?? null,
     event_type: 'created',
     message: 'Solicitação criada',
-    stage: initialStatus,
+    stage: (data.status as string | null) ?? initialStatus,
   })
 
   void logAction({
@@ -944,7 +947,7 @@ export async function createChangeRequest(body: {
     generated_description: body.generated_description != null ? toErpText(body.generated_description) : null,
     technical_attributes: toErpDeep(body.technical_attributes),
     user_id: user?.id ?? null,
-  }).select('id').single()
+  }).select('id, status').single()
   if (error) handleError(error)
 
   await supabase.from('request_history').insert({
@@ -953,7 +956,7 @@ export async function createChangeRequest(body: {
     user_id: user?.id ?? null,
     event_type: 'created',
     message: 'Solicitação de alteração criada',
-    stage: initialStatus,
+    stage: (data.status as string | null) ?? initialStatus,
     event_data: { request_type: 'alteracao', material_id: body.material_id, fields: body.change_fields },
   })
   void logAction({
@@ -1000,7 +1003,7 @@ export async function createExpansionRequest(body: {
     justification: body.justificativa ?? null,
     technical_attributes: toErpDeep(body.technical_attributes),
     user_id: user?.id ?? null,
-  }).select('id').single()
+  }).select('id, status').single()
   if (error) handleError(error)
 
   await supabase.from('request_history').insert({
@@ -1009,7 +1012,7 @@ export async function createExpansionRequest(body: {
     user_id: user?.id ?? null,
     event_type: 'created',
     message: 'Solicitação de ampliação criada',
-    stage: initialStatus,
+    stage: (data.status as string | null) ?? initialStatus,
     event_data: { request_type: 'ampliacao', material_id: body.material_id, center_id: body.center_id },
   })
   void logAction({
