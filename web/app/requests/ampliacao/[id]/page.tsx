@@ -160,6 +160,7 @@ export default function ExpansionRequestPage() {
     try {
       if (resubmitId != null) {
         await resubmitExpansionRequest(resubmitId, {
+          center_id: centerId!,
           technical_attributes: expansionAttributes(material, draft),
           urgency,
           justificativa: justification.trim(),
@@ -222,7 +223,7 @@ export default function ExpansionRequestPage() {
           <div>
             <p className="font-semibold">Motivo da rejeição</p>
             <p className="mt-0.5">{rejectionReason ?? 'Sem justificativa registrada.'}</p>
-            <p className="mt-1 text-xs">Ajuste os valores do centro. O centro não muda; para outro centro, abra outra ampliação. Ao reenviar, volta para a primeira etapa do fluxo de Ampliação.</p>
+            <p className="mt-1 text-xs">Ajuste o centro e os valores. Ao reenviar, a ampliação volta para a primeira etapa do fluxo de Ampliação.</p>
           </div>
         </div>
       )}
@@ -248,7 +249,7 @@ export default function ExpansionRequestPage() {
         <select
           id="expansion-center"
           value={centerId ?? ''}
-          disabled={blockedStatus || available.length === 0 || resubmitId != null}
+          disabled={blockedStatus || available.length === 0}
           onChange={(e) => setCenterId(e.target.value ? Number(e.target.value) : null)}
           className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
         >

@@ -1306,8 +1306,9 @@ export async function resubmitChangeRequest(id: number, body: {
   return data as ApiRequest
 }
 
-/** Ampliação rejeitada volta para a primeira etapa, no mesmo centro, com os valores corrigidos (migration 047). */
+/** Ampliação rejeitada volta para a primeira etapa com os valores corrigidos; pode trocar de centro (migrations 047 e 048). */
 export async function resubmitExpansionRequest(id: number, body: {
+  center_id: number
   technical_attributes: Record<string, unknown>
   urgency?: string
   justificativa?: string
@@ -1318,6 +1319,7 @@ export async function resubmitExpansionRequest(id: number, body: {
     p_technical_attributes: toErpDeep(body.technical_attributes),
     p_urgency: body.urgency ?? null,
     p_justification: body.justificativa ?? null,
+    p_center_id: body.center_id,
   })
   if (error) throw new Error(error.message)
   void logAction({ category: 'requests', action: 'request_resubmitted', description: 'Ampliação reenviada após correção', event_data: { request_id: id, request_type: 'ampliacao' } })

@@ -426,10 +426,13 @@ async function main() {
     await reject(amp2.id)
     await denied('ampliação não é reenviada pelo caminho do cadastro', () => solic.rpc('resubmit_request', { p_request_id: amp2.id, p_pdm_id: flowA.pdmId, p_technical_attributes: {}, p_generated_description: 'HACK' }), stillRejected(amp2.id))
     await denied('ampliação não é reenviada como alteração', () => solic.rpc('resubmit_change_request', { p_request_id: amp2.id, p_change_fields: ['sonda_campo'], p_technical_attributes: {} }), stillRejected(amp2.id))
-    await allowed('solicitante reenvia a ampliação corrigida', () => solic.rpc('resubmit_expansion_request', { p_request_id: amp2.id, p_technical_attributes: { sonda_centro: 'CORRIGIDO' } }))
+    await denied('reenvio da ampliação não troca para centro que o material já tem (migration 048)', () => solic.rpc('resubmit_expansion_request', { p_request_id: amp2.id, p_technical_attributes: {}, p_center_id: c1.id }), stillRejected(amp2.id))
+    await denied('reenvio da ampliação não troca para centro de outro tenant', () => solic.rpc('resubmit_expansion_request', { p_request_id: amp2.id, p_technical_attributes: {}, p_center_id: cB.id }), stillRejected(amp2.id))
+    const [c4] = await must(cent.from('centers').insert({ tenant_id: tA, code: '1004', name: 'SONDA QUATRO' }).select('id'), 'centro 4')
+    await allowed('solicitante reenvia a ampliação corrigida em outro centro', () => solic.rpc('resubmit_expansion_request', { p_request_id: amp2.id, p_technical_attributes: { sonda_centro: 'CORRIGIDO' }, p_center_id: c4.id }))
     const back = await reqOf(amp2.id)
-    record(back?.status === 'cadastro' && back?.center_id === c3.id && JSON.stringify(back?.change_fields) === JSON.stringify(['sonda_centro']),
-      'a ampliação volta para a primeira etapa no mesmo centro, com os campos por centro do dicionário')
+    record(back?.status === 'cadastro' && back?.center_id === c4.id && JSON.stringify(back?.change_fields) === JSON.stringify(['sonda_centro']),
+      'a ampliação volta para a primeira etapa no centro escolhido, com os campos por centro do dicionário')
   }
 }
 
