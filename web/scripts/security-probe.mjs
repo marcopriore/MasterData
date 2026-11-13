@@ -328,6 +328,7 @@ async function main() {
   const [c1, c2] = (await must(cent.from('centers').insert([{ tenant_id: tA, code: '1001', name: 'SONDA UM' }, { tenant_id: tA, code: '1002', name: 'SONDA DOIS' }]).select('id, code'), 'centros A'))
     .sort((a, b) => a.code.localeCompare(b.code))
   record(Boolean(c1 && c2), 'quem tem "Dicionário de Dados" cadastra centros')
+  await denied('código do centro tem até 4 caracteres (migration 046)', () => cent.from('centers').insert({ tenant_id: tA, code: '10030', name: 'LONGO' }).select('id'), async () => (await centerCount(tA)) === 2)
   const [cB] = await must(admin.from('centers').insert({ tenant_id: tB, code: '9001', name: 'SONDA B' }).select('id'), 'centro B')
   await denied('não cadastra centro em outro tenant', () => cent.from('centers').insert({ tenant_id: tB, code: 'H2', name: 'HACK' }).select('id'), async () => (await centerCount(tB)) === 1)
   await denied('outro tenant não lê os centros do A', () => relB.from('centers').select('id').eq('tenant_id', tA))
@@ -395,6 +396,40 @@ async function main() {
     const { data: born } = await admin.from('material_database').select('id').eq('tenant_id', tA).eq('request_id', cadCreated.id).maybeSingle()
     const bornCenters = born ? await centersOf(born.id) : []
     record(bornCenters.length === 1 && bornCenters[0].center_id === c1.id && bornCenters[0].is_origin, 'o material novo nasce com o centro inicial')
+  }
+
+  console.log('\nReenvio da rejeitada pelo caminho do tipo (migration 047)')
+  const reqOf = async (id) => (await admin.from('material_requests').select('status, pdm_id, center_id, change_fields, technical_attributes').eq('id', id).single()).data
+  const stillRejected = (id) => async () => (await reqOf(id))?.status === 'Rejected'
+  const reject = async (id) => {
+    await must(atend.rpc('assign_request', { p_request_id: id }), 'assumir para rejeitar')
+    await must(atend.rpc('reject_request', { p_request_id: id, p_reason: 'SONDA', p_category: 'outro' }), 'rejeitar')
+  }
+  const { data: alt2, error: alt2Err } = await solic.from('material_requests').insert(altRow({ technical_attributes: { sonda_campo: 'OUTRO' } })).select('id').single()
+  if (alt2Err) record(false, 'abre outra alteração para rejeitar', alt2Err.message)
+  if (alt2) {
+    await reject(alt2.id)
+    const [otherPdm] = await must(admin.from('pdm_templates').insert({ tenant_id: tA, name: `SONDA OUTRO ${tag}`, internal_code: `SOO${tag.slice(0, 3).toUpperCase()}`.replace(/[^A-Z0-9]/g, 'X'), is_active: true, attributes: [] }).select('id'), 'outro PDM')
+    await denied('alteração não é reenviada pelo caminho do cadastro (troca de PDM)', () => solic.rpc('resubmit_request', { p_request_id: alt2.id, p_pdm_id: otherPdm.id, p_technical_attributes: {}, p_generated_description: 'HACK' }), stillRejected(alt2.id))
+    await denied('reenvio da alteração não troca o Tipo de Material', () => solic.rpc('resubmit_change_request', { p_request_id: alt2.id, p_change_fields: ['tipo_material'], p_technical_attributes: { tipo_material: 'NLAG' } }), stillRejected(alt2.id))
+    await denied('quem não abriu a alteração não reenvia', () => compras.rpc('resubmit_change_request', { p_request_id: alt2.id, p_change_fields: ['sonda_campo'], p_technical_attributes: { sonda_campo: 'X' } }), stillRejected(alt2.id))
+    await allowed('solicitante reenvia a alteração corrigida', () => solic.rpc('resubmit_change_request', { p_request_id: alt2.id, p_change_fields: ['sonda_campo'], p_technical_attributes: { sonda_campo: 'CORRIGIDO' } }))
+    const back = await reqOf(alt2.id)
+    record(back?.status === 'cadastro' && back?.pdm_id === flowA.pdmId && JSON.stringify(back?.change_fields) === JSON.stringify(['sonda_campo']),
+      'a alteração volta para a primeira etapa com o mesmo PDM e os campos escolhidos')
+  }
+
+  const [c3] = await must(cent.from('centers').insert({ tenant_id: tA, code: '1003', name: 'SONDA TRES' }).select('id'), 'centro 3')
+  const { data: amp2, error: amp2Err } = await solic.from('material_requests').insert(ampRow({ center_id: c3.id })).select('id').single()
+  if (amp2Err) record(false, 'abre outra ampliação para rejeitar', amp2Err.message)
+  if (amp2) {
+    await reject(amp2.id)
+    await denied('ampliação não é reenviada pelo caminho do cadastro', () => solic.rpc('resubmit_request', { p_request_id: amp2.id, p_pdm_id: flowA.pdmId, p_technical_attributes: {}, p_generated_description: 'HACK' }), stillRejected(amp2.id))
+    await denied('ampliação não é reenviada como alteração', () => solic.rpc('resubmit_change_request', { p_request_id: amp2.id, p_change_fields: ['sonda_campo'], p_technical_attributes: {} }), stillRejected(amp2.id))
+    await allowed('solicitante reenvia a ampliação corrigida', () => solic.rpc('resubmit_expansion_request', { p_request_id: amp2.id, p_technical_attributes: { sonda_centro: 'CORRIGIDO' } }))
+    const back = await reqOf(amp2.id)
+    record(back?.status === 'cadastro' && back?.center_id === c3.id && JSON.stringify(back?.change_fields) === JSON.stringify(['sonda_centro']),
+      'a ampliação volta para a primeira etapa no mesmo centro, com os campos por centro do dicionário')
   }
 }
 

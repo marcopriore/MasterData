@@ -147,3 +147,12 @@ export function escapeHtml(value: string): string {
 export function noticeEmailHtml(input: { title: string; message: string; link: string }): string {
   return `<p><strong>${escapeHtml(input.title)}</strong></p><p>${escapeHtml(input.message)}</p><p><a href="${escapeHtml(input.link)}">Abrir no PRO-MAT</a></p>`
 }
+
+/**
+ * Destino do aviso: o que vai para o solicitante (atendimento iniciado, rejeitada, cancelada,
+ * concluída) abre o detalhe em Minhas Solicitações; o das áreas abre a Governança.
+ */
+export function noticePath(event: string, requestId: number): string {
+  const toRequester = event === 'assigned' || event === 'rejected' || event === 'cancelled' || event === 'completed'
+  return toRequester ? `/requests?req=${requestId}` : `/governance?req=${requestId}`
+}

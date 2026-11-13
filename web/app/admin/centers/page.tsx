@@ -106,10 +106,10 @@ export default function CentersPage() {
       </div>
 
       {canEdit ? (
-        <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 sm:grid-cols-[160px_1fr_auto] dark:border-zinc-700/50 dark:bg-card">
+        <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 sm:grid-cols-[120px_1fr_auto] dark:border-zinc-700/50 dark:bg-card">
           <div>
-            <label htmlFor="center-code" className="text-xs font-medium text-muted-foreground">Código *</label>
-            <Input id="center-code" value={code} maxLength={20} onChange={(e) => setCode(upper(e.target.value))} className="mt-1 uppercase" />
+            <label htmlFor="center-code" className="text-xs font-medium text-muted-foreground">Código * (até 4)</label>
+            <Input id="center-code" value={code} maxLength={4} onChange={(e) => setCode(upper(e.target.value))} className="mt-1 uppercase" />
           </div>
           <div>
             <label htmlFor="center-name" className="text-xs font-medium text-muted-foreground">Nome *</label>
@@ -146,7 +146,7 @@ export default function CentersPage() {
                   <tr key={center.id} data-testid={`center-${center.code}`}>
                     <td className="px-5 py-2.5 font-mono font-semibold">
                       {isEditing ? (
-                        <Input aria-label="Código do centro" value={editing.code} maxLength={20} onChange={(e) => setEditing({ ...editing, code: upper(e.target.value) })} className="h-8 uppercase" />
+                        <Input aria-label="Código do centro" value={editing.code} maxLength={4} onChange={(e) => setEditing({ ...editing, code: upper(e.target.value) })} className="h-8 uppercase" />
                       ) : center.code}
                     </td>
                     <td className="px-5 py-2.5">

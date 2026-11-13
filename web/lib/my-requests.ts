@@ -19,6 +19,8 @@ export type MyRequestRow = {
   can_cancel: boolean
   /** Tipo de solicitação (migration 043); ausente vale cadastro. */
   request_type?: 'cadastro' | 'alteracao' | 'ampliacao'
+  /** Material de origem da Alteração e da Ampliação. */
+  target_material_id?: number | null
 }
 
 export type MyRequestSituation = 'andamento' | 'finalizada' | 'rejeitada' | 'cancelada'
@@ -68,4 +70,14 @@ export function applyMyRequests(rows: MyRequestRow[], state: MyRequestsState) {
   const page = Math.min(Math.max(1, state.pagina), pages)
   const start = (page - 1) * MY_REQUESTS_PAGE_SIZE
   return { rows: filtered.slice(start, start + MY_REQUESTS_PAGE_SIZE), total: filtered.length, page, pages }
+}
+
+/** Onde se corrige e reenvia a rejeitada: cada tipo pela tela dele (migration 047). */
+export function resubmitHref(req: { id: number; request_type?: string | null; target_material_id?: number | null }): string | null {
+  const type = req.request_type ?? 'cadastro'
+  if (type === 'cadastro') return `/requests/new?reenviar=${req.id}`
+  if (!req.target_material_id) return null
+  if (type === 'alteracao') return `/requests/alteracao/${req.target_material_id}?reenviar=${req.id}`
+  if (type === 'ampliacao') return `/requests/ampliacao/${req.target_material_id}?reenviar=${req.id}`
+  return null
 }

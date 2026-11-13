@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useNotifications, type Notification } from '@/contexts/notifications-context'
 import { supportTicketIdFromEvent } from '@/lib/axisdesk/types'
+import { noticePath } from '@/lib/request-notices'
 import { useUser } from '@/contexts/user-context'
 import { cn } from '@/lib/utils'
 
@@ -74,7 +75,7 @@ function NotificationItem({
 }
 
 export function NotificationsBell() {
-  const { accessToken } = useUser()
+  const { accessToken, can } = useUser()
   const router = useRouter()
   const { unreadCount, notifications, markAsRead, markAllAsRead } = useNotifications()
   const [open, setOpen] = useState(false)
@@ -89,7 +90,9 @@ export function NotificationsBell() {
       return
     }
     if (n.request_id != null) {
-      router.push(`/governance?req=${n.request_id}`)
+      const path = noticePath(n.event_type ?? '', n.request_id)
+      const seesGovernance = can('can_approve') || can('can_reject') || can('can_attend')
+      router.push(path.startsWith('/governance') && !seesGovernance ? `/requests?req=${n.request_id}` : path)
     }
   }
 

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
-import { ChevronLeft, Loader2, PencilLine } from 'lucide-react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { AlertTriangle, ChevronLeft, Loader2, PencilLine } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import {
@@ -14,7 +14,11 @@ import {
   getMaterialById,
   getPdmById,
   getPdms,
+  getRequestById,
+  getRequestHistory,
+  resubmitChangeRequest,
 } from '@/lib/supabase-api'
+import { isRejectedStatus } from '@/lib/my-requests'
 import { erpViewLabel } from '@/lib/erp-views'
 import { changedAttributes, changeRows, touchesPdm, validateChanges, valueText, type ChangeDraft, type ChangeDictField } from '@/lib/change-request'
 import { pdmShortDescription, type PdmDescTemplate } from '@/lib/pdm-description'
@@ -38,6 +42,10 @@ export default function ChangeRequestPage() {
   const router = useRouter()
   const { user, can, ready } = useUser()
   const materialId = Number(params.id)
+  const searchParams = useSearchParams()
+  const resubmitParam = Number(searchParams.get('reenviar'))
+  const resubmitId = Number.isInteger(resubmitParam) && resubmitParam > 0 ? resubmitParam : null
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -79,6 +87,21 @@ export default function ChangeRequestPage() {
         })))
         setProfiles(rules.filter((p) => p.is_active))
         if (!full) setLoadError('O PDM deste material não foi encontrado; a alteração precisa do PDM.')
+        if (resubmitId != null) {
+          // Reenvio: a rejeitada volta preenchida com os campos e valores que ela pediu.
+          const [req, history] = await Promise.all([getRequestById(resubmitId), getRequestHistory(resubmitId).catch(() => [])])
+          if (cancelled) return
+          if (!req || req.request_type !== 'alteracao' || req.target_material_id !== materialId || !isRejectedStatus(req.status)) {
+            setLoadError('Só uma alteração rejeitada deste material pode ser corrigida e reenviada aqui.')
+            return
+          }
+          const attrs = (req.technical_attributes ?? {}) as Record<string, unknown>
+          setDraft(Object.fromEntries((req.change_fields ?? []).map((k) => [k, valueText(attrs[k])])))
+          setUrgency(req.urgency || 'low')
+          setJustification(req.justification ?? '')
+          const rejection = history.find((e) => e.event_type === 'rejected')
+          setRejectionReason(((rejection?.event_data as { justification?: string } | null)?.justification ?? '').trim() || null)
+        }
       } catch (err) {
         if (!cancelled) setLoadError((err as Error)?.message ?? 'Não foi possível carregar o material.')
       } finally {
@@ -86,7 +109,7 @@ export default function ChangeRequestPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [materialId])
+  }, [materialId, resubmitId])
 
   const rows = useMemo(
     () => (material ? changeRows({ material, pdmAttributes: (pdm?.attributes ?? []) as never, fields, profiles, viewLabel: erpViewLabel }) : []),
@@ -123,11 +146,23 @@ export default function ChangeRequestPage() {
     setSaving(true)
     try {
       if (pdmTouched) {
-        const dup = await checkDuplicateRequest({ pdm_id: pdm.id, formData: newAttributes, excludeMaterialId: material.id })
+        const dup = await checkDuplicateRequest({ pdm_id: pdm.id, formData: newAttributes, excludeMaterialId: material.id, excludeRequestId: resubmitId })
         if (dup.isDuplicate) {
           toast.error(`Com esses atributos o material fica igual a ${dup.existingCode ?? 'outro cadastro'}.`)
           return
         }
+      }
+      if (resubmitId != null) {
+        await resubmitChangeRequest(resubmitId, {
+          change_fields: Object.keys(draft),
+          technical_attributes: newAttributes,
+          generated_description: newDescription,
+          urgency,
+          justificativa: justification.trim(),
+        })
+        toast.success(`Alteração REQ-${String(resubmitId).padStart(4, '0')} reenviada para a primeira etapa.`)
+        router.push(`/requests?req=${resubmitId}`)
+        return
       }
       const { id } = await createChangeRequest({
         material_id: material.id,
@@ -171,12 +206,23 @@ export default function ChangeRequestPage() {
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-foreground">
           <PencilLine className="size-6" />
-          Alteração de material
+          {resubmitId != null ? `Corrigir e reenviar REQ-${String(resubmitId).padStart(4, '0')}` : 'Alteração de material'}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Marque os campos que mudam e informe o valor novo. Cada área revisa só os campos dela; na aprovação final o material é atualizado e volta para Pendente ERP.
         </p>
       </div>
+
+      {resubmitId != null && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Motivo da rejeição</p>
+            <p className="mt-0.5">{rejectionReason ?? 'Sem justificativa registrada.'}</p>
+            <p className="mt-1 text-xs">Ajuste os campos e os valores. Ao reenviar, a alteração volta para a primeira etapa do fluxo de Alteração.</p>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-zinc-700/50 dark:bg-card">
         <p className="font-mono text-sm font-semibold text-[#0F1C38] dark:text-[#C69A46]">{code}</p>
@@ -260,7 +306,7 @@ export default function ChangeRequestPage() {
         <span className="text-sm text-muted-foreground">{Object.keys(draft).length} campo(s) marcado(s)</span>
         <Button onClick={() => void handleSubmit()} disabled={saving || blockedStatus || Object.keys(draft).length === 0} className="gap-2">
           {saving && <Loader2 className="size-4 animate-spin" />}
-          Abrir solicitação de alteração
+          {resubmitId != null ? 'Reenviar alteração' : 'Abrir solicitação de alteração'}
         </Button>
       </div>
     </div>

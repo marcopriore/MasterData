@@ -3,9 +3,17 @@ import {
   noticeCopy,
   noticeEmailHtml,
   noticeEventFromHistory,
+  noticePath,
   selectNoticeRecipients,
   type NoticeCandidate,
 } from './request-notices'
+
+describe('destino do aviso', () => {
+  it('aviso do solicitante abre Minhas Solicitações; o das áreas, a Governança', () => {
+    for (const event of ['assigned', 'rejected', 'cancelled', 'completed']) expect(noticePath(event, 5)).toBe('/requests?req=5')
+    for (const event of ['created', 'approved', 'moved']) expect(noticePath(event, 5)).toBe('/governance?req=5')
+  })
+})
 
 function user(partial: Partial<NoticeCandidate> & Pick<NoticeCandidate, 'id'>): NoticeCandidate {
   return {

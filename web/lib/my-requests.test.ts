@@ -4,9 +4,22 @@ import {
   countBySituation,
   DEFAULT_MY_REQUESTS,
   MY_REQUESTS_PAGE_SIZE,
+  resubmitHref,
   situationOf,
   type MyRequestRow,
 } from './my-requests'
+
+describe('reenvio da rejeitada pelo caminho do tipo', () => {
+  it('cadastro reabre o assistente; alteração e ampliação, a tela delas com o material', () => {
+    expect(resubmitHref({ id: 7 })).toBe('/requests/new?reenviar=7')
+    expect(resubmitHref({ id: 7, request_type: 'alteracao', target_material_id: 30 })).toBe('/requests/alteracao/30?reenviar=7')
+    expect(resubmitHref({ id: 7, request_type: 'ampliacao', target_material_id: 30 })).toBe('/requests/ampliacao/30?reenviar=7')
+  })
+
+  it('sem material de origem, alteração e ampliação não têm reenvio', () => {
+    expect(resubmitHref({ id: 7, request_type: 'ampliacao', target_material_id: null })).toBeNull()
+  })
+})
 
 const row = (id: number, extra: Partial<MyRequestRow> = {}): MyRequestRow => ({
   id,

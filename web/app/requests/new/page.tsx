@@ -16,7 +16,7 @@ import {
   getCenters,
   type Center,
 } from '@/lib/supabase-api'
-import { isRejectedStatus } from '@/lib/my-requests'
+import { isRejectedStatus, resubmitHref } from '@/lib/my-requests'
 import { toErpDeep, toErpText } from '@/lib/erp-text'
 import { useUser } from '@/contexts/user-context'
 import { useMeasurementUnits } from '@/hooks/useMeasurementUnits'
@@ -163,6 +163,11 @@ function NewMaterialRequestForm() {
       if (!req || !isRejectedStatus(req.status)) {
         toast.error('Só solicitação rejeitada pode ser corrigida e reenviada.')
         router.replace('/requests')
+        return
+      }
+      // Alteração e Ampliação não trocam PDM nem atributos livres: reenvio pela tela do tipo.
+      if ((req.request_type ?? 'cadastro') !== 'cadastro') {
+        router.replace(resubmitHref(req) ?? '/requests')
         return
       }
       const history = await getRequestHistory(resubmitId).catch(() => [])

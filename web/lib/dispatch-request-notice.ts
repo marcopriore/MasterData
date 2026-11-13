@@ -4,6 +4,7 @@ import {
   noticeCopy,
   noticeEmailHtml,
   noticeEventFromHistory,
+  noticePath,
   requestCode,
   selectNoticeRecipients,
   type NoticeCandidate,
@@ -121,7 +122,7 @@ export async function dispatchRequestNotice(input: {
     stage: String(history.stage ?? ''),
     reason: reasonFromHistory(history.event_data, event),
   })
-  const link = `${input.appOrigin.replace(/\/$/, '')}/governance?req=${input.requestId}`
+  const link = `${input.appOrigin.replace(/\/$/, '')}${noticePath(event, input.requestId)}`
 
   const inApp = fresh.filter((item) => item.inApp)
   if (inApp.length > 0) {

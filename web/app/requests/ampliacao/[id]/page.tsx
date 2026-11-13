@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
-import { ChevronLeft, Factory, Loader2 } from 'lucide-react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { AlertTriangle, ChevronLeft, Factory, Loader2 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
 import {
@@ -14,9 +14,13 @@ import {
   getMaterialById,
   getMaterialCenters,
   getPdms,
+  getRequestById,
+  getRequestHistory,
+  resubmitExpansionRequest,
   type Center,
   type MaterialCenter,
 } from '@/lib/supabase-api'
+import { isRejectedStatus } from '@/lib/my-requests'
 import { erpViewLabel } from '@/lib/erp-views'
 import { valueText } from '@/lib/change-request'
 import {
@@ -49,6 +53,11 @@ export default function ExpansionRequestPage() {
   const router = useRouter()
   const { user, can, ready } = useUser()
   const materialId = Number(params.id)
+  const searchParams = useSearchParams()
+  const resubmitParam = Number(searchParams.get('reenviar'))
+  const resubmitId = Number.isInteger(resubmitParam) && resubmitParam > 0 ? resubmitParam : null
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null)
+  const [resubmitDraft, setResubmitDraft] = useState<ExpansionDraft | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -97,6 +106,22 @@ export default function ExpansionRequestPage() {
         setCenters(allCenters)
         setMaterialCenters(mine)
         if (!pdm) setLoadError('O PDM deste material não foi encontrado; a ampliação precisa do PDM.')
+        if (resubmitId != null) {
+          // Reenvio: mesmo centro; os valores voltam como a rejeitada pediu.
+          const [req, history] = await Promise.all([getRequestById(resubmitId), getRequestHistory(resubmitId).catch(() => [])])
+          if (cancelled) return
+          if (!req || req.request_type !== 'ampliacao' || req.target_material_id !== materialId || !isRejectedStatus(req.status)) {
+            setLoadError('Só uma ampliação rejeitada deste material pode ser corrigida e reenviada aqui.')
+            return
+          }
+          const attrs = (req.technical_attributes ?? {}) as Record<string, unknown>
+          setCenterId(req.center_id ?? null)
+          setResubmitDraft(Object.fromEntries((req.change_fields ?? []).map((k) => [k, valueText(attrs[k])])))
+          setUrgency(req.urgency || 'low')
+          setJustification(req.justification ?? '')
+          const rejection = history.find((e) => e.event_type === 'rejected')
+          setRejectionReason(((rejection?.event_data as { justification?: string } | null)?.justification ?? '').trim() || null)
+        }
       } catch (err) {
         if (!cancelled) setLoadError((err as Error)?.message ?? 'Não foi possível carregar o material.')
       } finally {
@@ -104,13 +129,16 @@ export default function ExpansionRequestPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [materialId])
+  }, [materialId, resubmitId])
 
   const rows = useMemo(
     () => (material ? expansionRows({ material, fields, profiles, viewLabel: erpViewLabel }) : []),
     [material, fields, profiles]
   )
-  useEffect(() => { setDraft(initialExpansionDraft(rows)) }, [rows])
+  useEffect(() => {
+    const initial = initialExpansionDraft(rows)
+    setDraft(resubmitDraft ? { ...initial, ...resubmitDraft } : initial)
+  }, [rows, resubmitDraft])
 
   const groups = useMemo(() => {
     const out = new Map<string, typeof rows>()
@@ -130,6 +158,16 @@ export default function ExpansionRequestPage() {
     }
     setSaving(true)
     try {
+      if (resubmitId != null) {
+        await resubmitExpansionRequest(resubmitId, {
+          technical_attributes: expansionAttributes(material, draft),
+          urgency,
+          justificativa: justification.trim(),
+        })
+        toast.success(`Ampliação REQ-${String(resubmitId).padStart(4, '0')} reenviada para a primeira etapa.`)
+        router.push(`/requests?req=${resubmitId}`)
+        return
+      }
       const { id } = await createExpansionRequest({
         material_id: material.id,
         pdm_id: pdmId,
@@ -171,12 +209,23 @@ export default function ExpansionRequestPage() {
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-foreground">
           <Factory className="size-6" />
-          Ampliação de material
+          {resubmitId != null ? `Corrigir e reenviar REQ-${String(resubmitId).padStart(4, '0')}` : 'Ampliação de material'}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Escolha o centro novo e proponha os valores dos campos por centro (já vêm com os do material). Cada área revisa os campos dela; na aprovação final o centro entra no material, que volta para Pendente ERP.
         </p>
       </div>
+
+      {resubmitId != null && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Motivo da rejeição</p>
+            <p className="mt-0.5">{rejectionReason ?? 'Sem justificativa registrada.'}</p>
+            <p className="mt-1 text-xs">Ajuste os valores do centro. O centro não muda; para outro centro, abra outra ampliação. Ao reenviar, volta para a primeira etapa do fluxo de Ampliação.</p>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-zinc-700/50 dark:bg-card">
         <p className="font-mono text-sm font-semibold text-[#0F1C38] dark:text-[#C69A46]">{code}</p>
@@ -199,7 +248,7 @@ export default function ExpansionRequestPage() {
         <select
           id="expansion-center"
           value={centerId ?? ''}
-          disabled={blockedStatus || available.length === 0}
+          disabled={blockedStatus || available.length === 0 || resubmitId != null}
           onChange={(e) => setCenterId(e.target.value ? Number(e.target.value) : null)}
           className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
         >
@@ -276,7 +325,7 @@ export default function ExpansionRequestPage() {
       <div className="flex items-center justify-end">
         <Button onClick={() => void handleSubmit()} disabled={saving || blockedStatus || available.length === 0} className="gap-2">
           {saving && <Loader2 className="size-4 animate-spin" />}
-          Abrir solicitação de ampliação
+          {resubmitId != null ? 'Reenviar ampliação' : 'Abrir solicitação de ampliação'}
         </Button>
       </div>
     </div>

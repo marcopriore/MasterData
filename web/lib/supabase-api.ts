@@ -781,7 +781,7 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
   const rows = await allPages((from, to) =>
     supabase
       .from('material_requests')
-      .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, request_type, pdm_templates(name, internal_code)')
+      .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, request_type, target_material_id, pdm_templates(name, internal_code)')
       .eq('tenant_id', tenantId)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
@@ -842,6 +842,7 @@ export async function getMyRequests(): Promise<MyRequestRow[]> {
       rejection_reason: reasons.get(r.id) || null,
       can_cancel: !r.assigned_to_id && firstStep.get(r.workflow_id) === status.toLowerCase(),
       request_type: ((r as { request_type?: string }).request_type ?? 'cadastro') as MyRequestRow['request_type'],
+      target_material_id: (r as { target_material_id?: number | null }).target_material_id ?? null,
     }
   })
 }
@@ -1282,6 +1283,48 @@ export async function resubmitRequest(
   return data as ApiRequest
 }
 
+/** Alteração rejeitada volta para a primeira etapa com os campos e valores corrigidos (migration 047). */
+export async function resubmitChangeRequest(id: number, body: {
+  change_fields: string[]
+  technical_attributes: Record<string, unknown>
+  generated_description?: string | null
+  urgency?: string
+  justificativa?: string
+}): Promise<ApiRequest> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('resubmit_change_request', {
+    p_request_id: id,
+    p_change_fields: body.change_fields,
+    p_technical_attributes: toErpDeep(body.technical_attributes),
+    p_generated_description: body.generated_description != null ? toErpText(body.generated_description) : null,
+    p_urgency: body.urgency ?? null,
+    p_justification: body.justificativa ?? null,
+  })
+  if (error) throw new Error(error.message)
+  void logAction({ category: 'requests', action: 'request_resubmitted', description: 'Alteração reenviada após correção', event_data: { request_id: id, request_type: 'alteracao' } })
+  queueRequestNotice(id)
+  return data as ApiRequest
+}
+
+/** Ampliação rejeitada volta para a primeira etapa, no mesmo centro, com os valores corrigidos (migration 047). */
+export async function resubmitExpansionRequest(id: number, body: {
+  technical_attributes: Record<string, unknown>
+  urgency?: string
+  justificativa?: string
+}): Promise<ApiRequest> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('resubmit_expansion_request', {
+    p_request_id: id,
+    p_technical_attributes: toErpDeep(body.technical_attributes),
+    p_urgency: body.urgency ?? null,
+    p_justification: body.justificativa ?? null,
+  })
+  if (error) throw new Error(error.message)
+  void logAction({ category: 'requests', action: 'request_resubmitted', description: 'Ampliação reenviada após correção', event_data: { request_id: id, request_type: 'ampliacao' } })
+  queueRequestNotice(id)
+  return data as ApiRequest
+}
+
 /** category: motivo padrão (lib/rejection-reasons.ts), obrigatório; reason: texto livre. */
 export async function rejectRequest(id: number, reason: string, category: RejectionReason): Promise<ApiRequest> {
   const supabase = createClient()
@@ -1585,6 +1628,12 @@ export async function bulkUpdateWorkflowConfig(payload: {
 }): Promise<void> {
   const supabase = createClient()
   const tenantId = await getCurrentUserTenantId()
+  // Etapa que saiu da lista sai do banco (antes das gravações: o banco recusa se tiver solicitação em andamento).
+  const keptIds = payload.steps.map((s) => s.id).filter((id): id is number => typeof id === 'number' && id > 0)
+  let removal = supabase.from('workflow_config').delete().eq('workflow_id', payload.workflow_id)
+  if (keptIds.length) removal = removal.not('id', 'in', `(${keptIds.join(',')})`)
+  const { error: removeError } = await removal
+  if (removeError) throw new Error(removeError.message)
   for (let i = 0; i < payload.steps.length; i++) {
     const s = payload.steps[i]
     const row = {

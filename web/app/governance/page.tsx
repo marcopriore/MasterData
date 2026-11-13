@@ -53,6 +53,7 @@ import { isClosedStatus, isDoneStatus, isRejectedStatus } from '@/lib/request-st
 import { fieldsForStage, type FieldRuleProfile } from '@/lib/field-rules'
 import { stageProgress, type WorkflowStepLite } from '@/lib/stage-progress'
 import { requestsInStageScope, seesAllStages, stageScope } from '@/lib/stage-scope'
+import { resubmitHref } from '@/lib/my-requests'
 import { REJECTION_REASONS, type RejectionReason } from '@/lib/rejection-reasons'
 import { toErpText } from '@/lib/erp-text'
 import { Input } from '@/components/ui/input'
@@ -1115,10 +1116,10 @@ export default function GovernancePage() {
                 </div>
               )}
 
-              {isRejectedStatus(selectedRequest.status) && !isChangeRequest && !isExpansionRequest && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
+              {isRejectedStatus(selectedRequest.status) && resubmitHref(selectedRequest) && (user?.is_master || user?.has_admin_group || user?.id === selectedRequest.user_id) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                   <p>Solicitação rejeitada. Ela pode ser corrigida e reenviada para a primeira etapa.</p>
-                  <Link href={`/requests/new?reenviar=${selectedRequest.id}`}>
+                  <Link href={resubmitHref(selectedRequest)!}>
                     <Button size="sm" className="gap-1.5 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90">
                       <RotateCcw className="size-3.5" />
                       Corrigir e reenviar

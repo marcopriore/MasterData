@@ -24,6 +24,7 @@ import {
   DEFAULT_MY_REQUESTS,
   filterMyRequests,
   MY_REQUESTS_PAGE_SIZE,
+  resubmitHref,
   situationOf,
   type MyRequestRow,
   type MyRequestsState,
@@ -451,12 +452,14 @@ function MyRequestsContent() {
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                   <p className="font-semibold">Solicitação rejeitada</p>
                   <p className="mt-1">{detail.rejection_reason || 'Sem justificativa registrada.'}</p>
-                  <Link href={`/requests/new?reenviar=${detail.id}`} className="mt-3 inline-block">
-                    <Button size="sm" className="gap-1.5 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90">
-                      <RotateCcw className="size-3.5" />
-                      Corrigir e reenviar
-                    </Button>
-                  </Link>
+                  {resubmitHref(detail) && (
+                    <Link href={resubmitHref(detail)!} className="mt-3 inline-block">
+                      <Button size="sm" className="gap-1.5 bg-[#0F1C38] text-white hover:bg-[#0F1C38]/90">
+                        <RotateCcw className="size-3.5" />
+                        Corrigir e reenviar
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               )}
 

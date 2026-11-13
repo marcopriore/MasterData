@@ -482,8 +482,9 @@ export default function WorkflowConfigPage() {
       })
       toast.success('Fluxo salvo com sucesso!')
       fetchSteps()
-    } catch {
-      toast.error('Falha ao salvar fluxo')
+    } catch (err) {
+      toast.error('Falha ao salvar fluxo', { description: err instanceof Error ? err.message : undefined })
+      fetchSteps()
     } finally {
       setSaving(false)
     }
