@@ -1,36 +1,25 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PRO-MAT — aplicação web
 
-## Getting Started
+Next.js com Supabase. A documentação do produto fica em [`../docs`](../docs):
 
-First, run the development server:
+- [funcionalidades.md](../docs/funcionalidades.md): telas e o que cada uma faz;
+- [regras.md](../docs/regras.md): regras de negócio, permissões e travas do banco;
+- [tecnologias.md](../docs/tecnologias.md): arquitetura, migrations e testes;
+- [deploy-producao.md](../docs/deploy-producao.md): ambiente, migrations e publicação.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Rodar
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. Copie as variáveis para `.env.local` (lista em `deploy-producao.md`). O banco é o de produção: use tenant de teste.
+2. `npm install`
+3. `npm run dev` e abra [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Verificar
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Comando | O que faz |
+|---------|-----------|
+| `npm run check` | Testes unitários, auditoria de segurança do código e tipos. Não usa o banco. |
+| `npx next build` | Build de produção. |
+| `npm run prd:check` | Confere ambiente e migrations aplicadas. |
+| `npm run security:probe` | Ataques conhecidos contra o banco, com tenants temporários apagados no fim. Só antes de commit. |
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+O E2E fica em `../tests` (`npx playwright test --config=e2e/playwright.config.ts`), também só antes de commit.

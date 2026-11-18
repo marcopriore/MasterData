@@ -34,6 +34,7 @@ import {
   type ErpErrorRow,
   type ErpEventRow,
   type FlowRow,
+  type IncompleteMaterialRow,
   type MaterialBaseRow,
   type ProductivityRow,
   type RejectionRow,
@@ -713,6 +714,22 @@ export async function getReportErpErrors(): Promise<ErpErrorRow[]> {
     message: String(r.message ?? ''),
     total: toNumber(r.total),
     last_update: r.last_update ? String(r.last_update) : null,
+  }))
+}
+
+/** Materiais sem campo obrigatório pela regra por material (migration 051). */
+export async function getReportIncompleteMaterials(): Promise<IncompleteMaterialRow[]> {
+  const supabase = createClient()
+  const rows = await allPages((from, to) => supabase.rpc('report_incomplete_materials').range(from, to))
+  return (rows as Record<string, unknown>[]).map((r) => ({
+    material_id: toNumber(r.material_id),
+    id_sistema: (r.id_sistema as string | null) ?? null,
+    id_erp: (r.id_erp as string | null) ?? null,
+    description: String(r.description ?? ''),
+    pdm_code: String(r.pdm_code ?? ''),
+    status: String(r.status ?? ''),
+    erp_status: String(r.erp_status ?? ''),
+    missing: Array.isArray(r.missing) ? (r.missing as unknown[]).map(String) : [],
   }))
 }
 
@@ -2487,36 +2504,6 @@ export async function getMeasurementUnits(): Promise<MeasurementUnit[]> {
   cachedUnits = result
   cachedUnitsTime = Date.now()
   return result
-}
-
-// ─── Products ────────────────────────────────────────────────────────────────
-
-export type Product = { id: string; name: string; description?: string | null }
-
-export async function getProducts(): Promise<Product[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase.from('products').select('*')
-  if (error) handleError(error)
-  return data ?? []
-}
-
-export async function getProductById(id: string): Promise<Product | null> {
-  const supabase = createClient()
-  const { data } = await supabase.from('products').select('*').eq('id', id).single()
-  return data
-}
-
-export async function createProduct(payload: { name: string; description?: string | null }): Promise<Product> {
-  const supabase = createClient()
-  const { data, error } = await supabase.from('products').insert(payload).select().single()
-  if (error) handleError(error)
-  return data
-}
-
-export async function deleteProduct(id: string): Promise<void> {
-  const supabase = createClient()
-  const { error } = await supabase.from('products').delete().eq('id', id)
-  if (error) handleError(error)
 }
 
 // ─── Storage: upload attachment ───────────────────────────────────────────────

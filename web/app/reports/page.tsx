@@ -8,6 +8,7 @@ import {
   getReportErpErrors,
   getReportErpIntegrations,
   getReportFlow,
+  getReportIncompleteMaterials,
   getReportMaterialBase,
   getReportProductivity,
   getReportRejections,
@@ -20,6 +21,7 @@ import {
   erpTotals,
   formatDay,
   formatHours,
+  missingByField,
   periodToRange,
   productivityByArea,
   rejectionsBy,
@@ -27,6 +29,7 @@ import {
   type ErpErrorRow,
   type ErpEventRow,
   type FlowRow,
+  type IncompleteMaterialRow,
   type MaterialBaseRow,
   type ProductivityRow,
   type RejectionRow,
@@ -37,7 +40,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-type Tab = 'fluxo' | 'produtividade' | 'rejeicoes' | 'erp' | 'base'
+type Tab = 'fluxo' | 'produtividade' | 'rejeicoes' | 'erp' | 'base' | 'incompletos'
+
+/** Linhas mostradas na tela; a exportação leva todas. */
+const INCOMPLETE_ON_SCREEN = 200
 
 function Kpi({ label, value, tone }: { label: string; value: string | number; tone?: 'alert' }) {
   return (
@@ -71,6 +77,7 @@ const td = 'px-4 py-3'
 export default function ReportsPage() {
   const { can, ready } = useUser()
   const allowed = can('can_view_reports')
+  const seesDatabase = can('can_view_database')
   const [tab, setTab] = useState<Tab>('fluxo')
   const [period, setPeriod] = useState(defaultPeriod)
   const [stepNames, setStepNames] = useState<Map<string, { name: string; order: number }>>(new Map())
@@ -80,6 +87,7 @@ export default function ReportsPage() {
   const [rejections, setRejections] = useState<RejectionRow[]>([])
   const [erpEvents, setErpEvents] = useState<ErpEventRow[]>([])
   const [erpErrors, setErpErrors] = useState<ErpErrorRow[]>([])
+  const [incomplete, setIncomplete] = useState<IncompleteMaterialRow[]>([])
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
 
@@ -91,7 +99,7 @@ export default function ReportsPage() {
     setLoading(true)
     const range = periodToRange(period.from, period.to)
     try {
-      const [flowRows, peopleRows, baseRows, rejectionRows, erpRows, erpErrorRows, steps] = await Promise.all([
+      const [flowRows, peopleRows, baseRows, rejectionRows, erpRows, erpErrorRows, steps, incompleteRows] = await Promise.all([
         getReportFlow(range.from, range.to),
         getReportProductivity(range.from, range.to),
         getReportMaterialBase(),
@@ -99,7 +107,9 @@ export default function ReportsPage() {
         getReportErpIntegrations(range.from, range.to),
         getReportErpErrors(),
         getWorkflowConfig().catch(() => []),
+        getReportIncompleteMaterials(),
       ])
+      setIncomplete(incompleteRows)
       setFlow(flowRows)
       setPeople(peopleRows)
       setBase(baseRows)
@@ -135,6 +145,8 @@ export default function ReportsPage() {
   const erpDays = useMemo(() => erpByDay(erpEvents), [erpEvents])
   const erpSum = useMemo(() => erpTotals(erpEvents), [erpEvents])
   const erpOpenErrors = erpErrors.reduce((s, r) => s + r.total, 0)
+  const incompleteByField = useMemo(() => missingByField(incomplete), [incomplete])
+  const maxIncompleteField = Math.max(0, ...incompleteByField.map((r) => r.total))
 
   const maxAvg = Math.max(0, ...flow.map((r) => r.avg_hours ?? 0))
   const maxOpen = Math.max(0, ...flow.map((r) => r.current_open))
@@ -192,6 +204,21 @@ export default function ReportsPage() {
           'Integração ERP',
           `relatorio_erp_${period.from}_${period.to}`
         )
+      } else if (tab === 'incompletos') {
+        await exportRowsToXlsx(
+          incomplete.map((r) => ({
+            'Código PRO-MAT': r.id_sistema ?? '',
+            'Código ERP': r.id_erp ?? '',
+            Descrição: r.description,
+            'Código PDM': r.pdm_code,
+            Status: r.status,
+            'Situação ERP': r.erp_status,
+            'Campos faltando': r.missing.join('; '),
+            Quantidade: r.missing.length,
+          })),
+          'Materiais incompletos',
+          'relatorio_materiais_incompletos'
+        )
       } else {
         await exportRowsToXlsx(
           baseSorted.map((r) => ({
@@ -230,7 +257,7 @@ export default function ReportsPage() {
             <BarChart3 className="size-6" />
             Relatórios
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Fluxo das solicitações, produtividade das áreas, integração com o ERP e situação da base de materiais</p>
+          <p className="mt-1 text-sm text-muted-foreground">Fluxo das solicitações, produtividade das áreas, integração com o ERP, situação da base e materiais incompletos</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div>
@@ -259,6 +286,7 @@ export default function ReportsPage() {
           <TabsTrigger value="rejeicoes">Rejeições</TabsTrigger>
           <TabsTrigger value="erp">Integração ERP</TabsTrigger>
           <TabsTrigger value="base">Base de materiais</TabsTrigger>
+          <TabsTrigger value="incompletos">Materiais incompletos</TabsTrigger>
         </TabsList>
 
         <TabsContent value="erp" className="mt-4 space-y-4">
@@ -537,6 +565,77 @@ export default function ReportsPage() {
             </table>
           </div>
           <p className="text-xs text-muted-foreground">A base é a situação atual, sem período. Duplicados seguem a mesma regra do selo DUP: Obsoleto não conta.</p>
+        </TabsContent>
+
+        <TabsContent value="incompletos" className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Kpi label="Materiais incompletos" value={incomplete.length.toLocaleString('pt-BR')} tone={incomplete.length > 0 ? 'alert' : undefined} />
+            <Kpi label="Campos faltando (total)" value={incomplete.reduce((s, r) => s + r.missing.length, 0).toLocaleString('pt-BR')} />
+            <Kpi label="Campo que mais falta" value={incompleteByField[0]?.field ?? '—'} />
+          </div>
+          {incompleteByField.length > 0 && (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-zinc-700/50 dark:bg-card">
+              <table className="w-full text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 dark:border-zinc-700 dark:bg-muted/30">
+                  <tr>
+                    <th className={th}>Campo obrigatório sem valor</th>
+                    <th className={`${th} w-72`}>Materiais</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incompleteByField.map((r) => (
+                    <tr key={r.field} className="border-b border-slate-100 last:border-b-0 dark:border-zinc-700/40">
+                      <td className={td}>{r.field}</td>
+                      <td className={td}>
+                        <div className="flex items-center gap-3">
+                          <span className="w-12 shrink-0 text-right tabular-nums">{r.total.toLocaleString('pt-BR')}</span>
+                          <Bar value={r.total} max={maxIncompleteField} tone="red" />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-zinc-700/50 dark:bg-card">
+            <table className="w-full text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 dark:border-zinc-700 dark:bg-muted/30">
+                <tr>
+                  <th className={th}>Material</th>
+                  <th className={th}>PDM</th>
+                  <th className={th}>Status</th>
+                  <th className={th}>Campos faltando</th>
+                </tr>
+              </thead>
+              <tbody>
+                {incomplete.length === 0 ? (
+                  <tr><td colSpan={4} className="py-10 text-center text-muted-foreground">{loading ? 'Carregando…' : 'Nenhum material incompleto.'}</td></tr>
+                ) : incomplete.slice(0, INCOMPLETE_ON_SCREEN).map((r) => (
+                  <tr key={r.material_id} className="border-b border-slate-100 last:border-b-0 dark:border-zinc-700/40">
+                    <td className={td}>
+                      {seesDatabase ? (
+                        <a href={`/database/${r.material_id}`} className="font-mono text-xs font-semibold text-[#0F1C38] hover:underline dark:text-[#C69A46]">
+                          {r.id_erp ?? r.id_sistema ?? `#${r.material_id}`}
+                        </a>
+                      ) : (
+                        <span className="font-mono text-xs font-semibold">{r.id_erp ?? r.id_sistema ?? `#${r.material_id}`}</span>
+                      )}
+                      <p className="mt-0.5 font-mono text-xs">{r.description}</p>
+                    </td>
+                    <td className={`${td} font-mono text-xs`}>{r.pdm_code || '—'}</td>
+                    <td className={td}>{r.status}</td>
+                    <td className={`${td} text-red-700 dark:text-red-400`}>{r.missing.join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Obrigatórios pela regra por material (Dicionário de Campos → Regras), o mesmo cálculo que a edição, a importação e a API cobram. Obsoleto não entra.
+            {incomplete.length > INCOMPLETE_ON_SCREEN ? ` A tela mostra os ${INCOMPLETE_ON_SCREEN} primeiros; a exportação leva todos os ${incomplete.length.toLocaleString('pt-BR')}.` : ''}
+            {' '}Para completar, abra o material pelo código ou, em lote, use a Importação em Massa da Base de Dados (com o modelo da própria importação).
+          </p>
         </TabsContent>
       </Tabs>
 

@@ -191,3 +191,24 @@ export function totalsOfBase(rows: MaterialBaseRow[]): Omit<MaterialBaseRow, 'pd
   for (const row of rows) for (const k of keys) out[k] += row[k]
   return out
 }
+
+/** Material sem campo obrigatório pela regra por material (migration 051). */
+export type IncompleteMaterialRow = {
+  material_id: number
+  id_sistema: string | null
+  id_erp: string | null
+  description: string
+  pdm_code: string
+  status: string
+  erp_status: string
+  missing: string[]
+}
+
+/** Quantos materiais estão sem cada campo, do mais frequente para o menos. */
+export function missingByField(rows: IncompleteMaterialRow[]): Array<{ field: string; total: number }> {
+  const counts = new Map<string, number>()
+  for (const row of rows) for (const field of new Set(row.missing)) counts.set(field, (counts.get(field) ?? 0) + 1)
+  return [...counts.entries()]
+    .map(([field, total]) => ({ field, total }))
+    .sort((a, b) => b.total - a.total || a.field.localeCompare(b.field))
+}

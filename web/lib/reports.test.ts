@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { defaultPeriod, erpByDay, erpTotals, formatDay, formatHours, periodToRange, productivityByArea, rejectionsBy, totalsOfBase, type ProductivityRow } from './reports'
+import { defaultPeriod, erpByDay, erpTotals, formatDay, formatHours, missingByField, periodToRange, productivityByArea, rejectionsBy, totalsOfBase, type IncompleteMaterialRow, type ProductivityRow } from './reports'
+
+describe('materiais incompletos', () => {
+  const row = (id: number, missing: string[]): IncompleteMaterialRow => ({
+    material_id: id, id_sistema: `MDM-${id}`, id_erp: null, description: 'X', pdm_code: 'P', status: 'Ativo', erp_status: 'pendente_erp', missing,
+  })
+
+  it('conta quantos materiais estão sem cada campo, do mais frequente', () => {
+    expect(missingByField([row(1, ['Tipo MRP', 'NCM']), row(2, ['NCM']), row(3, ['NCM', 'NCM'])])).toEqual([
+      { field: 'NCM', total: 3 },
+      { field: 'Tipo MRP', total: 1 },
+    ])
+    expect(missingByField([])).toEqual([])
+  })
+})
 
 describe('integração com o ERP', () => {
   const rows = [

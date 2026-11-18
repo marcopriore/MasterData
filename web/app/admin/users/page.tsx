@@ -68,7 +68,7 @@ function roleBadgeStyle(name: string | null) {
   switch (name) {
     case 'ADMIN':       return { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' }
     case 'SOLICITANTE': return { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' }
-    case 'TRIAGEM':     return { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' }
+    case 'CADASTRO':    return { bg: '#EFF6FF', text: '#1E40AF', border: '#BFDBFE' }
     case 'FISCAL':      return { bg: '#F5F3FF', text: '#5B21B6', border: '#DDD6FE' }
     case 'MASTER':      return { bg: '#FEF3C7', text: '#B45309', border: '#FDE68A' }
     case 'MRP':         return { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0' }
@@ -799,7 +799,7 @@ export default function UsersPage() {
                       <li>A planilha tem uma aba <strong>Usuários</strong></li>
                       <li><strong>operacao=C</strong>: cria o usuário, que recebe um e-mail para criar a própria senha</li>
                       <li><strong>operacao=E</strong>: atualiza nome, perfil e/ou ativo — e-mail não pode ser alterado</li>
-                      <li>Perfis aceitos: ADMIN, MASTER, TRIAGEM, FISCAL, MRP, SOLICITANTE</li>
+                      <li>perfil: nome de um grupo de perfil da empresa (ex.: SOLICITANTE, CADASTRO, COMPRAS, MRP, FISCAL, CONTABILIDADE, ADMIN)</li>
                       <li>ativo aceita: Sim ou Não</li>
                       <li>Não alterar os nomes das colunas do cabeçalho</li>
                     </ul>

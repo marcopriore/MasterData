@@ -49,8 +49,8 @@ export function canSeeAdminHref(href: string, access: NavAccess): boolean {
 export function canOpenPath(pathname: string, access: NavAccess): boolean {
   const p = pathname.replace(/\/+$/, '') || '/'
   const under = (base: string) => p === base || p.startsWith(`${base}/`)
-  // Restos de desenvolvimento e administração de tenants: só Master.
-  if (under('/products') || under('/teste') || under('/admin/tenants')) return access.isMaster
+  // Administração de tenants: só Master.
+  if (under('/admin/tenants')) return access.isMaster
   if (access.isMaster) return true
   const perms = access.permissions
   if (p === '/' || under('/support') || under('/settings/profile') || under('/login') || under('/reset-password')) return true

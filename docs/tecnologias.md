@@ -186,3 +186,5 @@ Enquanto o banco for único, a rodada grava em produção, sempre num tenant pr�
 | 047 | Reenvio por tipo: `resubmit_check` (dono, Admin ou Master; só rejeitada), `resubmit_request` só cadastro, `resubmit_change_request` (Alteração, travas da abertura) e `resubmit_expansion_request` (Ampliação, mesmo centro) |
 | 048 | `resubmit_expansion_request` com `p_center_id`: a Ampliação rejeitada pode trocar de centro no reenvio, com as travas da abertura |
 | 049 | Etapa sem campo para revisar é pulada: `stage_applies`, `next_applicable_stage`, gatilho na abertura, `advance_workflow` e reenvios recomeçando pela primeira etapa com campo; `material_requests.skipped_stages` (só o banco grava); Central de Cadastro e etapa final nunca pulam |
+| 050 | Tabelas sem uso: `products` e `request_values` apagadas se vazias; com dado, mantidas sem acesso pela API |
+| 051 | `report_incomplete_materials`: materiais (menos Obsoleto) sem campo obrigatório pela regra por material, com a lista dos campos; `can_view_reports`, só o tenant em uso |

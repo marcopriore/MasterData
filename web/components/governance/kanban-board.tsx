@@ -123,6 +123,9 @@ function SortableCard({
 
 // ─── Main board ───────────────────────────────────────────────────────────────
 
+/** Cartões por coluna antes do "Mostrar mais". */
+const KANBAN_COLUMN_PAGE = 30
+
 interface KanbanBoardProps {
   requests: MaterialRequest[]
   workflowId?: number | null
@@ -158,6 +161,8 @@ export function KanbanBoard({
 }: KanbanBoardProps) {
   const [columns, setColumns] = useState<KanbanColumn[]>([])
   const [columnsLoading, setColumnsLoading] = useState(true)
+  /** Cartões mostrados por coluna; o contador do cabeçalho é sempre o total. */
+  const [shownByColumn, setShownByColumn] = useState<Record<string, number>>({})
 
   // Local copy of requests for optimistic updates
   const [localRequests, setLocalRequests] = useState<MaterialRequest[]>(requests)
@@ -340,6 +345,9 @@ export function KanbanBoard({
         <div className="flex gap-4 pb-4">
           {columnsToRender.map((col) => {
             const items = cardsByColumn(col.id)
+            const limit = shownByColumn[col.id] ?? KANBAN_COLUMN_PAGE
+            const shown = items.slice(0, limit)
+            const hidden = items.length - shown.length
             const isOver = overColumnId === col.id && activeCard?.status !== col.id
 
             return (
@@ -367,7 +375,7 @@ export function KanbanBoard({
                 {/* Column body — droppable zone */}
                 <SortableContext
                   id={col.id}
-                  items={items.map((r) => r.id)}
+                  items={shown.map((r) => r.id)}
                   strategy={verticalListSortingStrategy}
                 >
                   <div
@@ -383,20 +391,32 @@ export function KanbanBoard({
                     {items.length === 0 ? (
                       <EmptyColumn message={canManageAllStages ? "Arraste um card aqui" : "Nenhuma solicitação nesta etapa"} />
                     ) : (
-                      items.map((req) => (
-                        <SortableCard
-                          key={req.id}
-                          request={req}
-                          allValidStatuses={allStatusesSet}
-                          onCompleteData={onCompleteData}
-                          onViewDetails={onViewDetails}
-                          showActionButtons={showActionButtons}
-                          currentUserId={currentUserId}
-                          onIniciarAtendimentoClick={showActionButtons ? handleIniciarAtendimento : undefined}
-                          erpState={erpStates[req.id]}
-                          canDrag={canManageAllStages}
-                        />
-                      ))
+                      <>
+                        {shown.map((req) => (
+                          <SortableCard
+                            key={req.id}
+                            request={req}
+                            allValidStatuses={allStatusesSet}
+                            onCompleteData={onCompleteData}
+                            onViewDetails={onViewDetails}
+                            showActionButtons={showActionButtons}
+                            currentUserId={currentUserId}
+                            onIniciarAtendimentoClick={showActionButtons ? handleIniciarAtendimento : undefined}
+                            erpState={erpStates[req.id]}
+                            canDrag={canManageAllStages}
+                          />
+                        ))}
+                        {hidden > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShownByColumn((prev) => ({ ...prev, [col.id]: limit + KANBAN_COLUMN_PAGE }))}
+                            className="w-full rounded-md border border-dashed py-2 text-xs font-medium hover:bg-white/60 dark:hover:bg-white/5"
+                            style={{ borderColor: 'var(--kanban-col-border)', color: 'var(--kanban-col-text)' }}
+                          >
+                            Mostrar mais ({hidden.toLocaleString("pt-BR")} {hidden === 1 ? "restante" : "restantes"})
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </SortableContext>

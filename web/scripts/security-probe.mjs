@@ -458,6 +458,19 @@ async function main() {
     const { data: approvedEvt } = await admin.from('request_history').select('message').eq('request_id', skipReq.id).eq('event_type', 'approved').single()
     record(String(approvedEvt?.message ?? '').includes('Compras'), 'o histórico registra a etapa pulada')
   }
+
+  console.log('\nRelatório de materiais incompletos (migration 051)')
+  const [matI] = await must(admin.from('material_database').insert({ tenant_id: tA, id_sistema: `SONDA-${tag}-I`, description: 'SONDA INCOMPLETO', status: 'Ativo', erp_status: 'pendente_erp', source: 'manual', technical_attributes: { tipo_material: 'FERT' } }).select('id'), 'material incompleto')
+  const reporter = await makeUser(tA, 'REPO', { can_view_reports: true })
+  const repo = await signIn(reporter.email)
+  const { data: incompleteA, error: incompleteErr } = await repo.rpc('report_incomplete_materials')
+  const rowI = (incompleteA ?? []).find((r) => r.material_id === matI.id)
+  record(!incompleteErr && Boolean(rowI) && (rowI.missing ?? []).includes('Campo da sonda'),
+    'o relatório aponta o material sem o campo exigido pela regra', incompleteErr?.message ?? '')
+  record(!(incompleteA ?? []).some((r) => r.material_id === matF.id), 'material completo não aparece no relatório')
+  await denied('sem "Ver Relatórios" não lê os materiais incompletos', () => solic.rpc('report_incomplete_materials'))
+  const { data: incompleteB } = await relB.rpc('report_incomplete_materials')
+  record(!(incompleteB ?? []).some((r) => r.material_id === matI.id), 'o relatório do tenant B não mostra material do tenant A')
 }
 
 try {

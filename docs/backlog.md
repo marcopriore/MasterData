@@ -10,8 +10,8 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
   1. ~~Histórico no detalhe do material~~ (feito, migration 042).
   2. ~~Alteração e Ampliação a partir da pesquisa da nova solicitação~~ (fase A, Alteração, na 043; fase B, centros e Ampliação, na 045). **Falta confirmar com o ERP real** o formato de `sites` no JSON (um item por centro com `siteCode` e os campos por centro). Possível passo seguinte: Alteração de campo por centro num centro acrescentado (hoje a Alteração muda os campos do material, que valem para o centro inicial) e centro na API de solicitações. Texto original: No dialog de detalhes do item encontrado em Nova Solicitação, dois botões: **Alteração** (solicitação para alterar um material existente) e **Ampliação** (solicitação para ampliar o material para outro centro). Cada um abre um novo tipo de solicitação, com fluxo próprio. Lembrar: o Tipo de Material não muda numa alteração (migration 041).
   3. ~~Governança em lista: barras de progresso por etapa~~ (feito: uma barra por etapa do workflow, `lib/stage-progress.ts`).
-- **Materiais antigos incompletos.** Desde a 040, alterar um material exige os obrigatórios da regra. Os materiais que vieram por planilha ou seed sem os campos do dicionário precisam ser completados na primeira alteração; vale um relatório de "materiais incompletos" para tratar em lote.
-- **Governança com muitas abertas.** Desde a 037 as fechadas vêm só dos últimos 90 dias (ajustável na tela). As abertas continuam todas: com milhares em andamento ao mesmo tempo, o próximo passo é paginar a lista.
+- ~~Materiais antigos incompletos~~ (feito: Relatórios → Materiais incompletos, migration 051).
+- **Governança com muitas abertas.** Desde a 037 as fechadas vêm só dos últimos 90 dias (ajustável na tela). A tela já pagina (30 cartões por coluna com "Mostrar mais", 50 linhas por página na lista), mas ainda carrega todas as abertas para os indicadores. Com dezenas de milhares em andamento, o próximo passo é buscar por página no banco e calcular os indicadores lá.
 - **AxisDesk em produção respondendo 500.** A chave do PRO-MAT é aceita, mas `/api/categorias` e `/api/chamados` do AxisDesk falham na primeira consulta ao próprio banco. Conferir o projeto Supabase do AxisDesk (pausado?) e os logs da Vercel dele.
 - **E-mail de redefinição de senha.** O link sai pelo e-mail do Supabase Auth. O SMTP padrão do Supabase só entrega para membros da equipe do projeto e tem limite baixo; em produção é preciso o SMTP próprio (Resend) e o modelo de e-mail com `token_hash`, descritos em `deploy-producao.md`.
 - **E-mail sem chave.** O disparo já respeita `email_request_*`. Falta configurar `RESEND_API_KEY` e `RESEND_FROM_EMAIL` no ambiente para a mensagem sair de fato.
@@ -32,14 +32,17 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
   - Captcha no login e na redefinição de senha, se aparecer tentativa em massa.
   - Rodar a sonda (`npm run security:probe`) no CI contra um banco de desenvolvimento, quando ele existir.
 
+- **Valores padrão por condição (a fazer, pedido em 18/11/2026).** Tela de parametrização para pré-preencher campos conforme uma condição, para reduzir o preenchimento manual nas etapas do workflow. Exemplos pedidos: o Grupo de Mercadorias vir preenchido pelo PDM escolhido; o Grupo de Compradores, a Classe de Avaliação e outros campos vindos de uma condição. Pontos a definir na modelagem:
+  - a condição (PDM, tipo de material, centro, outro campo ou combinação de campos) e o valor preenchido;
+  - se o valor é sugestão (o usuário pode trocar) ou fixo (só muda pela regra);
+  - em que momento aplica: ao abrir a solicitação, na etapa que cobra o campo ou na integração com o ERP;
+  - o que acontece com material antigo já preenchido (nunca sobrescrever um valor existente, só preencher vazio, salvo decisão diferente);
+  - rastreio: o histórico registra quando o valor veio de regra e qual regra.
+  Relação com a regra por material (migrations 038 a 040) e com a regra de etapa (migration 049): o campo pré-preenchido continua sendo cobrado pela etapa dele como qualquer outro.
+
 ## Resíduos
 
-- `/products` — CRUD da tabela `products`, sem entrada no menu.
-- `/teste` — página que só confirma que a rota responde.
-- `web/components/request/phase-category.tsx` — componente sem uso.
-- `request_values` — tabela da migration 002; o fluxo atual grava `technical_attributes` na solicitação.
-- `web/README.md` — texto padrão do create-next-app, sem instrução do PRO-MAT.
-- Papéis TRIAGEM e MASTER DATA da versão antiga não são os do seed atual. O fluxo demo usa CADASTRO, COMPRAS, MRP, FISCAL e CONTABILIDADE. A tela de perfis ainda colore TRIAGEM; esse nome pode aparecer só se alguém criar o papel à mão.
+- ~~`/products`, `/teste`, `phase-category.tsx`, tabelas `products` e `request_values`, README padrão e cor do papel TRIAGEM~~ (retirados em 13/11/2026; as tabelas pela migration 050, que só apaga se estiverem vazias e, com dado, tira o acesso pela API e avisa).
 
 ## Documentação e engenharia
 
@@ -49,5 +52,3 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 - Senha dos usuários demo continua hardcoded no script de criação. Aceitável para demo; não usar esse valor fora do tenant de demonstração.
 
 ## Ideias já modeladas e ainda abertas
-
-- Retirar ou esconder `/products` e `/teste` quando não forem mais úteis.
