@@ -188,3 +188,5 @@ Enquanto o banco for único, a rodada grava em produção, sempre num tenant pr�
 | 049 | Etapa sem campo para revisar é pulada: `stage_applies`, `next_applicable_stage`, gatilho na abertura, `advance_workflow` e reenvios recomeçando pela primeira etapa com campo; `material_requests.skipped_stages` (só o banco grava); Central de Cadastro e etapa final nunca pulam |
 | 050 | Tabelas sem uso: `products` e `request_values` apagadas se vazias; com dado, mantidas sem acesso pela API |
 | 051 | `report_incomplete_materials`: materiais (menos Obsoleto) sem campo obrigatório pela regra por material, com a lista dos campos; `can_view_reports`, só o tenant em uso |
+| 052 | Valores padrão por condição: tabela `field_default_rules` (condição por PDM ou campo de lista, campo alvo, valor, fixo, prioridade), coluna `material_requests.default_fields`, `apply_field_defaults` ao criar, entrar em etapa ou trocar o PDM no reenvio, e evento `defaults` no histórico |
+| 053 | Valores padrão: condição pode estar na mesma etapa do campo que recebe (recusa só se vier depois); `apply_field_defaults` também roda quando um campo de condição muda, para campos vazios |

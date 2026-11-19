@@ -13,6 +13,7 @@ import {
 import { useUser } from '@/contexts/user-context'
 import { ERP_VIEWS as ERP_VIEW_LIST, erpViewCode, erpViewLabel } from '@/lib/erp-views'
 import { FieldRulesPanel } from '@/components/fields/field-rules-panel'
+import { DefaultValuesPanel } from '@/components/fields/default-values-panel'
 import { PageLoading } from '@/components/ui/page-loading'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -397,7 +398,7 @@ export default function FieldsPage() {
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [erpViewFilter, setErpViewFilter] = useState('')
-  const [section, setSection] = useState<'campos' | 'regras'>('campos')
+  const [section, setSection] = useState<'campos' | 'regras' | 'valores'>('campos')
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<ModalMode>('create')
   const [editTarget, setEditTarget] = useState<FieldDictionary | null>(null)
@@ -512,7 +513,7 @@ export default function FieldsPage() {
       </div>
 
       <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-zinc-700 dark:bg-card" role="tablist">
-        {([['campos', 'Campos'], ['regras', 'Regras (etapa e obrigatoriedade)']] as const).map(([key, label]) => (
+        {([['campos', 'Campos'], ['regras', 'Regras (etapa e obrigatoriedade)'], ['valores', 'Valores padrão']] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -533,6 +534,10 @@ export default function FieldsPage() {
       {section === 'regras' ? (
         loading ? <PageLoading label="Carregando campos…" minHeight="min-h-[30vh]" /> : (
           <FieldRulesPanel fields={fields} roles={roles.map((r) => r.name)} onFieldsChanged={fetchData} />
+        )
+      ) : section === 'valores' ? (
+        loading ? <PageLoading label="Carregando campos…" minHeight="min-h-[30vh]" /> : (
+          <DefaultValuesPanel fields={fields} onChanged={fetchData} />
         )
       ) : (<>
       {/* Tabs filter */}

@@ -100,7 +100,7 @@ async function makeFlow(tenantId) {
 
 async function cleanup() {
   for (const tenantId of created.tenants) {
-    for (const table of ['request_history', 'notifications', 'system_logs', 'material_history', 'material_centers', 'material_requests', 'material_database', 'centers', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_dictionary']) {
+    for (const table of ['request_history', 'notifications', 'system_logs', 'material_history', 'material_centers', 'material_requests', 'material_database', 'centers', 'pdm_templates', 'workflow_config', 'workflow_header', 'field_rule_profiles', 'field_default_rules', 'field_dictionary']) {
       await admin.from(table).delete().eq('tenant_id', tenantId)
     }
   }
@@ -471,6 +471,75 @@ async function main() {
   await denied('sem "Ver Relatórios" não lê os materiais incompletos', () => solic.rpc('report_incomplete_materials'))
   const { data: incompleteB } = await relB.rpc('report_incomplete_materials')
   record(!(incompleteB ?? []).some((r) => r.material_id === matI.id), 'o relatório do tenant B não mostra material do tenant A')
+
+  console.log('\nValores padrão por condição (migration 052)')
+  // Fluxo próprio: Cadastro → Compras → Finalizado. O fluxo com pulo sai de uso para não haver dois de Cadastro ativos.
+  await must(admin.from('workflow_header').update({ is_active: false }).eq('id', wfSkip.id), 'desativa o fluxo com pulo (valor padrão)')
+  await must(admin.from('field_dictionary').insert([
+    { tenant_id: tA, field_name: 'sonda_dft_tipo', field_label: 'Sonda tipo', erp_view: 'dados_basicos', field_type: 'select', options: ['FERT', 'NLAG'], responsible_role: 'CADASTRO', is_required: false, display_order: 91 },
+    { tenant_id: tA, field_name: 'sonda_dft_grupo', field_label: 'Sonda grupo', erp_view: 'dados_basicos', field_type: 'select', options: ['001', '002'], responsible_role: 'CADASTRO', is_required: false, display_order: 92 },
+    { tenant_id: tA, field_name: 'sonda_dft_classe', field_label: 'Sonda classe', erp_view: 'dados_basicos', field_type: 'select', options: ['Z1', 'Z2'], responsible_role: 'COMPRAS', is_required: false, display_order: 93 },
+  ]), 'campos de valor padrão')
+  const [dftWf] = await must(admin.from('workflow_header').insert({ tenant_id: tA, name: `Sonda padrão ${tag}`, is_active: true }).select('id'), 'fluxo de valor padrão')
+  await must(admin.from('workflow_config').insert([
+    { tenant_id: tA, workflow_id: dftWf.id, step_name: 'Cadastro', status_key: 'cadastro', order: 1, is_active: true },
+    { tenant_id: tA, workflow_id: dftWf.id, step_name: 'Compras', status_key: 'compras', order: 2, is_active: true },
+    { tenant_id: tA, workflow_id: dftWf.id, step_name: 'Finalizado', status_key: 'finalizado', order: 3, is_active: true },
+  ]), 'etapas do fluxo de valor padrão')
+  const [dftPdm] = await must(admin.from('pdm_templates').select('internal_code').eq('id', flowA.pdmId), 'código do PDM')
+
+  const dftRegra = (extra) => ({ tenant_id: tA, priority: 100, is_fixed: false, is_active: true, ...extra })
+  const [dftTipo] = await must(admin.from('field_default_rules').insert(dftRegra({ name: `GRUPO POR TIPO ${tag}`, condition_field: 'sonda_dft_tipo', condition_value: 'FERT', target_field: 'sonda_dft_grupo', target_value: '001' })).select('id'), 'regra por tipo')
+  const [dftPdmRegra] = await must(admin.from('field_default_rules').insert(dftRegra({ name: `GRUPO POR PDM ${tag}`, priority: 200, condition_field: 'pdm', condition_value: dftPdm.internal_code, target_field: 'sonda_dft_grupo', target_value: '002' })).select('id'), 'regra por PDM de menor prioridade')
+  await must(admin.from('field_default_rules').insert(dftRegra({ name: `CLASSE FIXA ${tag}`, condition_field: 'pdm', condition_value: dftPdm.internal_code, target_field: 'sonda_dft_classe', target_value: 'Z1', is_fixed: true })), 'regra fixa')
+
+  const dftCount = async (name) => ((await admin.from('field_default_rules').select('id').eq('tenant_id', tA).eq('name', name)).data ?? []).length
+  const inversa = `INVERSA ${tag}`
+  await denied('condição preenchida depois do campo que recebe não é aceita', () => admin.from('field_default_rules').insert(dftRegra({ name: inversa, condition_field: 'sonda_dft_classe', condition_value: 'Z1', target_field: 'sonda_dft_grupo', target_value: '001' })).select('id'), async () => (await dftCount(inversa)) === 0)
+  const fora = `FORA ${tag}`
+  await denied('valor que não é opção do campo não é aceito', () => admin.from('field_default_rules').insert(dftRegra({ name: fora, condition_field: 'sonda_dft_tipo', condition_value: 'NLAG', target_field: 'sonda_dft_grupo', target_value: 'XYZ' })).select('id'), async () => (await dftCount(fora)) === 0)
+
+  const dftRow = (extra) => ({ tenant_id: tA, pdm_id: flowA.pdmId, workflow_id: dftWf.id, status: 'cadastro', requester: `PADRAO-${tag}`, urgency: 'low', user_id: requester.id, center_id: c1.id, technical_attributes: { sonda_dft_tipo: 'FERT' }, ...extra })
+  const readDft = async (id) => (await admin.from('material_requests').select('status, technical_attributes, default_fields').eq('id', id).single()).data
+
+  const [dft1] = await must(admin.from('material_requests').insert(dftRow({})).select('id'), 'pedido com valor padrão')
+  const r1 = await readDft(dft1.id)
+  record(r1?.technical_attributes?.sonda_dft_grupo === '001' && r1?.default_fields?.sonda_dft_grupo?.rule_id === dftTipo.id,
+    'na abertura, o campo da etapa recebe a regra de menor prioridade e o banco registra qual regra preencheu')
+  record(!('sonda_dft_classe' in (r1?.technical_attributes ?? {})) && !('sonda_dft_classe' in (r1?.default_fields ?? {})),
+    'campo de outra etapa (Compras) não é preenchido na abertura')
+
+  const [dft2] = await must(admin.from('material_requests').insert(dftRow({ technical_attributes: { sonda_dft_tipo: 'FERT', sonda_dft_grupo: '002' } })).select('id'), 'pedido com valor digitado')
+  const r2 = await readDft(dft2.id)
+  record(r2?.technical_attributes?.sonda_dft_grupo === '002' && !('sonda_dft_grupo' in (r2?.default_fields ?? {})),
+    'valor digitado na abertura não muda')
+
+  await must(atend.rpc('assign_request', { p_request_id: dft1.id }), 'assumir pedido com valor padrão')
+  await allowed('a área edita o valor sugerido', () => atend.from('material_requests').update({ technical_attributes: { ...r1.technical_attributes, sonda_dft_grupo: '002' } }).eq('id', dft1.id).select('id'))
+  await allowed('Cadastro aprova e o pedido entra em Compras', () => atend.rpc('advance_workflow', { p_request_id: dft1.id }))
+  const r1b = await readDft(dft1.id)
+  record(r1b?.status === 'compras' && r1b?.technical_attributes?.sonda_dft_classe === 'Z1' && r1b?.default_fields?.sonda_dft_classe?.fixed === true,
+    'na entrada de Compras, o campo fixo recebe o valor da regra', `etapa ${r1b?.status}`)
+  record(r1b?.technical_attributes?.sonda_dft_grupo === '002', 'valor editado pela área não é trocado pela regra ao avançar')
+  await denied('campo fixo não muda pela API', () => compras.from('material_requests').update({ technical_attributes: { ...r1b.technical_attributes, sonda_dft_classe: 'Z2' } }).eq('id', dft1.id).select('id'), async () => (await readDft(dft1.id))?.technical_attributes?.sonda_dft_classe === 'Z1')
+  const { data: dftEvts } = await admin.from('request_history').select('message').eq('request_id', dft1.id).eq('event_type', 'defaults')
+  record((dftEvts ?? []).some((e) => e.message.includes('Sonda classe') && e.message.includes('Z1')) && (dftEvts ?? []).some((e) => e.message.includes('Sonda grupo')),
+    'o histórico registra cada valor padrão preenchido, com o campo e a regra')
+
+  const [dft4] = await must(admin.from('material_requests').insert(dftRow({ technical_attributes: { sonda_dft_tipo: 'NLAG' } })).select('id'), 'pedido sem regra')
+  await must(atend.rpc('assign_request', { p_request_id: dft4.id }), 'assumir pedido sem regra')
+  await allowed('a área muda o tipo na própria etapa', () => atend.from('material_requests').update({ technical_attributes: { sonda_dft_tipo: 'FERT' } }).eq('id', dft4.id).select('id'))
+  record((await readDft(dft4.id))?.technical_attributes?.sonda_dft_grupo === '001', 'mudar a condição na mesma etapa preenche o campo vazio que a regra cobre')
+
+  const [dft3] = await must(admin.from('material_requests').insert(dftRow({})).select('id'), 'pedido para reenvio')
+  await reject(dft3.id)
+  await must(admin.from('field_default_rules').update({ is_active: false }).eq('id', dftPdmRegra.id), 'desativa a regra do PDM')
+  await allowed('reenvio com outro tipo de material', () => solic.rpc('resubmit_request', { p_request_id: dft3.id, p_pdm_id: flowA.pdmId, p_technical_attributes: { sonda_dft_tipo: 'NLAG' }, p_generated_description: 'SONDA' }))
+  const r3 = await readDft(dft3.id)
+  record(r3?.status === 'cadastro' && !('sonda_dft_grupo' in (r3?.technical_attributes ?? {})) && !('sonda_dft_grupo' in (r3?.default_fields ?? {})),
+    'no reenvio, o valor da regra que deixou de valer sai do campo')
+  const { data: retEvts } = await admin.from('request_history').select('message').eq('request_id', dft3.id).eq('event_type', 'defaults')
+  record((retEvts ?? []).some((e) => e.message.includes('retirado')), 'o histórico registra a retirada do valor padrão')
 }
 
 try {

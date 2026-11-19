@@ -40,6 +40,18 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
   - rastreio: o histórico registra quando o valor veio de regra e qual regra.
   Relação com a regra por material (migrations 038 a 040) e com a regra de etapa (migration 049): o campo pré-preenchido continua sendo cobrado pela etapa dele como qualquer outro.
 
+  Decisões de modelagem (18/11/2026):
+  - quando: na etapa que cobra o campo, quando a condição já estiver preenchida;
+  - sugestão ou fixo: misto, definido em cada regra e campo;
+  - material antigo: não mexer nos valores já preenchidos, e listar os casos no relatório de materiais incompletos;
+  - quem configura: Master e Admin do tenant (permissão `can_manage_fields`);
+  - condição: uma por regra (campo de lista ou PDM) com valor único;
+  - reenvio: se o PDM ou a condição mudar, a regra troca o valor que ela mesma preencheu e que a pessoa não editou; valor digitado por alguém é mantido;
+  - escopo: Cadastro, Alteração e Ampliação. Na Alteração, a regra só preenche campo escolhido na alteração que esteja vazio; na Ampliação, só o campo por centro vazio;
+  - conflito: duas regras ativas para o mesmo campo, vale a de menor número de prioridade, e a tela avisa a sobreposição;
+  - fixo: a tela trava o campo e o banco recusa a troca.
+  Modelagem proposta: tabela `field_default_rules` (condição, campo alvo, valor, fixo, prioridade, ativa), coluna `default_fields` em `material_requests` (só o banco grava), evento `defaults` no histórico da solicitação, função `apply_field_defaults` chamada na criação e a cada entrada de etapa.
+
 ## Resíduos
 
 - ~~`/products`, `/teste`, `phase-category.tsx`, tabelas `products` e `request_values`, README padrão e cor do papel TRIAGEM~~ (retirados em 13/11/2026; as tabelas pela migration 050, que só apaga se estiverem vazias e, com dado, tira o acesso pela API e avisa).

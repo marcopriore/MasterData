@@ -18,6 +18,7 @@ import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
 import { safeSearchTerm } from '@/lib/search-term'
 import { type MyRequestRow } from '@/lib/my-requests'
 import { toProfile, type FieldRuleProfile } from '@/lib/field-rules'
+import type { DefaultEntry, FieldDefaultRule } from '@/lib/field-defaults'
 import type { MaterialHistoryRow } from '@/lib/material-timeline'
 import {
   ATTENDED_EVENT_TYPES,
@@ -530,6 +531,8 @@ export type ApiRequest = {
   center_id?: number | null
   /** Etapas puladas por não ter campo para revisar (migration 049). */
   skipped_stages?: string[]
+  /** Campos preenchidos por regra de valor padrão (migration 052); só o banco grava. */
+  default_fields?: Record<string, DefaultEntry>
 }
 
 export async function getRequests(params?: {
@@ -629,6 +632,7 @@ export async function getRequests(params?: {
       change_previous: (r.change_previous ?? {}) as Record<string, unknown>,
       center_id: (r.center_id as number | null) ?? null,
       skipped_stages: (r.skipped_stages ?? []) as string[],
+      default_fields: (r.default_fields ?? {}) as Record<string, DefaultEntry>,
     })
   }
   return result
@@ -2322,6 +2326,58 @@ export async function saveFieldRuleProfile(profile: Omit<FieldRuleProfile, 'id'>
 export async function deleteFieldRuleProfile(id: number): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('field_rule_profiles').delete().eq('id', id)
+  if (error) handleError(error)
+}
+
+// ─── Valores padrão por condição (migration 052) ─────────────────────────────
+
+/** Regras do tenant em uso (RLS; leitura liberada ao tenant, escrita com can_manage_fields). */
+export async function getFieldDefaultRules(): Promise<FieldDefaultRule[]> {
+  const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
+  const { data, error } = await supabase
+    .from('field_default_rules')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('priority')
+    .order('id')
+  if (error) handleError(error)
+  return (data ?? []) as FieldDefaultRule[]
+}
+
+export async function saveFieldDefaultRule(rule: Omit<FieldDefaultRule, 'id'> & { id?: number }): Promise<FieldDefaultRule> {
+  const supabase = createClient()
+  const tenantId = await getCurrentUserTenantId()
+  const row = {
+    name: toErpText(rule.name.trim()).toUpperCase(),
+    condition_field: rule.condition_field,
+    condition_value: rule.condition_value.trim(),
+    target_field: rule.target_field,
+    target_value: rule.target_value.trim(),
+    is_fixed: rule.is_fixed,
+    priority: rule.priority,
+    is_active: rule.is_active,
+    updated_at: new Date().toISOString(),
+  }
+  const { data, error } = rule.id
+    ? await supabase.from('field_default_rules').update(row).eq('id', rule.id).select().single()
+    : await supabase.from('field_default_rules').insert({ ...row, tenant_id: tenantId }).select().single()
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error(
+        error.message.includes('uq_field_default_rules_name')
+          ? 'Já existe uma regra com esse nome.'
+          : 'Já existe uma regra para este campo com esta mesma condição.'
+      )
+    }
+    handleError(error)
+  }
+  return data as FieldDefaultRule
+}
+
+export async function deleteFieldDefaultRule(id: number): Promise<void> {
+  const supabase = createClient()
+  const { error } = await supabase.from('field_default_rules').delete().eq('id', id)
   if (error) handleError(error)
 }
 

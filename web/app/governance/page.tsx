@@ -126,6 +126,8 @@ type ApiRequest = {
   change_previous?: Record<string, unknown>
   center_id?: number | null
   skipped_stages?: string[]
+  /** Campos preenchidos por regra de valor padrão (migration 052); fixo não muda pela tela. */
+  default_fields?: Record<string, { value: string; rule_id: number; rule: string; fixed: boolean }>
 }
 
 function mapToMaterialRequest(r: ApiRequest, steps: WorkflowStepLite[]): MaterialRequest {
@@ -1331,10 +1333,18 @@ export default function GovernancePage() {
                     {stageFields
                       .filter((f) => f.field_name !== 'descricao_basica')
                       .map((f) => (
-                      <div key={f.id}>
+                      <fieldset key={f.id} disabled={!!selectedRequest?.default_fields?.[f.field_name]?.fixed} className="min-w-0">
                         <Label htmlFor={`attr-${f.field_name}`} className="text-sm font-medium">
                           {f.field_label}
                           {f.requirement === 'required' && ' *'}
+                          {selectedRequest?.default_fields?.[f.field_name] && (
+                            <span
+                              title={`Preenchido pela regra ${selectedRequest?.default_fields?.[f.field_name]?.rule ?? ''}`}
+                              className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase text-sky-800 dark:bg-sky-950/50 dark:text-sky-200"
+                            >
+                              {selectedRequest?.default_fields?.[f.field_name]?.fixed ? 'padrão · fixo' : 'padrão'}
+                            </span>
+                          )}
                         </Label>
                         {f.field_type === 'text' && (
                           <Input
@@ -1405,7 +1415,7 @@ export default function GovernancePage() {
                             ))}
                           </select>
                         )}
-                      </div>
+                      </fieldset>
                     ))}
                   </div>
                 </div>
