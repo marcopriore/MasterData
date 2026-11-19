@@ -101,7 +101,7 @@ Regressão sem banco: união de grupos e extras, menu, quem pode gerir usuários
 ```powershell
 cd C:\Dev\MasterData\web
 npm test          # regressão + gate de segurança
-npm run check     # o mesmo + auditoria de dependências + tipos
+npm run check     # o mesmo + auditoria de dependências + tipos + lint (só erros)
 ```
 
 `npm test` também roda o gate de segurança (`web/security`). O GitHub Actions roda testes, auditoria, tipos e `next build` a cada push em `main` e em pull request; o build usa valores fictícios para o Supabase porque não conecta no banco.

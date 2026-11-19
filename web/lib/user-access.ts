@@ -10,6 +10,7 @@ import {
 type GroupRow = { id: number; name: string; permissions: Partial<RolePermissions> | null; tenant_id: number }
 
 export async function callerCanManageUsers(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- recebe o client do servidor e o mock dos testes
   supabase: { from: (table: string) => any },
   userId: string,
   isMaster: boolean

@@ -289,7 +289,7 @@ O gate não promete segurança total. Ele impede que regras já conquistadas se 
   
   Confere no banco que nada mudou, confere que o uso legítimo continua funcionando e apaga tudo.
 - **Quando rodar cada teste:** a sonda e o E2E gravam no banco, que hoje é o de produção, e gastam o orçamento de disco do plano.
-  - **Durante o trabalho:** só os testes que não usam o banco: `npm run check` (unitários, tipos e auditoria) e `next build`.
+  - **Durante o trabalho:** só os testes que não usam o banco: `npm run check` (unitários, tipos, auditoria e lint) e `next build`.
   - **Antes de cada commit:** uma rodada só de `npm run security:probe` (em `web`) e `npm run test:e2e` (em `tests`), com as correções do período juntas.
   - Migration de policy ou função entra no commit só depois dessa rodada.
 

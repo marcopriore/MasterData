@@ -35,7 +35,7 @@ O que vai para produção é a branch `main`. Antes de ligar a Vercel, ela preci
 cd C:\Dev\MasterData
 git status
 cd web
-npm run check          # testes, gate de segurança, auditoria e tipos
+npm run check          # testes, gate de segurança, auditoria, tipos e lint
 cd ..
 git add -A
 git commit -m "chore: preparação para produção"

@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "security": "vitest run security && node scripts/security-audit.mjs",
-    "check": "vitest run && node scripts/security-audit.mjs && tsc --noEmit",
+    "check": "vitest run && node scripts/security-audit.mjs && tsc --noEmit && eslint . --quiet",
     "create-demo-users": "node ../supabase/create-demo-users.js",
     "seed-materials-mass": "node ../supabase/seed-materials-mass.js --",
     "secrets": "node scripts/generate-secrets.mjs",
@@ -62,6 +62,6 @@
     "eslint-config-next": "^16.4.6",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   }
 }

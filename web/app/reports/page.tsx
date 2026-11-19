@@ -246,7 +246,7 @@ export default function ReportsPage() {
   }
 
   if (ready && !allowed) {
-    return <p className="text-sm text-muted-foreground">Você não tem acesso aos relatórios. Peça a permissão "Ver Relatórios" ao administrador.</p>
+    return <p className="text-sm text-muted-foreground">Você não tem acesso aos relatórios. Peça a permissão &ldquo;Ver Relatórios&rdquo; ao administrador.</p>
   }
 
   return (

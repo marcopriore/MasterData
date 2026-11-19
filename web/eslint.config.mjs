@@ -5,6 +5,13 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    // As telas carregam dados em useEffect (setLoading, setData). Trocar o padrão é refatoração própria;
+    // até lá a regra avisa, e as demais regras do React Compiler continuam como erro.
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

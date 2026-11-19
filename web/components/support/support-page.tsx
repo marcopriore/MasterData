@@ -123,7 +123,9 @@ export function SupportPage() {
     [filters, filterCategorias, pathname, router]
   )
   const replaceRef = useRef(replaceFilters)
-  replaceRef.current = replaceFilters
+  useEffect(() => {
+    replaceRef.current = replaceFilters
+  }, [replaceFilters])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

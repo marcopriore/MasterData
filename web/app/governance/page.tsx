@@ -448,6 +448,12 @@ export default function GovernancePage() {
     [scopedRequests, search, category, dateRange, stageFilter]
   )
 
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   /** Indicadores das solicitações que a tela mostra: workflow escolhido e filtros aplicados. */
   const indicators = useMemo(() => {
     const byId = new Map(requests.map((r) => [String(r.id), r]))
@@ -459,10 +465,10 @@ export default function GovernancePage() {
         stageEnteredAt: byId.get(r.id)?.stage_entered_at ?? null,
       })),
       finishedAt,
-      Date.now(),
+      now,
       slaByStage
     )
-  }, [filteredRequests, requests, finishedAt, slaByStage])
+  }, [filteredRequests, requests, finishedAt, now, slaByStage])
 
   const lastInitializedRequestIdRef = useRef<number | null>(null)
 
@@ -581,10 +587,13 @@ export default function GovernancePage() {
   const hasPdmAttributes = selectedRequest?.pdm_attributes && Object.keys(selectedRequest.pdm_attributes).length > 0
   const showTechnicalAttributes = hasTechnicalAttributes || hasPdmAttributes
 
+  const selectedPdmName = selectedRequest?.pdm_name
+  const selectedPdmAttrs = selectedRequest?.pdm_attributes
+  const selectedSavedDescription = selectedRequest?.generated_description
   const generatedDescription = useMemo(() => {
-    if (!selectedRequest?.pdm_name || !selectedRequest?.pdm_attributes) return selectedRequest?.generated_description ?? ''
-    const parts = [selectedRequest.pdm_name.toUpperCase()]
-    const pdmAttrs = selectedRequest.pdm_attributes
+    if (!selectedPdmName || !selectedPdmAttrs) return selectedSavedDescription ?? ''
+    const parts = [selectedPdmName.toUpperCase()]
+    const pdmAttrs = selectedPdmAttrs
     const sortedKeys = Object.keys(pdmAttrs).sort()
     for (const attrId of sortedKeys) {
       const attr = pdmAttrs[attrId]
@@ -602,7 +611,7 @@ export default function GovernancePage() {
       parts.push(abbr.toUpperCase())
     }
     return toErpText(parts.join(' '))
-  }, [selectedRequest?.pdm_name, selectedRequest?.pdm_attributes, selectedRequest?.generated_description, attributeValues])
+  }, [selectedPdmName, selectedPdmAttrs, selectedSavedDescription, attributeValues])
 
   useEffect(() => {
     if (!detailsOpen || !selectedRequest) return

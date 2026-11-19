@@ -32,7 +32,13 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
   - Captcha no login e na redefinição de senha, se aparecer tentativa em massa.
   - Rodar a sonda (`npm run security:probe`) no CI contra um banco de desenvolvimento, quando ele existir.
 
-- **Valores padrão por condição (a fazer, pedido em 18/11/2026).** Tela de parametrização para pré-preencher campos conforme uma condição, para reduzir o preenchimento manual nas etapas do workflow. Exemplos pedidos: o Grupo de Mercadorias vir preenchido pelo PDM escolhido; o Grupo de Compradores, a Classe de Avaliação e outros campos vindos de uma condição. Pontos a definir na modelagem:
+- **Desempenho das telas: carga de dados fora do `useEffect` (a fazer, pedido em 19/11/2026; prioridade alta).** O lint aponta 64 pontos em cerca de 40 telas (`react-hooks/set-state-in-effect`, hoje como aviso em `web/eslint.config.mjs`). A tela desenha vazia, o efeito liga o carregamento e ela desenha de novo; o React Compiler não otimiza esses componentes. Caminho:
+  - o que a tela precisa ao abrir vem do servidor (Server Component ou rota), sem esperar o efeito no navegador;
+  - nas telas que continuam no navegador, uma camada de cache de consultas (TanStack Query, SWR ou equivalente; escolher no começo) no lugar de `useState` + `useEffect`, com cancelamento e reaproveitamento entre telas;
+  - estado que só copia outro (rascunho de busca, filtro vindo da URL) passa a ser calculado no render;
+  - medir antes e depois em cada tela (tempo até mostrar os dados e número de renders), começando por Governança, Base de Dados e Minhas Solicitações;
+  - no fim, a regra volta a ser erro.
+- **Valores padrão por condição (feito em 18/11/2026, migrations 052 e 053, v3.23.0).** A 053 permite a condição na mesma etapa do campo que recebe (recusa só se vier depois) e reaplica a regra quando o campo de condição muda na etapa. Tela de parametrização para pré-preencher campos conforme uma condição, para reduzir o preenchimento manual nas etapas do workflow. Exemplos pedidos: o Grupo de Mercadorias vir preenchido pelo PDM escolhido; o Grupo de Compradores, a Classe de Avaliação e outros campos vindos de uma condição. Pontos levantados na modelagem:
   - a condição (PDM, tipo de material, centro, outro campo ou combinação de campos) e o valor preenchido;
   - se o valor é sugestão (o usuário pode trocar) ou fixo (só muda pela regra);
   - em que momento aplica: ao abrir a solicitação, na etapa que cobra o campo ou na integração com o ERP;

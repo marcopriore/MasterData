@@ -312,6 +312,7 @@ export default function DatabaseDetailPage() {
     []
   )
 
+  const materialAttrs = material?.technical_attributes
   const fetchPdmTemplate = useCallback(
     async (pdmCode: string | null) => {
       if (!pdmCode) return
@@ -336,7 +337,7 @@ export default function DatabaseDetailPage() {
         }
         setPdmTemplate(full)
 
-        const currentAttrs = (material?.technical_attributes as Record<string, string | { value: string; unit: string }>) || {}
+        const currentAttrs = (materialAttrs as Record<string, string | { value: string; unit: string }>) || {}
         const merged: Record<string, string | { value: string; unit: string }> = {}
         const sortedAttrs = [...(full.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
         sortedAttrs.forEach((attr) => {
@@ -355,7 +356,7 @@ export default function DatabaseDetailPage() {
         setPdmTemplate(null)
       }
     },
-    [material?.technical_attributes, generateDescription]
+    [materialAttrs, generateDescription]
   )
 
   /** Material como ficaria com o que está na tela (regras por material, migration 040). */
@@ -1211,9 +1212,9 @@ export default function DatabaseDetailPage() {
         {/* Campos do Dicionário (technical_attributes) agrupados por erp_view */}
         {Object.keys(fieldsByView).length > 0 && (() => {
           const VIEW_ORDER = ['Fiscal', 'Compras', 'MRP', 'Contabilidade', 'Vendas']
-          const entries = Object.entries(fieldsByView) as Array<[string, any]>
-          const orderedEntries: Array<[string, any]> = [
-            ...VIEW_ORDER.map((v) => entries.find((e) => e[0] === v)).filter((e): e is [string, any] => Boolean(e)),
+          const entries = Object.entries(fieldsByView)
+          const orderedEntries: Array<[string, DictViewField[]]> = [
+            ...VIEW_ORDER.map((v) => entries.find((e) => e[0] === v)).filter((e): e is [string, DictViewField[]] => Boolean(e)),
             ...entries.filter((e) => e[0] !== 'Dados Básicos' && !VIEW_ORDER.includes(e[0])),
           ]
 
