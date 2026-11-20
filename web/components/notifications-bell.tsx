@@ -75,7 +75,7 @@ function NotificationItem({
 }
 
 export function NotificationsBell() {
-  const { accessToken, can } = useUser()
+  const { user, can } = useUser()
   const router = useRouter()
   const { unreadCount, notifications, markAsRead, markAllAsRead } = useNotifications()
   const [open, setOpen] = useState(false)
@@ -105,7 +105,7 @@ export function NotificationsBell() {
     }
   }
 
-  if (!accessToken) return null
+  if (!user) return null
 
   const badgeText = unreadCount > 9 ? '9+' : String(unreadCount)
 

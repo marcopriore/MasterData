@@ -1,19 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { getMeasurementUnits } from '@/lib/supabase-api'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { createClient } from '@/lib/supabase/client'
+import { measurementUnitsQuery } from '@/lib/queries/reference'
 import type { MeasurementUnit } from '@/lib/supabase-api'
 
 export type { MeasurementUnit }
 
+const NO_UNITS: MeasurementUnit[] = []
+
 export function useMeasurementUnits(): MeasurementUnit[] {
-  const [units, setUnits] = useState<MeasurementUnit[]>([])
-
-  useEffect(() => {
-    getMeasurementUnits()
-      .then(setUnits)
-      .catch(() => {})
-  }, [])
-
-  return units
+  const db = useMemo(() => createClient(), [])
+  return useQuery(measurementUnitsQuery(db)).data ?? NO_UNITS
 }

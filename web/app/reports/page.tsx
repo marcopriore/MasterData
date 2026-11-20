@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { BarChart3, Download, Loader2, RefreshCw } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
@@ -45,6 +46,14 @@ type Tab = 'fluxo' | 'produtividade' | 'rejeicoes' | 'erp' | 'base' | 'incomplet
 /** Linhas mostradas na tela; a exportação leva todas. */
 const INCOMPLETE_ON_SCREEN = 200
 
+const NO_FLOW: FlowRow[] = []
+const NO_PEOPLE: ProductivityRow[] = []
+const NO_BASE: MaterialBaseRow[] = []
+const NO_REJECTIONS: RejectionRow[] = []
+const NO_ERP_EVENTS: ErpEventRow[] = []
+const NO_ERP_ERRORS: ErpErrorRow[] = []
+const NO_INCOMPLETE: IncompleteMaterialRow[] = []
+
 function Kpi({ label, value, tone }: { label: string; value: string | number; tone?: 'alert' }) {
   return (
     <div
@@ -78,56 +87,60 @@ export default function ReportsPage() {
   const { can, ready } = useUser()
   const allowed = can('can_view_reports')
   const seesDatabase = can('can_view_database')
+  const queryClient = useQueryClient()
   const [tab, setTab] = useState<Tab>('fluxo')
+  /** Período dos campos e o aplicado (o que os relatórios mostram). Só o botão "Atualizar" aplica. */
   const [period, setPeriod] = useState(defaultPeriod)
-  const [stepNames, setStepNames] = useState<Map<string, { name: string; order: number }>>(new Map())
-  const [flow, setFlow] = useState<FlowRow[]>([])
-  const [people, setPeople] = useState<ProductivityRow[]>([])
-  const [base, setBase] = useState<MaterialBaseRow[]>([])
-  const [rejections, setRejections] = useState<RejectionRow[]>([])
-  const [erpEvents, setErpEvents] = useState<ErpEventRow[]>([])
-  const [erpErrors, setErpErrors] = useState<ErpErrorRow[]>([])
-  const [incomplete, setIncomplete] = useState<IncompleteMaterialRow[]>([])
-  const [loading, setLoading] = useState(false)
+  const [applied, setApplied] = useState(defaultPeriod)
   const [exporting, setExporting] = useState(false)
+  const periodValid = !!applied.from && !!applied.to && applied.from <= applied.to
+  const range = periodValid ? periodToRange(applied.from, applied.to) : null
+  const rangeFrom = range?.from ?? ''
+  const rangeTo = range?.to ?? ''
+  const withRange = ready && allowed && range != null
+  const open = ready && allowed
 
-  const load = useCallback(async () => {
+  // Cada relatório é uma consulta. Os que dependem do período só rodam com um período válido.
+  // A lista de incompletos só é buscada quando a aba dela está aberta: a consulta é a mais pesada.
+  const flowQ = useQuery({ queryKey: ['reports', 'flow', rangeFrom, rangeTo] as const, queryFn: () => getReportFlow(rangeFrom, rangeTo), enabled: withRange })
+  const peopleQ = useQuery({ queryKey: ['reports', 'productivity', rangeFrom, rangeTo] as const, queryFn: () => getReportProductivity(rangeFrom, rangeTo), enabled: withRange })
+  const rejectionsQ = useQuery({ queryKey: ['reports', 'rejections', rangeFrom, rangeTo] as const, queryFn: () => getReportRejections(rangeFrom, rangeTo), enabled: withRange })
+  const erpQ = useQuery({ queryKey: ['reports', 'erp', rangeFrom, rangeTo] as const, queryFn: () => getReportErpIntegrations(rangeFrom, rangeTo), enabled: withRange })
+  const baseQ = useQuery({ queryKey: ['reports', 'base'] as const, queryFn: () => getReportMaterialBase(), enabled: open })
+  const erpErrorsQ = useQuery({ queryKey: ['reports', 'erp-errors'] as const, queryFn: () => getReportErpErrors(), enabled: open })
+  const stepsQ = useQuery({ queryKey: ['reports', 'steps'] as const, queryFn: () => getWorkflowConfig().catch(() => []), enabled: open })
+  const incompleteQ = useQuery({ queryKey: ['reports', 'incomplete'] as const, queryFn: () => getReportIncompleteMaterials(), enabled: open && tab === 'incompletos' })
+
+  const flow = flowQ.data ?? NO_FLOW
+  const people = peopleQ.data ?? NO_PEOPLE
+  const base = baseQ.data ?? NO_BASE
+  const rejections = rejectionsQ.data ?? NO_REJECTIONS
+  const erpEvents = erpQ.data ?? NO_ERP_EVENTS
+  const erpErrors = erpErrorsQ.data ?? NO_ERP_ERRORS
+  const incomplete = incompleteQ.data ?? NO_INCOMPLETE
+  const stepNames = useMemo(
+    () => new Map((stepsQ.data ?? []).map((s) => [s.status_key.toLowerCase(), { name: s.step_name, order: s.order }])),
+    [stepsQ.data]
+  )
+  const loading = [flowQ, peopleQ, baseQ, rejectionsQ, erpQ, erpErrorsQ, incompleteQ].some((q) => q.isFetching)
+
+  const failure = [flowQ, peopleQ, baseQ, rejectionsQ, erpQ, erpErrorsQ, incompleteQ].find((q) => q.error)?.error
+  useEffect(() => {
+    if (failure) toast.error((failure as Error)?.message ?? 'Não foi possível carregar os relatórios.')
+  }, [failure])
+
+  /** Atualizar: aplica o período dos campos (ou relê os dados do período atual). */
+  const refresh = () => {
     if (!period.from || !period.to || period.from > period.to) {
       toast.error('Período inválido.')
       return
     }
-    setLoading(true)
-    const range = periodToRange(period.from, period.to)
-    try {
-      const [flowRows, peopleRows, baseRows, rejectionRows, erpRows, erpErrorRows, steps, incompleteRows] = await Promise.all([
-        getReportFlow(range.from, range.to),
-        getReportProductivity(range.from, range.to),
-        getReportMaterialBase(),
-        getReportRejections(range.from, range.to),
-        getReportErpIntegrations(range.from, range.to),
-        getReportErpErrors(),
-        getWorkflowConfig().catch(() => []),
-        getReportIncompleteMaterials(),
-      ])
-      setIncomplete(incompleteRows)
-      setFlow(flowRows)
-      setPeople(peopleRows)
-      setBase(baseRows)
-      setRejections(rejectionRows)
-      setErpEvents(erpRows)
-      setErpErrors(erpErrorRows)
-      setStepNames(new Map(steps.map((s) => [s.status_key.toLowerCase(), { name: s.step_name, order: s.order }])))
-    } catch (err) {
-      toast.error((err as Error)?.message ?? 'Não foi possível carregar os relatórios.')
-    } finally {
-      setLoading(false)
+    if (period.from === applied.from && period.to === applied.to) {
+      void queryClient.invalidateQueries({ queryKey: ['reports'] })
+    } else {
+      setApplied({ ...period })
     }
-  }, [period])
-
-  useEffect(() => {
-    if (ready && allowed) void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, allowed])
+  }
 
   const stageLabel = useCallback((stage: string) => stepNames.get(stage)?.name ?? requestStatusLabel(stage), [stepNames])
   const flowSorted = useMemo(
@@ -268,7 +281,7 @@ export default function ReportsPage() {
             <p className="mb-1 text-xs font-medium text-muted-foreground">Até</p>
             <Input type="date" value={period.to} onChange={(e) => setPeriod((p) => ({ ...p, to: e.target.value }))} className="h-9 w-40" />
           </div>
-          <Button variant="outline" size="sm" className="h-9 gap-2" onClick={() => void load()} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-9 gap-2" onClick={refresh} disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
             Atualizar
           </Button>

@@ -21,3 +21,23 @@ export const isRejectedStatus = (status: string | null | undefined) => statusGro
 export const isCancelledStatus = (status: string | null | undefined) => statusGroup(status) === 'cancelled'
 /** Fora do fluxo: finalizada, rejeitada ou cancelada. */
 export const isClosedStatus = (status: string | null | undefined) => statusGroup(status) !== 'open'
+
+/** Nome da etapa de cada status (o que aparece no quadro, nas listas e nos gráficos). */
+export const STATUS_LABELS: Record<string, string> = {
+  cadastro: 'Central de Cadastro',
+  compras: 'Compras',
+  mrp: 'MRP',
+  fiscal: 'Fiscal',
+  contabilidade: 'Contabilidade',
+  finalizado: 'Finalizado',
+  rejected: 'Rejeitado',
+  cancelado: 'Cancelado',
+  pending: 'Pendente',
+}
+
+/** Nome da etapa para um status de solicitação; sem nome conhecido, o próprio status. */
+export function requestStatusLabel(status: string): string {
+  const key = status.trim().toLowerCase()
+  if (key === 'rejeitado') return STATUS_LABELS.rejected
+  return STATUS_LABELS[key] ?? status
+}

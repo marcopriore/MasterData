@@ -16,34 +16,43 @@ function permissionsOf(value: PermissionsEmbed) {
   return { permissions: row?.permissions ?? null }
 }
 
-/** Usuário da sessão, tenant efetivo (Master usa o tenant para o qual trocou) e permissões efetivas. */
+/**
+ * Usuário da sessão, tenant efetivo (Master usa o tenant para o qual trocou) e permissões efetivas.
+ * getClaims valida a assinatura e a validade do token com as chaves públicas do projeto, sem ida ao Auth:
+ * o mesmo critério do banco (RLS) e do proxy.ts. Inativo é barrado pelo perfil, lido a cada chamada.
+ */
 export async function getCallerAccess(): Promise<CallerAccess | { error: NextResponse }> {
   const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: NextResponse.json({ error: 'Não autenticado' }, { status: 401 }) }
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const claims = claimsData?.claims
+  if (!claims?.sub) return { error: NextResponse.json({ error: 'Não autenticado' }, { status: 401 }) }
+  const userId = claims.sub
+  const meta = (claims.app_metadata ?? {}) as { is_master?: boolean; tenant_id?: number | string }
 
-  const { data: profile } = await supabase
-    .from('users')
-    .select('tenant_id, is_active, roles!users_role_id_fkey(permissions)')
-    .eq('id', user.id)
-    .single()
+  const [{ data: profile }, { data: memberships }, { data: grants }] = await Promise.all([
+    supabase
+      .from('users')
+      .select('tenant_id, is_active, roles!users_role_id_fkey(permissions)')
+      .eq('id', userId)
+      .single(),
+    supabase.from('user_role_groups').select('roles(permissions)').eq('user_id', userId),
+    supabase.from('user_permission_grants').select('permission_key').eq('user_id', userId),
+  ])
   if (!profile || profile.is_active === false) {
     return { error: NextResponse.json({ error: 'Usuário sem acesso.' }, { status: 403 }) }
   }
 
-  const isMaster = user.app_metadata?.is_master === true
-  const tenantId = Number(isMaster ? user.app_metadata?.tenant_id ?? profile.tenant_id : profile.tenant_id)
+  const isMaster = meta.is_master === true
+  const tenantId = Number(isMaster ? meta.tenant_id ?? profile.tenant_id : profile.tenant_id)
   if (!Number.isFinite(tenantId)) return { error: NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 }) }
-  if (isMaster) return { userId: user.id, isMaster, tenantId, permissions: allPermissions() }
+  if (isMaster) return { userId, isMaster, tenantId, permissions: allPermissions() }
 
-  const { data: memberships } = await supabase.from('user_role_groups').select('roles(permissions)').eq('user_id', user.id)
   const groups = memberships?.length
     ? memberships.map((row) => permissionsOf(row.roles as PermissionsEmbed))
     : [permissionsOf(profile.roles as PermissionsEmbed)]
-  const { data: grants } = await supabase.from('user_permission_grants').select('permission_key').eq('user_id', user.id)
   const permissions = mergeRolePermissions(groups, (grants ?? []).map((grant) => grant.permission_key as string))
 
-  return { userId: user.id, isMaster, tenantId, permissions }
+  return { userId, isMaster, tenantId, permissions }
 }
 
 /** getCallerAccess + exige ao menos uma das permissões (Master sempre passa). */

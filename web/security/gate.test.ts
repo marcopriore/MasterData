@@ -101,7 +101,7 @@ describe('segredos fora do browser', () => {
   const sources = ['app', 'components', 'contexts', 'hooks', 'lib']
     .flatMap((dir) => walk(path.join(WEB, dir), (file) => /\.(ts|tsx)$/.test(file) && !/\.test\.ts$/.test(file)))
   const isClient = (source: string) => /^\s*['"]use client['"]/.test(source)
-  const SERVER_ONLY_IMPORT = /from\s+['"]@\/lib\/(supabase\/admin|secret-box|material-api\/server|erp\/client|erp\/integrate|master-access|server-access|dispatch-request-notice|email\/send-email|axisdesk\/client)['"]/
+  const SERVER_ONLY_IMPORT = /from\s+['"]@\/lib\/(supabase\/admin|secret-box|material-api\/server|erp\/client|erp\/integrate|erp\/request-erp-status|erp\/duplicate-guard|query\/server|queries\/[\w-]+\.server|master-access|server-access|server-user|dispatch-request-notice|email\/send-email|axisdesk\/client)['"]/
 
   it('arquivo de browser não importa módulo com chave de serviço ou segredo', () => {
     const leaks = sources.filter((file) => {

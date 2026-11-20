@@ -25,7 +25,10 @@ import type { RequestErpState } from "@/lib/request-erp-state"
 import { kanbanMoveBlock } from "@/lib/kanban-move"
 import { seesAllStages, stageScope } from "@/lib/stage-scope"
 import { CANCELLED_STATUSES, DONE_STATUSES, REJECTED_STATUSES, statusGroup } from "@/lib/request-status"
-import { getWorkflowConfig, assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
+import { useQuery } from "@tanstack/react-query"
+import { assignRequest, moveRequestToStatus } from "@/lib/supabase-api"
+import { createClient } from "@/lib/supabase/client"
+import { workflowStepsQuery } from "@/lib/queries/governance"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -159,8 +162,6 @@ export function KanbanBoard({
   canManageAllStages = false,
   erpStates = {},
 }: KanbanBoardProps) {
-  const [columns, setColumns] = useState<KanbanColumn[]>([])
-  const [columnsLoading, setColumnsLoading] = useState(true)
   /** Cartões mostrados por coluna; o contador do cabeçalho é sempre o total. */
   const [shownByColumn, setShownByColumn] = useState<Record<string, number>>({})
 
@@ -188,13 +189,14 @@ export function KanbanBoard({
     }
   }
 
-  useEffect(() => {
-    setColumnsLoading(true)
-    getWorkflowConfig(workflowId ?? undefined)
-      .then((steps) => setColumns(workflowToColumns(steps.filter((s) => s.is_active))))
-      .catch(() => setColumns([]))
-      .finally(() => setColumnsLoading(false))
-  }, [workflowId])
+  // Mesma consulta da tela: as etapas vêm do cache, sem outra ida ao banco.
+  const db = useMemo(() => createClient(), [])
+  const stepsQ = useQuery({ ...workflowStepsQuery(db, workflowId ?? 0), enabled: workflowId != null })
+  const columnsLoading = workflowId != null && stepsQ.isPending
+  const columns = useMemo(
+    () => workflowToColumns((stepsQ.data ?? []).filter((s) => s.is_active)),
+    [stepsQ.data]
+  )
 
   const sensors = useSensors(
     useSensor(PointerSensor, {

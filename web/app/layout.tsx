@@ -5,6 +5,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { UserProvider } from "@/contexts/user-context";
 import { NotificationsProvider } from "@/contexts/notifications-context";
 import { AppShell } from "@/components/app-shell";
+import { QueryProvider } from "@/components/query-provider";
+import { getServerUser } from "@/lib/server-user";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -32,17 +34,20 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   // O script de tema é inline e precisa do nonce do CSP (proxy.ts).
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const [requestHeaders, serverUser] = await Promise.all([headers(), getServerUser()]);
+  const nonce = requestHeaders.get("x-nonce") ?? undefined;
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <body
         className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ThemeProvider defaultTheme="light" attribute="class" enableSystem={false} nonce={nonce}>
-          <UserProvider>
-            <NotificationsProvider>
-              <AppShell>{children}</AppShell>
-            </NotificationsProvider>
+          <UserProvider initialUser={serverUser.user} initialResolved={serverUser.resolved}>
+            <QueryProvider>
+              <NotificationsProvider>
+                <AppShell>{children}</AppShell>
+              </NotificationsProvider>
+            </QueryProvider>
           </UserProvider>
         </ThemeProvider>
       </body>

@@ -40,3 +40,5 @@ tests/e2e/test-results/
 PDM_EXCEL_FILES_V2/
 
 tests/e2e/.auth/
+
+tests/perf/results/

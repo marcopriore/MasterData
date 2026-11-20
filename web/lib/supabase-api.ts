@@ -4,19 +4,20 @@
  */
 
 import { createClient } from '@/lib/supabase/client'
+import { requestStatusLabel, STATUS_LABELS } from '@/lib/request-status'
+
+/** Reexporta para as telas que já importam daqui. */
+export { requestStatusLabel }
 import { isSystemRoleName, seesCurrentPhaseFields } from '@/lib/permissions'
 import {
   attrsMatch,
   countsForDuplicate,
   descriptionAttrKeys,
-  groupMaterialDuplicates,
   pickDescriptionAttrs,
-  type DuplicateCandidate,
 } from '@/lib/material-duplicates'
 import type { RequestErpInfo } from '@/lib/request-erp-state'
 import { toErpDeep, toErpPdmAttributes, toErpText } from '@/lib/erp-text'
 import { safeSearchTerm } from '@/lib/search-term'
-import { type MyRequestRow } from '@/lib/my-requests'
 import { toProfile, type FieldRuleProfile } from '@/lib/field-rules'
 import type { DefaultEntry, FieldDefaultRule } from '@/lib/field-defaults'
 import type { MaterialHistoryRow } from '@/lib/material-timeline'
@@ -48,9 +49,6 @@ const CACHE_TTL_MS = 5 * 60 * 1000
 let cachedFields: unknown[] | null = null
 let cachedFieldsTime = 0
 
-let cachedUnits: unknown[] | null = null
-let cachedUnitsTime = 0
-
 let cachedRoles: unknown[] | null = null
 let cachedRolesTime = 0
 
@@ -60,7 +58,6 @@ let cachedWorkflowsTime = 0
 /** Invalida caches (chamar após criar/editar fields, units, roles, workflows) */
 export function invalidateApiCache(): void {
   cachedFields = null
-  cachedUnits = null
   cachedRoles = null
   cachedWorkflows = null
 }
@@ -70,6 +67,15 @@ export function invalidateApiCache(): void {
 function handleError(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err)
   throw new Error(msg)
+}
+
+/**
+ * Usuário da sessão local, sem ida ao Auth (getUser vai à rede e o cliente enfileira as chamadas).
+ * Serve para filtrar consultas; quem garante o acesso é o RLS, que valida o token em cada consulta.
+ */
+async function sessionUser() {
+  const { data: { session } } = await createClient().auth.getSession()
+  return session?.user ?? null
 }
 
 let tenantIdMemo: { key: string; promise: Promise<number> } | null = null
@@ -142,25 +148,6 @@ export type DashboardStats = {
   user_name?: string | null
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  cadastro: 'Central de Cadastro',
-  compras: 'Compras',
-  mrp: 'MRP',
-  fiscal: 'Fiscal',
-  contabilidade: 'Contabilidade',
-  finalizado: 'Finalizado',
-  rejected: 'Rejeitado',
-  cancelado: 'Cancelado',
-  pending: 'Pendente',
-}
-
-/** Nome da etapa para um status de solicitação; sem nome conhecido, o próprio status. */
-export function requestStatusLabel(status: string): string {
-  const key = status.trim().toLowerCase()
-  if (key === 'rejeitado') return STATUS_LABELS.rejected
-  return STATUS_LABELS[key] ?? status
-}
-
 const URGENCY_LABELS: Record<string, string> = {
   low: 'Baixa',
   medium: 'Média',
@@ -169,14 +156,17 @@ const URGENCY_LABELS: Record<string, string> = {
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return { total_requests: 0, by_status: [], by_urgency: [], recent_activities: [], pdm_count: 0, user_count: 0 }
 
-  const { data: profile } = await supabase.from('users').select('tenant_id, name, roles!users_role_id_fkey(name, role_type)').eq('id', user.id).single()
+  // Perfil e tenant em uso são independentes: saem juntos.
+  const [{ data: profile }, effectiveTenantId] = await Promise.all([
+    supabase.from('users').select('tenant_id, name, roles!users_role_id_fkey(name, role_type)').eq('id', user.id).single(),
+    getCurrentUserTenantId(),
+  ])
   const roleName = (profile?.roles as { name?: string })?.name?.toUpperCase() ?? ''
   const roleType = (profile?.roles as { role_type?: string })?.role_type ?? 'sistema'
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
-  const effectiveTenantId = await getCurrentUserTenantId()
 
   // Escopo do painel: Master e ADMIN veem tudo; solicitante, as próprias; área, a fila da sua etapa.
   let scopeUser: string | null = null
@@ -244,29 +234,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   }
 }
 
-// ─── Governance Stats ────────────────────────────────────────────────────────
-// Os indicadores são calculados na tela (lib/governance-stats.ts) sobre a lista filtrada.
-
-/** Quando cada solicitação foi finalizada: último "approved" que levou à etapa final. */
-export async function getRequestsFinishedAt(requestIds: number[]): Promise<Record<string, string>> {
-  const out: Record<string, string> = {}
-  if (requestIds.length === 0) return out
-  const supabase = createClient()
-  for (let i = 0; i < requestIds.length; i += 200) {
-    const { data, error } = await supabase
-      .from('request_history')
-      .select('request_id, created_at')
-      .in('request_id', requestIds.slice(i, i + 200))
-      .eq('event_type', 'approved')
-      .in('stage', ['finalizado', 'completed'])
-    if (error) handleError(error)
-    for (const row of data ?? []) {
-      const key = String(row.request_id)
-      if (!out[key] || row.created_at > out[key]) out[key] = row.created_at as string
-    }
-  }
-  return out
-}
+// ─── Governance ──────────────────────────────────────────────────────────────
+// Leituras do quadro em lib/data/governance.ts (servidor e navegador); os indicadores em lib/governance-stats.ts.
 
 // ─── PDM ─────────────────────────────────────────────────────────────────────
 
@@ -535,109 +504,6 @@ export type ApiRequest = {
   default_fields?: Record<string, DefaultEntry>
 }
 
-export async function getRequests(params?: {
-  workflowId?: number
-  status?: string
-  limit?: number
-  /** Abertas sempre; fechadas só as que fecharam nos últimos N dias (is_closed, migration 037). */
-  closedSinceDays?: number | null
-}): Promise<ApiRequest[]> {
-  const supabase = createClient()
-  const closedSince = params?.closedSinceDays
-    ? new Date(Date.now() - params.closedSinceDays * 24 * 3600 * 1000).toISOString()
-    : null
-  const query = () => {
-    let q = supabase
-      .from('material_requests')
-      .select(`
-        *,
-        pdm_templates(id, name)
-      `)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-    if (params?.workflowId) q = q.eq('workflow_id', params.workflowId)
-    if (params?.status) q = q.eq('status', params.status)
-    if (closedSince) q = q.or(`is_closed.eq.false,stage_entered_at.gte.${closedSince}`)
-    return q
-  }
-
-  const rows = params?.limit
-    ? await (async () => {
-        const { data, error } = await query().limit(params.limit!)
-        if (error) handleError(error)
-        return data ?? []
-      })()
-    : await allPages((from, to) => query().range(from, to))
-  const assigneeIds = [...new Set(rows.map((r) => r.assigned_to_id).filter(Boolean))] as string[]
-  const pdmIds = [...new Set(rows.map((r) => {
-    const pdm = Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates
-    return pdm?.id
-  }).filter(Boolean))] as number[]
-
-  const [usersRes, pdmAttrsRes] = await Promise.all([
-    assigneeIds.length ? supabase.from('users').select('id, name').in('id', assigneeIds) : Promise.resolve({ data: [] }),
-    pdmIds.length ? supabase.from('pdm_templates').select('id, attributes').in('id', pdmIds) : Promise.resolve({ data: [] }),
-  ])
-
-  const userMap: Record<string, string> = {}
-  ;(usersRes.data ?? []).forEach((u) => { userMap[u.id] = u.name ?? '' })
-
-  const pdmAttrMap: Record<number, Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>> = {}
-  ;(pdmAttrsRes.data ?? []).forEach((p) => {
-    const attrs = (p.attributes ?? []) as Array<{ id?: string; name?: string; dataType?: string; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }>
-    const map: Record<string, { label: string; type: string; options: string[]; includeInDescription?: boolean; abbreviation?: string; allowedValues?: Array<{ value: string; abbreviation?: string }> }> = {}
-    for (const a of attrs) {
-      const key = a.id ?? ''
-      if (!key) continue
-      map[key] = {
-        label: a.name ?? key,
-        type: a.dataType === 'lov' ? 'select' : (a.dataType ?? 'text'),
-        options: (a.allowedValues ?? []).map((v) => (typeof v === 'object' ? v.value : String(v)) ?? ''),
-        includeInDescription: a.includeInDescription,
-        abbreviation: a.abbreviation,
-        allowedValues: a.allowedValues ?? [],
-      }
-    }
-    pdmAttrMap[p.id] = map
-  })
-
-  const result: ApiRequest[] = []
-  for (const r of rows) {
-    const pdm = Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates
-    const assignedName = r.assigned_to_id ? (userMap[r.assigned_to_id] ?? null) : null
-    const pdmAttributes = (pdm?.id ? pdmAttrMap[pdm.id] : {}) ?? {}
-    result.push({
-      id: r.id,
-      user_id: r.user_id ?? null,
-      pdm_id: r.pdm_id,
-      pdm_name: pdm?.name,
-      status: r.status,
-      workflow_id: r.workflow_id,
-      requester: r.requester,
-      cost_center: r.cost_center,
-      urgency: r.urgency,
-      justification: r.justification,
-      generated_description: r.generated_description,
-      technical_attributes: r.technical_attributes,
-      attachments: r.attachments,
-      date: r.created_at,
-      values: [],
-      assigned_to_id: r.assigned_to_id,
-      assigned_to_name: assignedName,
-      pdm_attributes: pdmAttributes,
-      stage_entered_at: r.stage_entered_at ?? null,
-      request_type: (r.request_type ?? 'cadastro') as RequestType,
-      target_material_id: r.target_material_id ?? null,
-      change_fields: (r.change_fields ?? []) as string[],
-      change_previous: (r.change_previous ?? {}) as Record<string, unknown>,
-      center_id: (r.center_id as number | null) ?? null,
-      skipped_stages: (r.skipped_stages ?? []) as string[],
-      default_fields: (r.default_fields ?? {}) as Record<string, DefaultEntry>,
-    })
-  }
-  return result
-}
-
 // ─── Relatórios (migration 029) ──────────────────────────────────────────────
 
 export async function getReportFlow(fromIso: string, toIso: string): Promise<FlowRow[]> {
@@ -740,7 +606,7 @@ export async function getReportIncompleteMaterials(): Promise<IncompleteMaterial
 /** Solicitações em que o usuário logado iniciou o atendimento, aprovou, rejeitou ou moveu de etapa. */
 export async function getMyAttendedRequests(): Promise<AttendedRow[]> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return []
   const tenantId = await getCurrentUserTenantId()
 
@@ -795,82 +661,6 @@ export async function getMyAttendedRequests(): Promise<AttendedRow[]> {
   return summarizeAttended(events as AttendedEvent[], infos)
 }
 
-/** Solicitações abertas pelo usuário logado, no tenant efetivo, com etapa, atendente e motivo da rejeição. */
-export async function getMyRequests(): Promise<MyRequestRow[]> {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return []
-  const tenantId = await getCurrentUserTenantId()
-
-  const rows = await allPages((from, to) =>
-    supabase
-      .from('material_requests')
-      .select('id, status, urgency, generated_description, created_at, assigned_to_id, workflow_id, request_type, target_material_id, pdm_templates(name, internal_code)')
-      .eq('tenant_id', tenantId)
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(from, to)
-  )
-
-  const assigneeIds = [...new Set(rows.map((r) => r.assigned_to_id).filter(Boolean))] as string[]
-  const workflowIds = [...new Set(rows.map((r) => r.workflow_id).filter(Boolean))] as number[]
-  const rejectedIds = rows.filter((r) => isRejectedStatus(r.status)).map((r) => r.id)
-
-  const [usersRes, stepsRes, rejectionsRes] = await Promise.all([
-    assigneeIds.length ? supabase.from('users').select('id, name').in('id', assigneeIds) : Promise.resolve({ data: [] }),
-    workflowIds.length
-      ? supabase.from('workflow_config').select('workflow_id, status_key, step_name, "order", is_active').in('workflow_id', workflowIds)
-      : Promise.resolve({ data: [] }),
-    rejectedIds.length
-      ? supabase
-          .from('request_history')
-          .select('request_id, event_data, created_at')
-          .in('request_id', rejectedIds)
-          .eq('event_type', 'rejected')
-          .order('created_at', { ascending: false })
-      : Promise.resolve({ data: [] }),
-  ])
-
-  const names = new Map(((usersRes.data ?? []) as Array<{ id: string; name: string | null }>).map((u) => [u.id, u.name ?? '']))
-  const stepRows = (stepsRes.data ?? []) as Array<{ workflow_id: number; status_key: string; step_name: string; order: number; is_active: boolean }>
-  const steps = new Map(stepRows.map((s) => [`${s.workflow_id}:${s.status_key.toLowerCase()}`, s.step_name]))
-  // Primeira etapa ativa de cada workflow: enquanto a solicitação está nela sem atendente, o autor cancela.
-  const firstStep = new Map<number, string>()
-  for (const s of [...stepRows].filter((s) => s.is_active).sort((a, b) => a.order - b.order)) {
-    if (!firstStep.has(s.workflow_id)) firstStep.set(s.workflow_id, s.status_key.toLowerCase())
-  }
-  const reasons = new Map<number, string>()
-  for (const h of (rejectionsRes.data ?? []) as Array<{ request_id: number; event_data: { justification?: string | null } | null }>) {
-    if (!reasons.has(h.request_id)) reasons.set(h.request_id, h.event_data?.justification?.trim() ?? '')
-  }
-
-  return rows.map((r) => {
-    const pdm = (Array.isArray(r.pdm_templates) ? r.pdm_templates[0] : r.pdm_templates) as { name?: string; internal_code?: string } | null
-    const status = String(r.status ?? '')
-    return {
-      id: r.id,
-      code: `REQ-${String(r.id).padStart(4, '0')}`,
-      pdm_name: pdm?.name ?? '—',
-      pdm_code: pdm?.internal_code ?? '',
-      description: r.generated_description ?? '',
-      status,
-      step_label: isRejectedStatus(status)
-        ? 'Rejeitada'
-        : isCancelledStatus(status)
-          ? 'Cancelada'
-          : steps.get(`${r.workflow_id}:${status.toLowerCase()}`) ?? requestStatusLabel(status),
-      urgency: (r.urgency ?? 'low') as MyRequestRow['urgency'],
-      created_at: r.created_at ?? null,
-      assigned_to_name: r.assigned_to_id ? names.get(r.assigned_to_id) ?? null : null,
-      rejection_reason: reasons.get(r.id) || null,
-      can_cancel: !r.assigned_to_id && firstStep.get(r.workflow_id) === status.toLowerCase(),
-      request_type: ((r as { request_type?: string }).request_type ?? 'cadastro') as MyRequestRow['request_type'],
-      target_material_id: (r as { target_material_id?: number | null }).target_material_id ?? null,
-    }
-  })
-}
-
 export async function createRequest(body: {
   pdm_id: number
   requester: string
@@ -885,7 +675,7 @@ export async function createRequest(body: {
   center_id?: number | null
 }): Promise<{ id: number }> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   const tenantId = await getCurrentUserTenantId()
 
   const wfId = body.workflow_id ?? (await getActiveWorkflowId('cadastro'))
@@ -947,7 +737,7 @@ export async function createChangeRequest(body: {
   justificativa?: string
 }): Promise<{ id: number }> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   const tenantId = await getCurrentUserTenantId()
   const wfId = await getActiveWorkflowId('alteracao')
   if (!wfId) handleError(new Error('Nenhum workflow de Alteração ativo. Configure em Configurações → Workflows.'))
@@ -1004,7 +794,7 @@ export async function createExpansionRequest(body: {
   justificativa?: string
 }): Promise<{ id: number }> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   const tenantId = await getCurrentUserTenantId()
   const wfId = await getActiveWorkflowId('ampliacao')
   if (!wfId) handleError(new Error('Nenhum workflow de Ampliação ativo. Configure em Configurações → Workflows.'))
@@ -1412,7 +1202,7 @@ export async function updateRequestAttributes(
     ? { generated_description: toErpText(rawOptions.generated_description) }
     : rawOptions
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   const { data: req } = await supabase.from('material_requests').select('technical_attributes, tenant_id').eq('id', id).single()
   const oldAttrs = (req?.technical_attributes ?? {}) as Record<string, unknown>
 
@@ -1532,18 +1322,17 @@ export async function getRequestById(id: number): Promise<ApiRequest | null> {
     .from('material_requests')
     .select(`
       *,
-      pdm_templates(id, name)
+      pdm_templates(id, name),
+      assignee:users!assigned_to_id(name)
     `)
     .eq('id', id)
     .single()
   if (error || !data) return null
 
   const pdm = Array.isArray(data.pdm_templates) ? data.pdm_templates[0] : data.pdm_templates
-  let assignedName: string | null = null
-  if (data.assigned_to_id) {
-    const { data: u } = await supabase.from('users').select('name').eq('id', data.assigned_to_id).single()
-    assignedName = u?.name ?? null
-  }
+  // Nome do atendente na mesma consulta (antes, uma segunda ida ao banco em série).
+  const assignee = (Array.isArray(data.assignee) ? data.assignee[0] : data.assignee) as { name?: string | null } | null
+  const assignedName = data.assigned_to_id ? assignee?.name ?? null : null
   return {
     id: data.id,
     pdm_id: data.pdm_id,
@@ -1684,53 +1473,7 @@ export async function bulkUpdateWorkflowConfig(payload: {
 export type MaterialDetail = Record<string, unknown>
 export type MaterialsResponse = { total: number; page: number; limit: number; items: MaterialDetail[] }
 
-const MATERIALS_LIST_COLS = 'id, id_sistema, id_erp, description, detailed_description, status, pdm_code, pdm_name, material_group, unit_of_measure, ncm, material_type, erp_status, standardized_at, created_at'
-
-export async function getMaterials(params: {
-  page?: number
-  limit?: number
-  q?: string
-  status?: string
-  pdm_code?: string
-  erp_status?: string
-  date_from?: string
-  date_to?: string
-}): Promise<MaterialsResponse> {
-  const supabase = createClient()
-  const page = params.page ?? 1
-  const limit = params.limit ?? 50
-  let q = supabase.from('material_database').select(MATERIALS_LIST_COLS, { count: 'exact' })
-
-  const term = safeSearchTerm(params.q)
-  if (term) q = q.or(`id_sistema.ilike.%${term}%,description.ilike.%${term}%,id_erp.ilike.%${term}%`)
-  if (params.status) q = q.eq('status', params.status)
-  if (params.pdm_code) q = q.eq('pdm_code', params.pdm_code)
-  if (params.erp_status) q = q.eq('erp_status', params.erp_status)
-  if (params.date_from) q = q.gte('created_at', params.date_from)
-  if (params.date_to) q = q.lte('created_at', `${params.date_to}T23:59:59.999Z`)
-
-  const from = (page - 1) * limit
-  const { data, error, count } = await q.order('created_at', { ascending: false }).range(from, from + limit - 1)
-  if (error) handleError(error)
-  return { total: count ?? 0, page, limit, items: data ?? [] }
-}
-
-/** Map of duplicated material IDs -> other duplicated materials' id_sistema codes (same description + pdm_code). */
-/** Selo DUP dos materiais informados (a página da lista). O banco devolve só os candidatos; a regra é a de material-duplicates. */
-export async function getDuplicateMaterials(materialIds: number[]): Promise<Map<number, string[]>> {
-  if (materialIds.length === 0) return new Map()
-  try {
-    const supabase = createClient()
-    const { data, error } = await supabase.rpc('material_duplicate_candidates', { p_ids: materialIds })
-    if (error) throw error
-    const all = groupMaterialDuplicates((data ?? []) as DuplicateCandidate[])
-    const wanted = new Set(materialIds)
-    return new Map([...all].filter(([id]) => wanted.has(id)))
-  } catch (e) {
-    console.error('getDuplicateMaterials', e)
-    return new Map()
-  }
-}
+// Lista da Base de Dados em lib/data/database.ts.
 
 export async function getMaterialById(id: number): Promise<MaterialDetail> {
   const supabase = createClient()
@@ -1756,7 +1499,7 @@ export async function searchMaterials(query: string): Promise<MaterialDetail[]> 
 
 export async function updateMaterialStandardize(id: number, body: Record<string, unknown>): Promise<MaterialDetail> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   const { data, error } = await supabase
     .from('material_database')
     .update({
@@ -2232,7 +1975,7 @@ function statusToResponsibleRole(status: string | undefined): string | null {
  */
 export async function getStageFields(requestStatus?: string): Promise<{ role: string | null; fields: MyField[] }> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return { role: null, fields: [] }
 
   const isMaster = (user.app_metadata?.is_master as boolean) ?? false
@@ -2403,10 +2146,12 @@ export async function getRoles(): Promise<Role[]> {
     return cachedRoles as Role[]
   }
   const supabase = createClient()
-  const { data: roles, error } = await supabase.from('roles').select('id, name, role_type, permissions').order('id')
+  const [{ data: roles, error }, { data: counts }] = await Promise.all([
+    supabase.from('roles').select('id, name, role_type, permissions').order('id'),
+    supabase.from('user_role_groups').select('role_id'),
+  ])
   if (error) handleError(error)
   const roleList = roles ?? []
-  const { data: counts } = await supabase.from('user_role_groups').select('role_id')
   const countMap: Record<number, number> = {}
   ;(counts ?? []).forEach((u) => {
     const rid = u.role_id as number
@@ -2485,15 +2230,17 @@ export type NotificationsResponse = { unread_count: number; notifications: Notif
 
 export async function getNotifications(unreadOnly?: boolean): Promise<NotificationsResponse> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return { unread_count: 0, notifications: [] }
 
   let q = supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20)
   if (unreadOnly) q = q.eq('is_read', false)
-  const { data, error } = await q
+  // Lista e contagem são independentes: saem juntas.
+  const [{ data, error }, { count }] = await Promise.all([
+    q,
+    supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false),
+  ])
   if (error) handleError(error)
-
-  const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_read', false)
   return { unread_count: count ?? 0, notifications: data ?? [] }
 }
 
@@ -2505,7 +2252,7 @@ export async function markNotificationRead(id: number): Promise<void> {
 
 export async function markAllNotificationsRead(): Promise<void> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return
   await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id)
 }
@@ -2514,7 +2261,7 @@ export type NotificationPrefs = Record<string, boolean>
 
 export async function getUserNotificationPrefs(): Promise<NotificationPrefs> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return {}
   const { data } = await supabase.from('user_notification_prefs').select('*').eq('user_id', user.id).single()
   if (!data) {
@@ -2536,7 +2283,7 @@ export async function getUserNotificationPrefs(): Promise<NotificationPrefs> {
 
 export async function updateUserNotificationPrefs(prefs: Partial<NotificationPrefs>): Promise<void> {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) return
   const tenantId = await getCurrentUserTenantId()
   await supabase.from('user_notification_prefs').upsert(
@@ -2547,20 +2294,8 @@ export async function updateUserNotificationPrefs(prefs: Partial<NotificationPre
 
 // ─── Measurement Units ───────────────────────────────────────────────────────
 
+/** Leitura em lib/data/reference.ts, com cache em hooks/useMeasurementUnits. */
 export type MeasurementUnit = { id: number; name: string; abbreviation: string; category?: string | null }
-
-export async function getMeasurementUnits(): Promise<MeasurementUnit[]> {
-  if (cachedUnits && Date.now() - cachedUnitsTime < CACHE_TTL_MS) {
-    return cachedUnits as MeasurementUnit[]
-  }
-  const supabase = createClient()
-  const { data, error } = await supabase.from('measurement_units').select('id, name, abbreviation, category').eq('is_active', true).order('category')
-  if (error) handleError(error)
-  const result = data ?? []
-  cachedUnits = result
-  cachedUnitsTime = Date.now()
-  return result
-}
 
 // ─── Storage: upload attachment ───────────────────────────────────────────────
 
@@ -2656,10 +2391,11 @@ export async function getSystemLogs(params: {
 
   const items: SystemLogItem[] = []
   const userIds = [...new Set((data ?? []).map((r) => r.user_id).filter(Boolean))] as string[]
-  const userMap: Record<string, string> = {}
-  for (const uid of userIds) {
-    const { data: u } = await supabase.from('users').select('name').eq('id', uid).single()
-    userMap[uid] = u?.name ?? ''
+  // Um pedido para todos os autores da página (antes, um pedido por linha).
+  const userMap: Record<string, string> = Object.fromEntries(userIds.map((uid) => [uid, '']))
+  if (userIds.length) {
+    const { data: users } = await supabase.from('users').select('id, name').in('id', userIds)
+    for (const u of users ?? []) userMap[u.id as string] = (u.name as string | null) ?? ''
   }
   for (const r of data ?? []) {
     items.push({
@@ -2751,8 +2487,7 @@ export async function getUsersApi(): Promise<UserWithRole[]> {
 }
 
 export async function updateMyPassword(currentPassword: string, newPassword: string): Promise<void> {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) throw new Error('Não autenticado')
   const res = await fetch(`/api/admin/users/${user.id}/password`, {
     method: 'PUT',
@@ -2767,8 +2502,7 @@ export async function updateMyPassword(currentPassword: string, newPassword: str
 }
 
 export async function updateMyPreferences(prefs: { theme?: string; language?: string }): Promise<void> {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await sessionUser()
   if (!user) throw new Error('Não autenticado')
   const res = await fetch(`/api/admin/users/${user.id}/preferences`, {
     method: 'PATCH',
@@ -2933,7 +2667,7 @@ export async function getRecentActivities(params?: { limit?: number; offset?: nu
 
   try {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await sessionUser()
     if (!user) return { data: [], count: 0 }
 
     const { data, error, count } = await supabase
@@ -3032,7 +2766,7 @@ export async function logAction(params: {
 }): Promise<void> {
   try {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await sessionUser()
 
     let tenantId: number | null = null
     try {
