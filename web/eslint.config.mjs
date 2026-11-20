@@ -6,10 +6,10 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
-    // As telas carregam dados em useEffect (setLoading, setData). Trocar o padrão é refatoração própria;
-    // até lá a regra avisa, e as demais regras do React Compiler continuam como erro.
+    // Dados carregam por useQuery e estado derivado sai de efeito (ajuste na renderização).
+    // Exceções só com `eslint-disable-next-line ... -- motivo`, documentadas no código.
     rules: {
-      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/set-state-in-effect": "error",
     },
   },
   // Override default ignores of eslint-config-next.

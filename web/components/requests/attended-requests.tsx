@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Download, Loader2, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { getMyAttendedRequests, getRequestHistory, type HistoryEvent } from '@/lib/supabase-api'
@@ -47,41 +48,28 @@ function formatDate(iso: string | null, withTime = false): string {
   return withTime ? `${date} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : date
 }
 
+const NO_ROWS: AttendedRow[] = []
+const NO_EVENTS: HistoryEvent[] = []
+
 /** Solicitações em que o usuário agiu como atendente: o que fez por último e onde a solicitação está agora. */
 export function AttendedRequests() {
-  const [rows, setRows] = useState<AttendedRow[]>([])
-  const [loading, setLoading] = useState(true)
+  // Lista e histórico são consultas com cache; filtro, paginação e item aberto são estado local.
+  const rowsQ = useQuery({ queryKey: ['attended-requests'] as const, queryFn: () => getMyAttendedRequests() })
+  const rows = rowsQ.data ?? NO_ROWS
+  const loading = rowsQ.isPending
+  useEffect(() => {
+    if (rowsQ.error) toast.error(rowsQ.error.message || 'Falha ao carregar as solicitações atendidas')
+  }, [rowsQ.error])
   const [state, setState] = useState<AttendedState>(DEFAULT_ATTENDED)
   const [exporting, setExporting] = useState(false)
   const [detail, setDetail] = useState<AttendedRow | null>(null)
-  const [history, setHistory] = useState<HistoryEvent[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setRows(await getMyAttendedRequests())
-    } catch (err) {
-      toast.error((err as Error)?.message ?? 'Falha ao carregar as solicitações atendidas')
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
-
-  useEffect(() => {
-    if (!detail) return
-    let cancelled = false
-    setHistory([])
-    setHistoryLoading(true)
-    getRequestHistory(detail.id)
-      .then((events) => { if (!cancelled) setHistory(events) })
-      .catch(() => { if (!cancelled) setHistory([]) })
-      .finally(() => { if (!cancelled) setHistoryLoading(false) })
-    return () => { cancelled = true }
-  }, [detail])
+  const historyQ = useQuery({
+    queryKey: ['request-history', detail?.id] as const,
+    queryFn: () => getRequestHistory(detail?.id ?? 0),
+    enabled: detail != null,
+  })
+  const history = historyQ.data ?? NO_EVENTS
+  const historyLoading = detail != null && historyQ.isPending
 
   const result = useMemo(() => applyAttended(rows, state), [rows, state])
   const counts = useMemo(() => countByAction(rows), [rows])

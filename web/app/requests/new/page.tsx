@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { useRouter, usePathname, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   getPdms,
   getPdmById,
@@ -94,6 +95,77 @@ type MaterialSearchItem = {
   profit_center: string | null
 }
 
+const NO_PDMS: PDMTemplate[] = []
+const NO_ATTRIBUTES: Attribute[] = []
+const NO_CENTERS_LIST: Center[] = []
+
+async function loadPdmTemplates(): Promise<PDMTemplate[]> {
+  const list = await getPdms()
+  return list.map((p) => ({ ...p, is_active: p.is_active ?? true })) as PDMTemplate[]
+}
+
+/** Modelo completo do PDM: atributos ordenados. Registra o esquema no console para a equipe. */
+async function loadPdmAttributes(pdmId: number): Promise<Attribute[]> {
+  const pdm = await getPdmById(pdmId)
+  const attrs = (pdm.attributes ?? []) as Attribute[]
+  const sorted = [...attrs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+  // Development aid — log the full schema so the team can see all fields
+  console.group(`[PDM] ${pdm.name} (${pdm.internal_code})`)
+  console.log('id:', pdm.id)
+  console.log('attributes (%d fields):', attrs.length)
+  attrs.forEach((attr, i) => {
+    const type = attr.dataType === 'lov'
+      ? `LOV [${(attr.allowedValues ?? []).map(v => v.value).join(' | ')}]`
+      : attr.dataType
+    console.log(
+      `  ${i + 1}. [${attr.id}] ${attr.name}` +
+      ` — ${type}` +
+      (attr.isRequired ? ' *required*' : '') +
+      (attr.includeInDescription ? ' 📋' : '')
+    )
+  })
+  console.groupEnd()
+  return sorted
+}
+
+type ResubmitSeed = {
+  rejectionReason: string | null
+  pdmId: number | null
+  formData: Record<string, string | { value: string; unit: string }>
+  urgency: 'low' | 'medium' | 'high' | null
+  justification: string
+  centerId: number | null
+  requester: string | null
+}
+type ResubmitData = { kind: 'redirect'; to: string; message?: string } | { kind: 'ok'; seed: ResubmitSeed }
+
+async function loadResubmit(requestId: number): Promise<ResubmitData> {
+  const req = await getRequestById(requestId)
+  if (!req || !isRejectedStatus(req.status)) {
+    return { kind: 'redirect', to: '/requests', message: 'Só solicitação rejeitada pode ser corrigida e reenviada.' }
+  }
+  // Alteração e Ampliação não trocam PDM nem atributos livres: reenvio pela tela do tipo.
+  if ((req.request_type ?? 'cadastro') !== 'cadastro') {
+    return { kind: 'redirect', to: resubmitHref(req) ?? '/requests' }
+  }
+  const history = await getRequestHistory(requestId).catch(() => [])
+  const rejection = history.find((evt) => evt.event_type === 'rejected')
+  const justification = (rejection?.event_data as { justification?: string } | null | undefined)?.justification
+  const urgency = req.urgency === 'low' || req.urgency === 'medium' || req.urgency === 'high' ? req.urgency : null
+  return {
+    kind: 'ok',
+    seed: {
+      rejectionReason: justification?.trim() || null,
+      pdmId: req.pdm_id,
+      formData: (req.technical_attributes ?? {}) as Record<string, string | { value: string; unit: string }>,
+      urgency,
+      justification: req.justification ?? '',
+      centerId: req.center_id ?? null,
+      requester: req.requester ?? null,
+    },
+  }
+}
 export default function NewMaterialRequestPage() {
   return (
     <Suspense fallback={null}>
@@ -104,7 +176,6 @@ export default function NewMaterialRequestPage() {
 
 function NewMaterialRequestForm() {
   const router = useRouter()
-  const pathname = usePathname()
   const searchParams = useSearchParams()
   const { user } = useUser()
   const resubmitParam = Number(searchParams.get('reenviar'))
@@ -128,15 +199,29 @@ function NewMaterialRequestForm() {
   const [requesterName, setRequesterName] = useState(user?.name ? user.name.toUpperCase() : '')
   const [costCenter, setCostCenter] = useState('')
   const [urgency, setUrgency] = useState<'low' | 'medium' | 'high'>('low')
-  const [centers, setCenters] = useState<Center[]>([])
   const [centerId, setCenterId] = useState<number | null>(null)
 
   // Phase 2 – Specs
-  const [pdms, setPdms] = useState<PDMTemplate[]>([])
-  const [pdmsLoading, setPdmsLoading] = useState(false)
   const [selectedPdm, setSelectedPdm] = useState<number | null>(null)
-  const [attributes, setAttributes] = useState<Attribute[]>([])
-  const [attributesLoading, setAttributesLoading] = useState(false)
+  // Centros e modelos de PDM são consultas com cache. Os atributos são do PDM escolhido.
+  const centersQ = useQuery({ queryKey: ['centers-active'] as const, queryFn: () => getCenters({ activeOnly: true }) })
+  const centers = centersQ.data ?? NO_CENTERS_LIST
+  const pdmsQ = useQuery({ queryKey: ['pdm-templates'] as const, queryFn: () => loadPdmTemplates() })
+  const pdms = pdmsQ.data ?? NO_PDMS
+  const pdmsLoading = pdmsQ.isPending
+  const attributesQ = useQuery({
+    queryKey: ['pdm-attributes', selectedPdm] as const,
+    queryFn: () => loadPdmAttributes(selectedPdm ?? 0),
+    enabled: selectedPdm != null,
+  })
+  const attributes: Attribute[] = selectedPdm == null ? NO_ATTRIBUTES : (attributesQ.data ?? NO_ATTRIBUTES)
+  const attributesLoading = selectedPdm != null && attributesQ.isPending
+  useEffect(() => {
+    if (pdmsQ.error) toast.error((pdmsQ.error as Error)?.message ?? 'Erro ao carregar PDMs')
+  }, [pdmsQ.error])
+  useEffect(() => {
+    if (attributesQ.error) toast.error((attributesQ.error as Error)?.message ?? 'Erro ao carregar atributos')
+  }, [attributesQ.error])
   const [formData, setFormData] = useState<Record<string, string | { value: string; unit: string }>>({})
   const [invalidFieldIds, setInvalidFieldIds] = useState<Set<string>>(new Set())
   const [quantity, setQuantity] = useState('')
@@ -146,91 +231,38 @@ function NewMaterialRequestForm() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [justificativa, setJustificativa] = useState('')
 
-  // Auto-fill requester name from the logged-in user when it becomes available
+  // Solicitante = nome de quem está logado (ajuste na renderização). O reenvio define o seu.
+  const [seenUserName, setSeenUserName] = useState<string | null | undefined>(undefined)
+  if (seenUserName !== (user?.name ?? null)) {
+    setSeenUserName(user?.name ?? null)
+    if (user?.name && resubmitId == null) setRequesterName(user.name.toUpperCase())
+  }
+  // Reenvio: a rejeitada volta preenchida, uma vez. Quem não é de cadastro é levado à tela do tipo.
+  const resubmitQ = useQuery({
+    queryKey: ['request-resubmit', resubmitId] as const,
+    queryFn: () => loadResubmit(resubmitId ?? 0),
+    enabled: resubmitId != null,
+  })
   useEffect(() => {
-    if (user?.name && resubmitId == null) {
-      setRequesterName(user.name.toUpperCase())
-    }
-  }, [user?.name, pathname, resubmitId])
-
-  // Reenvio: carrega a rejeitada já preenchida e começa nos atributos
-  useEffect(() => {
-    if (resubmitId == null) return
-    let cancelled = false
-    void (async () => {
-      const req = await getRequestById(resubmitId)
-      if (cancelled) return
-      if (!req || !isRejectedStatus(req.status)) {
-        toast.error('Só solicitação rejeitada pode ser corrigida e reenviada.')
-        router.replace('/requests')
-        return
-      }
-      // Alteração e Ampliação não trocam PDM nem atributos livres: reenvio pela tela do tipo.
-      if ((req.request_type ?? 'cadastro') !== 'cadastro') {
-        router.replace(resubmitHref(req) ?? '/requests')
-        return
-      }
-      const history = await getRequestHistory(resubmitId).catch(() => [])
-      if (cancelled) return
-      const rejection = history.find((evt) => evt.event_type === 'rejected')
-      const justification = (rejection?.event_data as { justification?: string } | null | undefined)?.justification
-      setRejectionReason(justification?.trim() || null)
-      setSelectedPdm(req.pdm_id)
-      setFormData((req.technical_attributes ?? {}) as Record<string, string | { value: string; unit: string }>)
-      if (req.urgency === 'low' || req.urgency === 'medium' || req.urgency === 'high') setUrgency(req.urgency)
-      setJustificativa(req.justification ?? '')
-      setCenterId(req.center_id ?? null)
-      if (req.requester) setRequesterName(req.requester)
-      setCurrentStep(2)
-      setResubmitReady(true)
-    })()
-    return () => { cancelled = true }
-  }, [resubmitId, router])
-
-  useEffect(() => {
-    getCenters({ activeOnly: true }).then(setCenters).catch(() => setCenters([]))
-  }, [])
-
-  // Fetch PDM templates on mount
-  useEffect(() => {
-    setPdmsLoading(true)
-    getPdms()
-      .then((list) => setPdms(list.map((p) => ({ ...p, is_active: p.is_active ?? true })) as PDMTemplate[]))
-      .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar PDMs'))
-      .finally(() => setPdmsLoading(false))
-  }, [pathname])
-
-  // Fetch full PDM template + attributes when a PDM is selected (entering Phase 2)
-  useEffect(() => {
-    if (selectedPdm == null) { setAttributes([]); return }
-    setAttributesLoading(true)
-    getPdmById(selectedPdm)
-      .then((pdm) => {
-        const attrs = (pdm.attributes ?? []) as Attribute[]
-        const sorted = [...attrs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-        setAttributes(sorted)
-
-        // Development aid — log the full schema so the team can see all fields
-        console.group(`[PDM] ${pdm.name} (${pdm.internal_code})`)
-        console.log('id:', pdm.id)
-        console.log('attributes (%d fields):', attrs.length)
-        attrs.forEach((attr, i) => {
-          const type = attr.dataType === 'lov'
-            ? `LOV [${(attr.allowedValues ?? []).map(v => v.value).join(' | ')}]`
-            : attr.dataType
-          console.log(
-            `  ${i + 1}. [${attr.id}] ${attr.name}` +
-            ` — ${type}` +
-            (attr.isRequired ? ' *required*' : '') +
-            (attr.includeInDescription ? ' 📋' : '')
-          )
-        })
-        console.groupEnd()
-      })
-      .catch((e: unknown) => toast.error((e as Error)?.message ?? 'Erro ao carregar atributos'))
-      .finally(() => setAttributesLoading(false))
-  }, [selectedPdm])
-
+    const data = resubmitQ.data
+    if (data?.kind !== 'redirect') return
+    if (data.message) toast.error(data.message)
+    router.replace(data.to)
+  }, [resubmitQ.data, router])
+  const resubmitSeed = resubmitQ.data?.kind === 'ok' ? resubmitQ.data.seed : null
+  const [seededResubmit, setSeededResubmit] = useState<number | null>(null)
+  if (resubmitSeed && seededResubmit !== resubmitId) {
+    setSeededResubmit(resubmitId)
+    setRejectionReason(resubmitSeed.rejectionReason)
+    setSelectedPdm(resubmitSeed.pdmId)
+    setFormData(resubmitSeed.formData)
+    if (resubmitSeed.urgency) setUrgency(resubmitSeed.urgency)
+    setJustificativa(resubmitSeed.justification)
+    setCenterId(resubmitSeed.centerId)
+    if (resubmitSeed.requester) setRequesterName(resubmitSeed.requester)
+    setCurrentStep(2)
+    setResubmitReady(true)
+  }
   const selectedPdmTemplate = pdms.find((p) => p.id === selectedPdm) ?? null
 
   const measurementUnits = useMeasurementUnits()

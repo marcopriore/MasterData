@@ -3,13 +3,14 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
   Home, FileText, ShieldCheck, Database, LayoutGrid, Headphones, BarChart3,
   Settings, GitBranch, Sun, Moon,
   UserCircle, Users, ShieldHalf, BookOpen, BookMarked, LogOut, ScrollText, Building2, Plug, FileCode2, Factory,
 } from 'lucide-react'
+import { useIsClient } from '@/lib/use-is-client'
 import { cn } from '@/lib/utils'
 import {
   Collapsible,
@@ -129,7 +130,8 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: { collapsed: boolea
   const pathname = usePathname()
   const { setTheme, resolvedTheme } = useTheme()
   const { user, logout } = useUser()
-  const [mounted, setMounted] = useState(false)
+  // Só depois da montagem no navegador: evita divergência entre servidor e cliente no tema.
+  const mounted = useIsClient()
 
   const access = {
     isMaster: user?.is_master === true,
@@ -148,14 +150,12 @@ export function AppSidebar({ collapsed, onToggleCollapsed }: { collapsed: boolea
     pathname.startsWith('/settings/') ||
     [...CONFIG_ADMIN, { href: '/admin/tenants' }].some((item) => pathname.startsWith(item.href))
   const [configExpanded, setConfigExpanded] = useState(isInsideConfig)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
+  // Ao entrar numa rota de configurações, o grupo abre (ajuste na renderização, sem efeito).
+  const [wasInsideConfig, setWasInsideConfig] = useState(isInsideConfig)
+  if (wasInsideConfig !== isInsideConfig) {
+    setWasInsideConfig(isInsideConfig)
     if (isInsideConfig) setConfigExpanded(true)
-  }, [isInsideConfig])
+  }
 
   const isDark = mounted && resolvedTheme === 'dark'
   const iconStyle = { color: 'var(--sidebar-icon)' }

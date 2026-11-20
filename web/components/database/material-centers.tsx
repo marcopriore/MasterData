@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Factory, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getCenters, getMaterialCenters, setMaterialOriginCenter, type Center, type MaterialCenter } from '@/lib/supabase-api'
@@ -8,6 +9,9 @@ import { centerLabel } from '@/lib/expansion-request'
 import { requestCode } from '@/lib/material-timeline'
 import { formatAttrValue } from '@/lib/format-attr-value'
 import { Button } from '@/components/ui/button'
+
+const NO_ROWS: MaterialCenter[] = []
+const NO_CENTERS: Center[] = []
 
 /** Centros do material (migration 045). Material antigo sem centro pode receber o centro inicial. */
 export function MaterialCenters({
@@ -23,25 +27,21 @@ export function MaterialCenters({
   labelOf: (fieldName: string) => string | undefined
   onChanged?: () => void
 }) {
-  const [rows, setRows] = useState<MaterialCenter[]>([])
-  const [centers, setCenters] = useState<Center[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const centersQ = useQuery({
+    queryKey: ['material-centers', materialId] as const,
+    queryFn: async (): Promise<{ rows: MaterialCenter[]; centers: Center[] }> => {
+      const [mine, all] = await Promise.all([getMaterialCenters(materialId), getCenters({ activeOnly: true })])
+      return { rows: mine, centers: all }
+    },
+  })
+  const rows = centersQ.data?.rows ?? NO_ROWS
+  const centers = centersQ.data?.centers ?? NO_CENTERS
+  const loading = centersQ.isPending
   const [choice, setChoice] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const [mine, all] = await Promise.all([getMaterialCenters(materialId), getCenters({ activeOnly: true })])
-      setRows(mine)
-      setCenters(all)
-    } catch {
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [materialId])
-
-  useEffect(() => { void load() }, [load])
+  const reload = () => queryClient.invalidateQueries({ queryKey: ['material-centers', materialId] })
 
   async function handleSetOrigin() {
     if (choice == null) {
@@ -53,7 +53,7 @@ export function MaterialCenters({
       await setMaterialOriginCenter(materialId, choice)
       toast.success('Centro inicial informado. O material volta para Pendente ERP.')
       setChoice(null)
-      await load()
+      await reload()
       onChanged?.()
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Não foi possível informar o centro.')

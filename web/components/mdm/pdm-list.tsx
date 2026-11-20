@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, FileDown, Loader2, Plus, Search, Upload, X } from "lucide-react"
@@ -33,6 +34,9 @@ const COLUMNS: Array<{ key: PdmSort; label: string; className?: string }> = [
   { key: "situacao", label: "Situação", className: "w-32" },
 ]
 
+const PDM_LIST_KEY = ["pdms"] as const
+const NO_PDM_ROWS: PdmListRow[] = []
+
 export function PdmList() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -42,25 +46,18 @@ export function PdmList() {
   // Importar cria PDMs: exige editar PDM, além da importação em massa.
   const showBulkImport = canEditPdm && can("can_bulk_import")
 
-  const [pdms, setPdms] = useState<PdmListRow[]>([])
-  const [loading, setLoading] = useState(true)
+  // A lista de PDMs é uma consulta com cache; importar ou criar a invalida.
+  const queryClient = useQueryClient()
+  const pdmsQ = useQuery({ queryKey: PDM_LIST_KEY, queryFn: () => getPdms() })
+  const pdms = pdmsQ.data ?? NO_PDM_ROWS
+  const loading = pdmsQ.isPending
+  const refreshPdms = () => queryClient.invalidateQueries({ queryKey: PDM_LIST_KEY })
+  useEffect(() => {
+    if (pdmsQ.error) toast.error((pdmsQ.error as Error)?.message ?? "Falha ao carregar PDMs")
+  }, [pdmsQ.error])
   const [state, setState] = useState<PdmListState>(() => readPdmListState(searchParams))
   const [exporting, setExporting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setPdms(await getPdms())
-    } catch (err) {
-      toast.error((err as Error)?.message ?? "Falha ao carregar PDMs")
-      setPdms([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
 
   useEffect(() => {
     const query = pdmListQuery(state)
@@ -286,7 +283,7 @@ export function PdmList() {
         </div>
       </div>
 
-      {importOpen && <PdmImportModal onClose={() => setImportOpen(false)} onImported={() => void load()} />}
+      {importOpen && <PdmImportModal onClose={() => setImportOpen(false)} onImported={() => void refreshPdms()} />}
     </div>
   )
 }

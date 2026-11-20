@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ChevronLeft, ChevronRight, Download, Eye, Headphones, Plus, RefreshCw, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { AttachmentFileList } from '@/components/support/attachment-file-list'
@@ -90,6 +91,36 @@ function DateFilter({ label, value, onChange }: { label: string; value: string; 
   )
 }
 
+const SUPPORT_TICKETS_KEY = ['support', 'tickets'] as const
+const SUPPORT_CATEGORIAS_KEY = ['support', 'categorias'] as const
+const NO_TICKETS: AxisDeskChamado[] = []
+const NO_CATEGORIAS: AxisDeskCategoria[] = []
+
+async function loadSupportTickets(): Promise<AxisDeskChamado[]> {
+  const res = await fetch('/api/support/tickets', { cache: 'no-store' }).catch(() => null)
+  if (!res) throw new Error('Não foi possível conectar ao sistema de suporte.')
+  const payload = (await res.json().catch(() => ({}))) as { data?: AxisDeskChamado[]; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Não foi possível carregar os chamados.')
+  return payload.data ?? NO_TICKETS
+}
+
+/** Categorias do filtro da lista. Se falhar, a lista segue sem essas opções. */
+async function loadFilterCategorias(): Promise<AxisDeskCategoria[]> {
+  const res = await fetch('/api/support/categorias', { cache: 'no-store' }).catch(() => null)
+  if (!res?.ok) return NO_CATEGORIAS
+  const payload = (await res.json().catch(() => ({}))) as { data?: AxisDeskCategoria[] }
+  return payload.data ?? NO_CATEGORIAS
+}
+
+async function loadFormCategorias(tipo: AxisDeskChamadoTipo): Promise<AxisDeskCategoria[]> {
+  const res = await fetch(`/api/support/categorias?tipo=${tipo}`, { cache: 'no-store' }).catch(() => null)
+  const payload: { data?: AxisDeskCategoria[]; error?: string } = res
+    ? await res.json().catch(() => ({}))
+    : {}
+  if (!res?.ok) throw new Error(payload.error ?? 'Não foi possível carregar as categorias.')
+  return payload.data ?? NO_CATEGORIAS
+}
+
 export function SupportPage() {
   const router = useRouter()
   const pathname = usePathname()
@@ -97,21 +128,38 @@ export function SupportPage() {
   const { user } = useUser()
   const filters = useMemo(() => parseSupportListFilters(new URLSearchParams(searchParams.toString())), [searchParams])
 
-  const [tickets, setTickets] = useState<AxisDeskChamado[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  // Chamados e categorias são consultas com cache; o rascunho da busca e o formulário são estado local.
+  const ticketsQ = useQuery({ queryKey: SUPPORT_TICKETS_KEY, queryFn: loadSupportTickets })
+  const tickets = ticketsQ.data ?? NO_TICKETS
+  const loading = ticketsQ.isPending
+  const refreshing = ticketsQ.isFetching && !ticketsQ.isPending
+  const loadError = ticketsQ.error?.message ?? null
+  const refreshTickets = () => queryClient.invalidateQueries({ queryKey: SUPPORT_TICKETS_KEY })
+  const filterCategoriasQ = useQuery({ queryKey: SUPPORT_CATEGORIAS_KEY, queryFn: loadFilterCategorias })
+  const filterCategorias = filterCategoriasQ.data ?? NO_CATEGORIAS
   const [exporting, setExporting] = useState(false)
-  const [filterCategorias, setFilterCategorias] = useState<AxisDeskCategoria[]>([])
   const [qDraft, setQDraft] = useState(filters.q)
+  const [seenQ, setSeenQ] = useState(filters.q)
+  if (seenQ !== filters.q) {
+    setSeenQ(filters.q)
+    setQDraft(filters.q)
+  }
 
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
-  const [categorias, setCategorias] = useState<AxisDeskCategoria[]>([])
-  const [categoriasLoading, setCategoriasLoading] = useState(false)
+  // Categorias do formulário dependem do tipo escolhido; a consulta só roda com o diálogo aberto.
+  const formCategoriasQ = useQuery({
+    queryKey: ['support', 'categorias', form.tipo] as const,
+    queryFn: () => loadFormCategorias(form.tipo),
+    enabled: open,
+  })
+  const categorias = formCategoriasQ.data ?? NO_CATEGORIAS
+  const categoriasLoading = open && formCategoriasQ.isPending
+  useEffect(() => {
+    if (formCategoriasQ.error) toast.error(formCategoriasQ.error.message)
+  }, [formCategoriasQ.error])
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => { setQDraft(filters.q) }, [filters.q])
 
   const replaceFilters = useCallback(
     (patch: Partial<SupportListFilters>) => {
@@ -133,55 +181,6 @@ export function SupportPage() {
     }, 400)
     return () => window.clearTimeout(timer)
   }, [qDraft, filters.q])
-
-  const load = useCallback(async (silent = false) => {
-    if (silent) setRefreshing(true)
-    else setLoading(true)
-    try {
-      const res = await fetch('/api/support/tickets', { cache: 'no-store' })
-      const payload = await res.json().catch(() => ({})) as { data?: AxisDeskChamado[]; error?: string }
-      if (!res.ok) {
-        setLoadError(payload.error ?? 'Não foi possível carregar os chamados.')
-        setTickets([])
-        return
-      }
-      setLoadError(null)
-      setTickets(payload.data ?? [])
-    } catch {
-      setLoadError('Não foi possível conectar ao sistema de suporte.')
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-    void (async () => {
-      const res = await fetch('/api/support/categorias', { cache: 'no-store' }).catch(() => null)
-      if (!res?.ok) return
-      const payload = await res.json().catch(() => ({})) as { data?: AxisDeskCategoria[] }
-      setFilterCategorias(payload.data ?? [])
-    })()
-  }, [load])
-
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    setCategoriasLoading(true)
-    void (async () => {
-      const res = await fetch(`/api/support/categorias?tipo=${form.tipo}`, { cache: 'no-store' }).catch(() => null)
-      const payload = res ? await res.json().catch(() => ({})) as { data?: AxisDeskCategoria[]; error?: string } : {}
-      if (cancelled) return
-      if (res?.ok) setCategorias(payload.data ?? [])
-      else {
-        setCategorias([])
-        toast.error(payload.error ?? 'Não foi possível carregar as categorias.')
-      }
-      setCategoriasLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [open, form.tipo])
 
   const filtered = useMemo(
     () => applySupportListFilters(tickets, filters, { userId: user?.id, email: user?.email }),
@@ -246,7 +245,7 @@ export function SupportPage() {
       setOpen(false)
       setForm(EMPTY_FORM)
       if (payload.data?.id) router.push(`/support/${payload.data.id}`)
-      else await load(true)
+      else await refreshTickets()
     } catch {
       toast.error('Não foi possível abrir o chamado.')
     } finally {
@@ -265,7 +264,7 @@ export function SupportPage() {
           <p className="mt-1 text-sm text-muted-foreground">Abra e acompanhe chamados com a equipe AxisStrategy.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void load(true)} disabled={refreshing || loading}>
+          <Button type="button" variant="outline" size="sm" onClick={() => void refreshTickets()} disabled={refreshing || loading}>
             <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>

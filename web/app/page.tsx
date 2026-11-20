@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { getDashboardStats } from '@/lib/supabase-api'
 import { RecentActivitiesList } from '@/components/recent-activities-list'
 import { useUser } from '@/contexts/user-context'
 import { mergeRolePermissions } from '@/lib/permissions'
+import { useIsClient } from '@/lib/use-is-client'
 import { canSeeHomeShortcut, canSeeMainNav } from '@/lib/nav-access'
 import {
   PieChart,
@@ -169,37 +170,20 @@ function NavCard({
 
 export default function DashboardPage() {
   const router = useRouter()
-  const pathname = usePathname()
   const { user, ready } = useUser()
   const access = {
     isMaster: user?.is_master === true,
     permissions: user?.role_permissions ?? mergeRolePermissions([], []),
   }
 
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [statsLoading, setStatsLoading] = useState(true)
-  const [statsError, setStatsError] = useState<string | null>(null)
+  // Só depois da sessão. Cada visita à página busca de novo (o cache é por usuário e empresa).
+  const statsQ = useQuery({ queryKey: ['dashboard-stats'], queryFn: () => getDashboardStats(), enabled: ready })
+  const stats: DashboardStats | null = statsQ.data ?? null
+  const statsLoading = statsQ.isPending
+  const statsError = statsQ.error ? (statsQ.error as Error).message : null
 
   // Hydration guard — recharts must only render on the client
-  const [isClient, setIsClient] = useState(false)
-  useEffect(() => setIsClient(true), [])
-
-  useEffect(() => {
-    if (!ready) return
-    async function load() {
-      setStatsLoading(true)
-      setStatsError(null)
-      try {
-        const s = await getDashboardStats()
-        setStats(s)
-      } catch (err) {
-        setStatsError((err as Error).message)
-      } finally {
-        setStatsLoading(false)
-      }
-    }
-    load()
-  }, [ready, pathname])
+  const isClient = useIsClient()
 
   /** Quem não tem governança (solicitante) filtra as próprias solicitações. */
   const seesGovernance = canSeeMainNav('/governance', access)

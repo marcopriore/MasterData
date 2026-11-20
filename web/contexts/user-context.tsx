@@ -91,7 +91,10 @@ export function UserProvider({
     return loaded
   }, [])
 
+  // Exceção documentada: sincroniza o contexto com a sessão do Supabase, uma fonte externa ao React
+  // que só o navegador lê. Roda uma vez, e só quando o servidor não resolveu o usuário.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sincronização com a sessão externa do Supabase
     if (!initialResolved) void loadUserFromSession()
   }, [initialResolved, loadUserFromSession])
 

@@ -54,9 +54,21 @@ function NavigationProgressInner() {
     giveUpTimer.current = window.setTimeout(finishNavigation, GIVE_UP_MS)
   }, [clearTimers, finishNavigation])
 
+  // Rota mudou: a barra completa e some. O ajuste do estado acontece na renderização; o timer fica no efeito.
+  const [seenRouteKey, setSeenRouteKey] = useState(routeKey)
+  if (seenRouteKey !== routeKey) {
+    setSeenRouteKey(routeKey)
+    setShowOverlay(false)
+    setProgress((current) => (current === 0 ? 0 : 100))
+  }
+
   useEffect(() => {
-    finishNavigation()
-  }, [routeKey, finishNavigation])
+    completeTimer.current = window.setTimeout(() => {
+      setIsNavigating(false)
+      setProgress(0)
+    }, 280)
+    return () => clearTimers()
+  }, [routeKey, clearTimers])
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {

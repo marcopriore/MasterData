@@ -103,6 +103,9 @@ type RequestValue = { label: string; value: string }
 const NO_WORKFLOWS: never[] = []
 const NO_PDMS: Array<{ id: number; name: string; internal_code: string; is_active: boolean }> = []
 const NO_REQUESTS: never[] = []
+const NO_MY_FIELDS: MyField[] = []
+const NO_FIELD_LABELS: FieldLabelItem[] = []
+const NO_FIELD_RULES: FieldRuleProfile[] = []
 const NO_CENTERS: Array<{ id: number; code: string; name: string; is_active: boolean }> = []
 const NO_STEPS: Array<{ status_key: string; step_name: string; order: number; is_active: boolean; sla_days?: number | null }> = []
 const NO_FINISHED_AT: Record<string, string> = {}
@@ -278,10 +281,25 @@ export default function GovernanceBoard() {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState<ApiRequest | null>(null)
   const [approveRejectLoading, setApproveRejectLoading] = useState(false)
-  const [myFields, setMyFields] = useState<MyField[]>([])
-  const [fieldRules, setFieldRules] = useState<FieldRuleProfile[]>([])
-  const [stageRole, setStageRole] = useState<string | null>(null)
-  const [fieldLabels, setFieldLabels] = useState<FieldLabelItem[]>([])
+  // Dados do pedido aberto: campos da etapa (só do responsável), rótulos e regras. Cada um é consulta.
+  const assignedToMe = selectedRequest?.assigned_to_id != null && selectedRequest.assigned_to_id === user?.id
+  const detailOpen = detailsOpen && selectedRequest != null
+  const stageStatus = selectedRequest?.status ?? ''
+  const stageQ = useQuery({
+    queryKey: ['governance', 'stage-fields', stageStatus] as const,
+    queryFn: () => getStageFields(stageStatus),
+    enabled: detailOpen && assignedToMe,
+  })
+  const labelsQ = useQuery({ queryKey: ['field-labels'] as const, queryFn: () => getFieldLabels(), enabled: detailOpen })
+  const rulesQ = useQuery({
+    queryKey: ['field-rules'] as const,
+    queryFn: () => getFieldRules().catch(() => [] as FieldRuleProfile[]),
+    enabled: detailOpen && assignedToMe,
+  })
+  const myFields: MyField[] = assignedToMe ? (stageQ.data?.fields ?? NO_MY_FIELDS) : NO_MY_FIELDS
+  const stageRole: string | null = assignedToMe ? (stageQ.data?.role ?? null) : null
+  const fieldLabels: FieldLabelItem[] = labelsQ.data ?? NO_FIELD_LABELS
+  const fieldRules: FieldRuleProfile[] = rulesQ.data ?? NO_FIELD_RULES
   const [attributeValues, setAttributeValues] = useState<Record<string, string | { value: string; unit: string }>>({})
   const measurementUnits = useMeasurementUnits()
 
@@ -365,15 +383,10 @@ export default function GovernanceBoard() {
     [requests, workflowSteps]
   )
 
-  /** ?status=chave vem do gráfico da tela inicial. */
-  const [stageFilter, setStageFilter] = useState<string | null>(null)
+  /** ?status=chave vem do gráfico da tela inicial. O filtro é a própria URL. */
   const statusParam = searchParams.get('status')
-  useEffect(() => {
-    const key = statusParam?.trim().toLowerCase()
-    if (key) setStageFilter(key)
-  }, [statusParam])
+  const stageFilter = statusParam?.trim().toLowerCase() || null
   const clearStageFilter = () => {
-    setStageFilter(null)
     router.replace('/governance', { scroll: false })
   }
 
@@ -426,38 +439,31 @@ export default function GovernanceBoard() {
     setDetailsOpen(true)
   }
 
-  /** ?req=ID vem do e-mail, do sino e do link antigo /governance/request/ID. */
-  const [linkedRequestId, setLinkedRequestId] = useState<number | null>(null)
-  const linkedWorkflowTried = useRef(false)
+  /** ?req=ID vem do e-mail, do sino e do link antigo /governance/request/ID. A própria URL guarda o pedido. */
   const reqParam = searchParams.get('req')
-  useEffect(() => {
-    const id = Number(reqParam)
-    if (Number.isInteger(id) && id > 0) {
-      linkedWorkflowTried.current = false
-      setLinkedRequestId(id)
-    }
-  }, [reqParam])
+  const parsedReq = Number(reqParam)
+  const linkedRequestId = Number.isInteger(parsedReq) && parsedReq > 0 ? parsedReq : null
+  /** Pedido do link já procurado no servidor: se não existe, não procura de novo. */
+  const linkedWorkflowTriedFor = useRef<number | null>(null)
 
   useEffect(() => {
     if (linkedRequestId == null || loading || selectedWorkflowId == null) return
-    const clearLink = () => {
-      setLinkedRequestId(null)
-      linkedWorkflowTried.current = false
-      router.replace('/governance', { scroll: false })
-    }
+    const clearLink = () => router.replace('/governance', { scroll: false })
     const found = requests.find((r) => r.id === linkedRequestId)
     if (found) {
+      // Abre o detalhe do pedido do link e limpa a URL: abrir a partir do link é uma ação, não dado.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- abre o detalhe do pedido vindo do link
       setSelectedRequest(found)
       setDetailsOpen(true)
       clearLink()
       return
     }
-    if (linkedWorkflowTried.current) {
+    if (linkedWorkflowTriedFor.current === linkedRequestId) {
       toast.error(`Solicitação REQ-${String(linkedRequestId).padStart(4, '0')} não encontrada.`)
       clearLink()
       return
     }
-    linkedWorkflowTried.current = true
+    linkedWorkflowTriedFor.current = linkedRequestId
     void getRequestById(linkedRequestId).then((req) => {
       if (req && req.workflow_id && req.workflow_id !== selectedWorkflowId) {
         setRequestType(req.request_type ?? 'cadastro')
@@ -486,8 +492,6 @@ export default function GovernanceBoard() {
     lastInitializedRequestIdRef.current = null
     setSelectedRequest(null)
     setAttributeValues({})
-    setMyFields([])
-    setFieldLabels([])
     setDetailsOpen(false)
   }, [])
 
@@ -559,8 +563,10 @@ export default function GovernanceBoard() {
     return toErpText(parts.join(' '))
   }, [selectedPdmName, selectedPdmAttrs, selectedSavedDescription, attributeValues])
 
+  // Ao abrir ou trocar de pedido, o formulário volta ao estado dele (estado de tela, não dado do servidor).
   useEffect(() => {
     if (!detailsOpen || !selectedRequest) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reinicia o formulário ao trocar de pedido
     setHistoryFetched(false)
     setHistoryEvents([])
     setInvalidFields(new Set())
@@ -582,32 +588,7 @@ export default function GovernanceBoard() {
         )
       )
     }
-    const assignedToMe =
-      selectedRequest.assigned_to_id != null && selectedRequest.assigned_to_id === user?.id
-
-    if (assignedToMe) {
-      Promise.all([
-        getStageFields(selectedRequest.status),
-        getFieldLabels(),
-        getFieldRules().catch(() => [] as FieldRuleProfile[]),
-      ])
-        .then(([stage, labels, rules]) => {
-          setMyFields(stage.fields)
-          setStageRole(stage.role)
-          setFieldLabels(labels ?? [])
-          setFieldRules(rules)
-        })
-        .catch(() => {
-          setMyFields([])
-          setStageRole(null)
-          setFieldLabels([])
-        })
-    } else {
-      setMyFields([])
-      setStageRole(null)
-      getFieldLabels().then(setFieldLabels).catch(() => setFieldLabels([]))
-    }
-  }, [detailsOpen, selectedRequest, user?.id])
+  }, [detailsOpen, selectedRequest])
 
   /** Campos desta etapa para o material (regra por material); muda na hora quando o tipo muda. */
   const stageFields = useMemo(() => {

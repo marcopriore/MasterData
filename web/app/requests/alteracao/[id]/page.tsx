@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { AlertTriangle, ChevronLeft, Loader2, PencilLine } from 'lucide-react'
@@ -37,6 +38,63 @@ const URGENCIES = [
 ]
 
 /** Solicitação de Alteração de um material da base: escolhe os campos e os valores novos. */
+type ResubmitSeed = { draft: ChangeDraft; urgency: string; justification: string; rejectionReason: string | null }
+type AlteracaoData = {
+  material: Material
+  pdm: { id: number; name: string; attributes: Array<Record<string, unknown>> } | null
+  fields: ChangeDictField[]
+  profiles: FieldRuleProfile[]
+  resubmit: ResubmitSeed | null
+  loadError: string | null
+}
+
+const NO_CHANGE_FIELDS: ChangeDictField[] = []
+const NO_PROFILES: FieldRuleProfile[] = []
+
+/** Carrega o material, o PDM e o dicionário; no reenvio, também o pedido rejeitado. */
+async function loadAlteracao(materialId: number, resubmitId: number | null): Promise<AlteracaoData> {
+  const [m, dict, rules, pdms] = await Promise.all([
+    getMaterialById(materialId),
+    getFieldDictionary(),
+    getFieldRules().catch(() => [] as FieldRuleProfile[]),
+    getPdms(),
+  ])
+  const mat = m as unknown as Material
+  const found = pdms.find((p) => p.internal_code === mat.pdm_code)
+  const full = found ? await getPdmById(found.id) : null
+  const out: AlteracaoData = {
+    material: mat,
+    pdm: full ? { id: full.id, name: full.name, attributes: (full.attributes ?? []) as Array<Record<string, unknown>> } : null,
+    fields: dict.map((f) => ({
+      field_name: f.field_name as string,
+      field_label: f.field_label as string,
+      responsible_role: f.responsible_role as string,
+      is_required: f.is_required === true,
+      field_type: (f.field_type as string) ?? 'text',
+      options: f.options,
+      erp_view: (f.erp_view as string) ?? '',
+    })),
+    profiles: rules.filter((p) => p.is_active),
+    resubmit: null,
+    loadError: full ? null : 'O PDM deste material não foi encontrado; a alteração precisa do PDM.',
+  }
+  if (resubmitId != null) {
+    // Reenvio: a rejeitada volta preenchida com os campos e valores que ela pediu.
+    const [req, history] = await Promise.all([getRequestById(resubmitId), getRequestHistory(resubmitId).catch(() => [])])
+    if (!req || req.request_type !== 'alteracao' || req.target_material_id !== materialId || !isRejectedStatus(req.status)) {
+      return { ...out, loadError: 'Só uma alteração rejeitada deste material pode ser corrigida e reenviada aqui.' }
+    }
+    const attrs = (req.technical_attributes ?? {}) as Record<string, unknown>
+    const rejection = history.find((e) => e.event_type === 'rejected')
+    out.resubmit = {
+      draft: Object.fromEntries((req.change_fields ?? []).map((k) => [k, valueText(attrs[k])])),
+      urgency: req.urgency || 'low',
+      justification: req.justification ?? '',
+      rejectionReason: ((rejection?.event_data as { justification?: string } | null)?.justification ?? '').trim() || null,
+    }
+  }
+  return out
+}
 export default function ChangeRequestPage() {
   const params = useParams()
   const router = useRouter()
@@ -47,70 +105,38 @@ export default function ChangeRequestPage() {
   const resubmitId = Number.isInteger(resubmitParam) && resubmitParam > 0 ? resubmitParam : null
   const [rejectionReason, setRejectionReason] = useState<string | null>(null)
 
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [material, setMaterial] = useState<Material | null>(null)
-  const [pdm, setPdm] = useState<{ id: number; name: string; attributes: Array<Record<string, unknown>> } | null>(null)
-  const [fields, setFields] = useState<ChangeDictField[]>([])
-  const [profiles, setProfiles] = useState<FieldRuleProfile[]>([])
+  // Material, PDM, campos e regras vêm de uma consulta por material e pedido de reenvio.
+  const dataQ = useQuery({
+    queryKey: ['change-request', materialId, resubmitId] as const,
+    queryFn: () => loadAlteracao(materialId, resubmitId),
+    enabled: Number.isInteger(materialId) && materialId > 0,
+  })
+  const loading = dataQ.isPending
+  const material = dataQ.data?.material ?? null
+  const pdm = dataQ.data?.pdm ?? null
+  const fields = dataQ.data?.fields ?? NO_CHANGE_FIELDS
+  const profiles = dataQ.data?.profiles ?? NO_PROFILES
+  const loadError = dataQ.data?.loadError
+    ?? (dataQ.error ? ((dataQ.error as Error).message || 'Não foi possível carregar o material.') : null)
+
   const [draft, setDraft] = useState<ChangeDraft>({})
   const [urgency, setUrgency] = useState('low')
   const [justification, setJustification] = useState('')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    if (!Number.isInteger(materialId) || materialId <= 0) return
-    let cancelled = false
-    setLoading(true)
-    ;(async () => {
-      try {
-        const [m, dict, rules, pdms] = await Promise.all([
-          getMaterialById(materialId),
-          getFieldDictionary(),
-          getFieldRules().catch(() => [] as FieldRuleProfile[]),
-          getPdms(),
-        ])
-        const mat = m as unknown as Material
-        const found = pdms.find((p) => p.internal_code === mat.pdm_code)
-        const full = found ? await getPdmById(found.id) : null
-        if (cancelled) return
-        setMaterial(mat)
-        setPdm(full ? { id: full.id, name: full.name, attributes: (full.attributes ?? []) as Array<Record<string, unknown>> } : null)
-        setFields(dict.map((f) => ({
-          field_name: f.field_name as string,
-          field_label: f.field_label as string,
-          responsible_role: f.responsible_role as string,
-          is_required: f.is_required === true,
-          field_type: (f.field_type as string) ?? 'text',
-          options: f.options,
-          erp_view: (f.erp_view as string) ?? '',
-        })))
-        setProfiles(rules.filter((p) => p.is_active))
-        if (!full) setLoadError('O PDM deste material não foi encontrado; a alteração precisa do PDM.')
-        if (resubmitId != null) {
-          // Reenvio: a rejeitada volta preenchida com os campos e valores que ela pediu.
-          const [req, history] = await Promise.all([getRequestById(resubmitId), getRequestHistory(resubmitId).catch(() => [])])
-          if (cancelled) return
-          if (!req || req.request_type !== 'alteracao' || req.target_material_id !== materialId || !isRejectedStatus(req.status)) {
-            setLoadError('Só uma alteração rejeitada deste material pode ser corrigida e reenviada aqui.')
-            return
-          }
-          const attrs = (req.technical_attributes ?? {}) as Record<string, unknown>
-          setDraft(Object.fromEntries((req.change_fields ?? []).map((k) => [k, valueText(attrs[k])])))
-          setUrgency(req.urgency || 'low')
-          setJustification(req.justification ?? '')
-          const rejection = history.find((e) => e.event_type === 'rejected')
-          setRejectionReason(((rejection?.event_data as { justification?: string } | null)?.justification ?? '').trim() || null)
-        }
-      } catch (err) {
-        if (!cancelled) setLoadError((err as Error)?.message ?? 'Não foi possível carregar o material.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [materialId, resubmitId])
-
+  // O rascunho do reenvio é semeado uma vez por material e pedido. Depois disso, é do usuário.
+  const seedKey = `${materialId}:${resubmitId ?? ''}`
+  const [seededKey, setSeededKey] = useState<string | null>(null)
+  if (dataQ.data && seededKey !== seedKey) {
+    setSeededKey(seedKey)
+    const r = dataQ.data.resubmit
+    setRejectionReason(r?.rejectionReason ?? null)
+    if (r) {
+      setDraft(r.draft)
+      setUrgency(r.urgency)
+      setJustification(r.justification)
+    }
+  }
   const rows = useMemo(
     () => (material ? changeRows({ material, pdmAttributes: (pdm?.attributes ?? []) as never, fields, profiles, viewLabel: erpViewLabel }) : []),
     [material, pdm, fields, profiles]

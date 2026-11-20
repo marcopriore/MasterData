@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { Copy, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -146,9 +146,13 @@ function EndpointCard({ endpoint, origin }: { endpoint: DocEndpoint; origin: str
   )
 }
 
+// A origem existe só no navegador: lida como valor externo (vazia no servidor e na hidratação), sem efeito.
+const subscribeNone = () => () => {}
+const readOrigin = () => window.location.origin
+const readServerOrigin = () => ''
+
 export function IntegrationDocs() {
-  const [origin, setOrigin] = useState('')
-  useEffect(() => { setOrigin(window.location.origin) }, [])
+  const origin = useSyncExternalStore(subscribeNone, readOrigin, readServerOrigin)
   const endpoints = useMemo(() => inboundEndpoints(), [])
   const outbound = useMemo(() => outboundOperations(), [])
 

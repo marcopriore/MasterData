@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { usePathname } from 'next/navigation'
+import { useState, useEffect, FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRoles, createRole, updateRole, logAction } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { emptyPermissions, isSystemRoleName, PERMISSION_GROUPS, type RolePermissions } from '@/lib/permissions'
@@ -219,31 +219,24 @@ function RoleModal({ mode, initial, onClose, onSaved }: RoleModalProps) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+/** Papéis da empresa: uma chave só, para a lista e para as gravações que a atualizam. */
+const ROLES_KEY = ['admin', 'roles'] as const
+
 export default function RolesPage() {
-  const pathname = usePathname()
   const { user, can } = useUser()
   const canManageRoles = user?.is_master || can('can_manage_roles')
 
-  const [roles, setRoles] = useState<Role[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const rolesQ = useQuery({ queryKey: ROLES_KEY, queryFn: async () => (await getRoles()) as Role[] })
+  const roles = rolesQ.data ?? []
+  const loading = rolesQ.isPending
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create')
   const [editTarget, setEditTarget] = useState<Role | null>(null)
 
-  const fetchRoles = useCallback(async () => {
-    setLoading(true)
-    try {
-      setRoles((await getRoles()) as Role[])
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
-    fetchRoles()
-  }, [fetchRoles, pathname])
+    if (rolesQ.error) toast.error((rolesQ.error as Error).message)
+  }, [rolesQ.error])
 
   function openCreate() {
     setEditTarget(null)
@@ -258,7 +251,7 @@ export default function RolesPage() {
   }
 
   function handleSaved(saved: Role) {
-    setRoles((prev) => {
+    queryClient.setQueryData<Role[]>(ROLES_KEY, (prev = []) => {
       const idx = prev.findIndex((r) => r.id === saved.id)
       return idx >= 0
         ? prev.map((r) => (r.id === saved.id ? saved : r))

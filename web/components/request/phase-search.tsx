@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { getMaterialById, getFieldDictionary, getPdms, getPdmById } from '@/lib/supabase-api'
 import { formatAttrValue } from '@/lib/format-attr-value'
@@ -91,6 +92,35 @@ interface PhaseSearchProps {
   onNotFoundCreateRequest: () => void
 }
 
+type PdmTemplateView = { name: string; attributes?: PdmAttribute[] }
+const NO_FIELDS_BY_VIEW: FieldByView = {}
+
+async function loadFieldsByView(): Promise<FieldByView> {
+  const fields = await getFieldDictionary()
+  const byView: FieldByView = {}
+  for (const f of fields) {
+    const view = erpViewLabel(f.erp_view as string)
+    if (!byView[view]) byView[view] = []
+    byView[view].push({
+      field_name: f.field_name as string,
+      field_label: f.field_label as string,
+      display_order: f.display_order as number | undefined,
+    })
+  }
+  for (const arr of Object.values(byView)) {
+    arr.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999) || a.field_label.localeCompare(b.field_label))
+  }
+  return byView
+}
+
+async function loadPdmTemplateByCode(pdmCode: string): Promise<PdmTemplateView | null> {
+  const pdms = await getPdms()
+  const found = pdms.find((p) => p.internal_code === pdmCode)
+  if (!found) return null
+  const pdm = await getPdmById(found.id)
+  return pdm ? { name: pdm.name, attributes: pdm.attributes as PdmAttribute[] } : null
+}
+
 export function PhaseSearch({
   hasSearched,
   searchResults,
@@ -103,44 +133,16 @@ export function PhaseSearch({
   const [modalMaterial, setModalMaterial] = useState<MaterialSearchItem | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailMaterial, setDetailMaterial] = useState<MaterialSearchItem | null>(null)
-  const [fieldsByView, setFieldsByView] = useState<FieldByView>({})
-  const [pdmTemplate, setPdmTemplate] = useState<{ name: string; attributes?: PdmAttribute[] } | null>(null)
-
-  useEffect(() => {
-    getFieldDictionary()
-      .then((fields) => {
-        const byView: FieldByView = {}
-        for (const f of fields) {
-          const view = erpViewLabel(f.erp_view as string)
-          if (!byView[view]) byView[view] = []
-          byView[view].push({
-            field_name: f.field_name as string,
-            field_label: f.field_label as string,
-            display_order: f.display_order as number | undefined,
-          })
-        }
-        for (const arr of Object.values(byView)) {
-          arr.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999) || a.field_label.localeCompare(b.field_label))
-        }
-        setFieldsByView(byView)
-      })
-      .catch(() => setFieldsByView({}))
-  }, [])
-
-  useEffect(() => {
-    if (!detailMaterial?.pdm_code) {
-      setPdmTemplate(null)
-      return
-    }
-    getPdms()
-      .then((pdms) => {
-        const found = pdms.find((p) => p.internal_code === detailMaterial.pdm_code)
-        if (!found) return
-        return getPdmById(found.id)
-      })
-      .then((pdm) => setPdmTemplate(pdm ? { name: pdm.name, attributes: pdm.attributes as PdmAttribute[] } : null))
-      .catch(() => setPdmTemplate(null))
-  }, [detailMaterial?.pdm_code])
+  // Dicionário de campos e modelo PDM do material aberto são consultas com cache.
+  const fieldsQ = useQuery({ queryKey: ['field-dictionary-by-view'] as const, queryFn: loadFieldsByView })
+  const fieldsByView = fieldsQ.data ?? NO_FIELDS_BY_VIEW
+  const pdmCode = detailMaterial?.pdm_code
+  const pdmTemplateQ = useQuery({
+    queryKey: ['pdm-template-by-code', pdmCode] as const,
+    queryFn: () => loadPdmTemplateByCode(pdmCode ?? ''),
+    enabled: Boolean(pdmCode),
+  })
+  const pdmTemplate = pdmTemplateQ.data ?? null
 
   const handleSearch = () => {
     const q = query.trim()

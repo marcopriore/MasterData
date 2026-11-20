@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { ArrowLeft, ChevronRight, History, MessageSquare, Paperclip, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -44,35 +45,31 @@ function historyDate(entry: AxisDeskHistoricoEntry) {
   return entry.created_at ?? entry.data ?? ''
 }
 
+async function loadSupportTicket(ticketId: string): Promise<AxisDeskChamadoDetalhe | null> {
+  const res = await fetch(`/api/support/tickets/${ticketId}`).catch(() => null)
+  if (!res) throw new Error('Não foi possível carregar o chamado.')
+  const payload = (await res.json().catch(() => ({}))) as { data?: AxisDeskChamadoDetalhe; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Chamado não encontrado.')
+  return payload.data ?? null
+}
+
 export function SupportTicketDetail({ ticketId }: { ticketId: string }) {
-  const [ticket, setTicket] = useState<AxisDeskChamadoDetalhe | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const queryClient = useQueryClient()
+  // O chamado é uma consulta com cache por id; mensagem, anexos e ação são estado local.
+  const ticketQ = useQuery({
+    queryKey: ['support', 'ticket', ticketId] as const,
+    queryFn: () => loadSupportTicket(ticketId),
+  })
+  const ticket = ticketQ.data ?? null
+  const loading = ticketQ.isPending
+  const refreshing = ticketQ.isFetching && !ticketQ.isPending
+  const refreshTicket = () => queryClient.invalidateQueries({ queryKey: ['support', 'ticket', ticketId] })
+  useEffect(() => {
+    if (ticketQ.error) toast.error(ticketQ.error.message)
+  }, [ticketQ.error])
   const [message, setMessage] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [acting, setActing] = useState<AxisDeskChamadoAcao | null>(null)
-
-  async function load(silent = false) {
-    if (silent) setRefreshing(true)
-    else setLoading(true)
-    try {
-      const res = await fetch(`/api/support/tickets/${ticketId}`)
-      const payload = await res.json() as { data?: AxisDeskChamadoDetalhe; error?: string }
-      if (!res.ok) {
-        toast.error(payload.error ?? 'Chamado não encontrado.')
-        setTicket(null)
-        return
-      }
-      setTicket(payload.data ?? null)
-    } catch {
-      toast.error('Não foi possível carregar o chamado.')
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }
-
-  useEffect(() => { void load() }, [ticketId])
 
   const actions = ticket ? getAvailableSupportActions(ticket.status) : []
   const showMessage = actions.some((action) => action.acao === 'usuario_respondeu' || action.acao === 'usuario_reprovou' || action.acao === 'usuario_reenviou')
@@ -117,7 +114,7 @@ export function SupportTicketDetail({ ticketId }: { ticketId: string }) {
       toast.success('Ação registrada com sucesso.')
       setMessage('')
       setFiles([])
-      await load(true)
+      await refreshTicket()
     } catch {
       toast.error('Não foi possível registrar a ação.')
     } finally {
@@ -168,7 +165,7 @@ export function SupportTicketDetail({ ticketId }: { ticketId: string }) {
             </div>
           </div>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => void load(true)} disabled={refreshing}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void refreshTicket()} disabled={refreshing}>
           <RefreshCw className={`size-4 ${refreshing ? 'animate-spin' : ''}`} />
           Atualizar
         </Button>

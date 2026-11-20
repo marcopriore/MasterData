@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { AlertTriangle, ChevronLeft, Factory, Loader2 } from 'lucide-react'
@@ -48,6 +49,72 @@ const URGENCIES = [
 ]
 
 /** Solicitação de Ampliação: o material passa a valer em outro centro, com os campos por centro dele. */
+type ExpansionSeed = { centerId: number | null; draft: ExpansionDraft; urgency: string; justification: string; rejectionReason: string | null }
+type AmpliacaoData = {
+  material: Material
+  pdmId: number | null
+  fields: ExpansionDictField[]
+  profiles: FieldRuleProfile[]
+  centers: Center[]
+  materialCenters: MaterialCenter[]
+  resubmit: ExpansionSeed | null
+  loadError: string | null
+}
+
+const NO_EXP_FIELDS: ExpansionDictField[] = []
+const NO_EXP_PROFILES: FieldRuleProfile[] = []
+const NO_EXP_CENTERS: Center[] = []
+const NO_EXP_MATERIAL_CENTERS: MaterialCenter[] = []
+
+/** Carrega o material, o PDM, o dicionário, os centros; no reenvio, também o pedido rejeitado. */
+async function loadAmpliacao(materialId: number, resubmitId: number | null): Promise<AmpliacaoData> {
+  const [m, dict, rules, pdms, allCenters, mine] = await Promise.all([
+    getMaterialById(materialId),
+    getFieldDictionary(),
+    getFieldRules().catch(() => [] as FieldRuleProfile[]),
+    getPdms(),
+    getCenters({ activeOnly: true }),
+    getMaterialCenters(materialId),
+  ])
+  const mat = m as unknown as Material
+  const pdm = pdms.find((p) => p.internal_code === mat.pdm_code)
+  const out: AmpliacaoData = {
+    material: mat,
+    pdmId: pdm?.id ?? null,
+    fields: dict.map((f) => ({
+      field_name: f.field_name as string,
+      field_label: f.field_label as string,
+      responsible_role: f.responsible_role as string,
+      is_required: f.is_required === true,
+      field_type: (f.field_type as string) ?? 'text',
+      options: f.options,
+      erp_view: (f.erp_view as string) ?? '',
+      per_center: f.per_center === true,
+    })),
+    profiles: rules.filter((p) => p.is_active),
+    centers: allCenters,
+    materialCenters: mine,
+    resubmit: null,
+    loadError: pdm ? null : 'O PDM deste material não foi encontrado; a ampliação precisa do PDM.',
+  }
+  if (resubmitId != null) {
+    // Reenvio: mesmo centro; os valores voltam como a rejeitada pediu.
+    const [req, history] = await Promise.all([getRequestById(resubmitId), getRequestHistory(resubmitId).catch(() => [])])
+    if (!req || req.request_type !== 'ampliacao' || req.target_material_id !== materialId || !isRejectedStatus(req.status)) {
+      return { ...out, loadError: 'Só uma ampliação rejeitada deste material pode ser corrigida e reenviada aqui.' }
+    }
+    const attrs = (req.technical_attributes ?? {}) as Record<string, unknown>
+    const rejection = history.find((e) => e.event_type === 'rejected')
+    out.resubmit = {
+      centerId: req.center_id ?? null,
+      draft: Object.fromEntries((req.change_fields ?? []).map((k) => [k, valueText(attrs[k])])),
+      urgency: req.urgency || 'low',
+      justification: req.justification ?? '',
+      rejectionReason: ((rejection?.event_data as { justification?: string } | null)?.justification ?? '').trim() || null,
+    }
+  }
+  return out
+}
 export default function ExpansionRequestPage() {
   const params = useParams()
   const router = useRouter()
@@ -57,89 +124,56 @@ export default function ExpansionRequestPage() {
   const resubmitParam = Number(searchParams.get('reenviar'))
   const resubmitId = Number.isInteger(resubmitParam) && resubmitParam > 0 ? resubmitParam : null
   const [rejectionReason, setRejectionReason] = useState<string | null>(null)
-  const [resubmitDraft, setResubmitDraft] = useState<ExpansionDraft | null>(null)
 
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [material, setMaterial] = useState<Material | null>(null)
-  const [pdmId, setPdmId] = useState<number | null>(null)
-  const [fields, setFields] = useState<ExpansionDictField[]>([])
-  const [profiles, setProfiles] = useState<FieldRuleProfile[]>([])
-  const [centers, setCenters] = useState<Center[]>([])
-  const [materialCenters, setMaterialCenters] = useState<MaterialCenter[]>([])
+  // Material, PDM, campos, regras e centros vêm de uma consulta por material e pedido de reenvio.
+  const dataQ = useQuery({
+    queryKey: ['expansion-request', materialId, resubmitId] as const,
+    queryFn: () => loadAmpliacao(materialId, resubmitId),
+    enabled: Number.isInteger(materialId) && materialId > 0,
+  })
+  const loading = dataQ.isPending
+  const material = dataQ.data?.material ?? null
+  const pdmId = dataQ.data?.pdmId ?? null
+  const fields = dataQ.data?.fields ?? NO_EXP_FIELDS
+  const profiles = dataQ.data?.profiles ?? NO_EXP_PROFILES
+  const centers = dataQ.data?.centers ?? NO_EXP_CENTERS
+  const materialCenters = dataQ.data?.materialCenters ?? NO_EXP_MATERIAL_CENTERS
+  const resubmitDraft = dataQ.data?.resubmit?.draft ?? null
+  const loadError = dataQ.data?.loadError
+    ?? (dataQ.error ? ((dataQ.error as Error).message || 'Não foi possível carregar o material.') : null)
+
   const [centerId, setCenterId] = useState<number | null>(null)
   const [draft, setDraft] = useState<ExpansionDraft>({})
   const [urgency, setUrgency] = useState('low')
   const [justification, setJustification] = useState('')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    if (!Number.isInteger(materialId) || materialId <= 0) return
-    let cancelled = false
-    setLoading(true)
-    ;(async () => {
-      try {
-        const [m, dict, rules, pdms, allCenters, mine] = await Promise.all([
-          getMaterialById(materialId),
-          getFieldDictionary(),
-          getFieldRules().catch(() => [] as FieldRuleProfile[]),
-          getPdms(),
-          getCenters({ activeOnly: true }),
-          getMaterialCenters(materialId),
-        ])
-        if (cancelled) return
-        const mat = m as unknown as Material
-        const pdm = pdms.find((p) => p.internal_code === mat.pdm_code)
-        setMaterial(mat)
-        setPdmId(pdm?.id ?? null)
-        setFields(dict.map((f) => ({
-          field_name: f.field_name as string,
-          field_label: f.field_label as string,
-          responsible_role: f.responsible_role as string,
-          is_required: f.is_required === true,
-          field_type: (f.field_type as string) ?? 'text',
-          options: f.options,
-          erp_view: (f.erp_view as string) ?? '',
-          per_center: f.per_center === true,
-        })))
-        setProfiles(rules.filter((p) => p.is_active))
-        setCenters(allCenters)
-        setMaterialCenters(mine)
-        if (!pdm) setLoadError('O PDM deste material não foi encontrado; a ampliação precisa do PDM.')
-        if (resubmitId != null) {
-          // Reenvio: mesmo centro; os valores voltam como a rejeitada pediu.
-          const [req, history] = await Promise.all([getRequestById(resubmitId), getRequestHistory(resubmitId).catch(() => [])])
-          if (cancelled) return
-          if (!req || req.request_type !== 'ampliacao' || req.target_material_id !== materialId || !isRejectedStatus(req.status)) {
-            setLoadError('Só uma ampliação rejeitada deste material pode ser corrigida e reenviada aqui.')
-            return
-          }
-          const attrs = (req.technical_attributes ?? {}) as Record<string, unknown>
-          setCenterId(req.center_id ?? null)
-          setResubmitDraft(Object.fromEntries((req.change_fields ?? []).map((k) => [k, valueText(attrs[k])])))
-          setUrgency(req.urgency || 'low')
-          setJustification(req.justification ?? '')
-          const rejection = history.find((e) => e.event_type === 'rejected')
-          setRejectionReason(((rejection?.event_data as { justification?: string } | null)?.justification ?? '').trim() || null)
-        }
-      } catch (err) {
-        if (!cancelled) setLoadError((err as Error)?.message ?? 'Não foi possível carregar o material.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [materialId, resubmitId])
+  // O reenvio semeia centro, urgência, justificativa e motivo uma vez por material e pedido.
+  const seedKey = `${materialId}:${resubmitId ?? ''}`
+  const [seededKey, setSeededKey] = useState<string | null>(null)
+  if (dataQ.data && seededKey !== seedKey) {
+    setSeededKey(seedKey)
+    const r = dataQ.data.resubmit
+    setRejectionReason(r?.rejectionReason ?? null)
+    if (r) {
+      setCenterId(r.centerId)
+      setUrgency(r.urgency)
+      setJustification(r.justification)
+    }
+  }
 
   const rows = useMemo(
     () => (material ? expansionRows({ material, fields, profiles, viewLabel: erpViewLabel }) : []),
     [material, fields, profiles]
   )
-  useEffect(() => {
+  // O rascunho parte dos valores iniciais das linhas (ou do reenvio) e depois é do usuário.
+  // Refaz-se só quando as linhas ou o reenvio mudam (ajuste na renderização, sem efeito).
+  const [draftSeed, setDraftSeed] = useState<{ rows: typeof rows; resubmit: ExpansionDraft | null } | null>(null)
+  if (draftSeed?.rows !== rows || draftSeed?.resubmit !== resubmitDraft) {
+    setDraftSeed({ rows, resubmit: resubmitDraft })
     const initial = initialExpansionDraft(rows)
     setDraft(resubmitDraft ? { ...initial, ...resubmitDraft } : initial)
-  }, [rows, resubmitDraft])
-
+  }
   const groups = useMemo(() => {
     const out = new Map<string, typeof rows>()
     for (const row of rows) out.set(row.group, [...(out.get(row.group) ?? []), row])

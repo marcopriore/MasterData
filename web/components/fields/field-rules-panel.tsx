@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Loader2, Pencil, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -63,9 +64,19 @@ function requirementOf(cell: Cell): FieldRequirement {
 }
 
 /** Regras por material: padrão do dicionário e regras específicas por condição. Grava com can_manage_fields (RLS). */
+const FIELD_RULES_KEY = ['field-rules'] as const
+const NO_PROFILES: FieldRuleProfile[] = []
+
 export function FieldRulesPanel({ fields, roles, onFieldsChanged }: { fields: RuleField[]; roles: string[]; onFieldsChanged: () => void }) {
-  const [loading, setLoading] = useState(true)
-  const [profiles, setProfiles] = useState<FieldRuleProfile[]>([])
+  // Regras de perfil são uma consulta com cache; salvar ou excluir a invalida.
+  const queryClient = useQueryClient()
+  const profilesQ = useQuery({ queryKey: FIELD_RULES_KEY, queryFn: () => getFieldRules() })
+  const profiles = profilesQ.data ?? NO_PROFILES
+  const loading = profilesQ.isPending
+  const load = () => queryClient.invalidateQueries({ queryKey: FIELD_RULES_KEY })
+  useEffect(() => {
+    if (profilesQ.error) toast.error((profilesQ.error as Error).message)
+  }, [profilesQ.error])
   const [defaults, setDefaults] = useState<Record<string, Cell>>({})
   const [savingDefaults, setSavingDefaults] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -95,21 +106,12 @@ export function FieldRulesPanel({ fields, roles, onFieldsChanged }: { fields: Ru
     return [...activeFields].sort((a, b) => order(a) - order(b) || a.display_order - b.display_order)
   }, [activeFields, stageRoles])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setProfiles(await getFieldRules())
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
-  useEffect(() => {
+  // Os valores padrão acompanham os campos ativos (ajuste na renderização, sem efeito).
+  const [seenActive, setSeenActive] = useState<RuleField[] | undefined>(undefined)
+  if (seenActive !== activeFields) {
+    setSeenActive(activeFields)
     setDefaults(Object.fromEntries(activeFields.map((f) => [f.field_name, { role: f.responsible_role, required: f.is_required }])))
-  }, [activeFields])
+  }
 
   // ─── Regra padrão ──────────────────────────────────────────────────────────
   const changedDefaults = activeFields.filter((f) => {

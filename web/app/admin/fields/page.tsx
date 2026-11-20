@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, FormEvent } from 'react'
-import { usePathname } from 'next/navigation'
+import { useState, useEffect, useMemo, FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getFieldDictionaryAll,
   getRoles,
@@ -390,32 +390,35 @@ function FieldModal({ mode, initial, roles, onClose, onSaved }: FieldModalProps)
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+/** Campos e papéis da tela: uma consulta, uma chave. */
+type FieldsData = { fields: FieldDictionary[]; roles: Role[] }
+const FIELDS_KEY = ['admin', 'fields'] as const
+const NO_FIELDS: FieldDictionary[] = []
+
+async function loadFieldsData(): Promise<FieldsData> {
+  const [f, r] = await Promise.all([getFieldDictionaryAll(), getRoles()])
+  return { fields: f as FieldDictionary[], roles: r }
+}
 export default function FieldsPage() {
-  const pathname = usePathname()
   const { user, can, ready } = useUser()
   const canAccess = user?.is_master || can('can_manage_fields')
-  const [fields, setFields] = useState<FieldDictionary[]>([])
-  const [roles, setRoles] = useState<Role[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  // Só depois da sessão: antes dela a RLS devolve a lista vazia.
+  const fieldsQ = useQuery({ queryKey: FIELDS_KEY, queryFn: loadFieldsData, enabled: ready && canAccess })
+  const fields = fieldsQ.data?.fields ?? NO_FIELDS
+  const roles = fieldsQ.data?.roles ?? []
+  const loading = fieldsQ.isPending
   const [erpViewFilter, setErpViewFilter] = useState('')
   const [section, setSection] = useState<'campos' | 'regras' | 'valores'>('campos')
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<ModalMode>('create')
   const [editTarget, setEditTarget] = useState<FieldDictionary | null>(null)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [f, r] = await Promise.all([getFieldDictionaryAll(), getRoles()])
-      setFields(f as FieldDictionary[])
-      setRoles(r)
-    } catch (err) {
-      toast.error((err as Error).message)
-      setFields([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  useEffect(() => {
+    if (fieldsQ.error) toast.error((fieldsQ.error as Error).message)
+  }, [fieldsQ.error])
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: FIELDS_KEY })
 
   // Filtro na tela, pelo código da visão (aceita rótulo antigo gravado, ex. "Dados Básicos").
   const visibleFields = useMemo(
@@ -423,10 +426,6 @@ export default function FieldsPage() {
     [fields, erpViewFilter]
   )
 
-  // Só depois da sessão: antes dela a RLS devolve a lista vazia.
-  useEffect(() => {
-    if (ready && canAccess) fetchData()
-  }, [ready, canAccess, fetchData, pathname])
 
   function openCreate() {
     setEditTarget(null)
@@ -441,10 +440,11 @@ export default function FieldsPage() {
   }
 
   function handleSaved(saved: FieldDictionary) {
-    setFields((prev) => {
-      const idx = prev.findIndex((x) => x.id === saved.id)
-      if (idx >= 0) return prev.map((x) => (x.id === saved.id ? saved : x))
-      return [saved, ...prev]
+    queryClient.setQueryData<FieldsData>(FIELDS_KEY, (prev) => {
+      if (!prev) return prev
+      const idx = prev.fields.findIndex((x) => x.id === saved.id)
+      const next = idx >= 0 ? prev.fields.map((x) => (x.id === saved.id ? saved : x)) : [saved, ...prev.fields]
+      return { ...prev, fields: next }
     })
     setModalOpen(false)
   }
@@ -468,7 +468,7 @@ export default function FieldsPage() {
         })
         toast.success('Campo reativado.')
       }
-      fetchData()
+      void reload()
     } catch (err) {
       toast.error((err as Error).message)
     }
@@ -533,11 +533,11 @@ export default function FieldsPage() {
 
       {section === 'regras' ? (
         loading ? <PageLoading label="Carregando campos…" minHeight="min-h-[30vh]" /> : (
-          <FieldRulesPanel fields={fields} roles={roles.map((r) => r.name)} onFieldsChanged={fetchData} />
+          <FieldRulesPanel fields={fields} roles={roles.map((r) => r.name)} onFieldsChanged={reload} />
         )
       ) : section === 'valores' ? (
         loading ? <PageLoading label="Carregando campos…" minHeight="min-h-[30vh]" /> : (
-          <DefaultValuesPanel fields={fields} onChanged={fetchData} />
+          <DefaultValuesPanel fields={fields} onChanged={reload} />
         )
       ) : (<>
       {/* Tabs filter */}

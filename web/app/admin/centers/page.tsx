@@ -1,10 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Factory, Loader2, Pencil, Plus, Trash2, X, Check } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { useUser } from '@/contexts/user-context'
-import { createCenter, deleteCenter, getCenters, updateCenter, type Center } from '@/lib/supabase-api'
+import { createCenter, deleteCenter, updateCenter, type Center } from '@/lib/supabase-api'
+import { createClient } from '@/lib/supabase/client'
+import { centersQuery, referenceKeys } from '@/lib/queries/reference'
 import { toErpText } from '@/lib/erp-text'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,24 +17,21 @@ import { PageLoading } from '@/components/ui/page-loading'
 export default function CentersPage() {
   const { can } = useUser()
   const canEdit = can('can_manage_fields')
-  const [centers, setCenters] = useState<Center[]>([])
-  const [loading, setLoading] = useState(true)
+  const db = useMemo(() => createClient(), [])
+  const queryClient = useQueryClient()
+  const centersQ = useQuery(centersQuery(db))
+  const centers: Center[] = centersQ.data ?? []
+  const loading = centersQ.isPending
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<{ id: number; code: string; name: string } | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      setCenters(await getCenters())
-    } catch (err) {
-      toast.error((err as Error)?.message ?? 'Não foi possível carregar os centros.')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  useEffect(() => {
+    if (centersQ.error) toast.error((centersQ.error as Error)?.message ?? 'Não foi possível carregar os centros.')
+  }, [centersQ.error])
 
-  useEffect(() => { void load() }, [load])
+  const reload = () => queryClient.invalidateQueries({ queryKey: referenceKeys.centers })
 
   const upper = (v: string) => toErpText(v.toUpperCase())
 
@@ -46,7 +46,7 @@ export default function CentersPage() {
       setCode('')
       setName('')
       toast.success('Centro cadastrado.')
-      await load()
+      await reload()
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Não foi possível cadastrar o centro.')
     } finally {
@@ -64,7 +64,7 @@ export default function CentersPage() {
       await updateCenter(editing.id, { code: editing.code, name: editing.name })
       setEditing(null)
       toast.success('Centro alterado.')
-      await load()
+      await reload()
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Não foi possível alterar o centro.')
     }
@@ -73,7 +73,7 @@ export default function CentersPage() {
   async function handleToggle(center: Center) {
     try {
       await updateCenter(center.id, { is_active: !center.is_active })
-      await load()
+      await reload()
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Não foi possível alterar o centro.')
     }
@@ -84,7 +84,7 @@ export default function CentersPage() {
     try {
       await deleteCenter(center.id)
       toast.success('Centro excluído.')
-      await load()
+      await reload()
     } catch (err) {
       toast.error((err as Error)?.message ?? 'Não foi possível excluir o centro.')
     }

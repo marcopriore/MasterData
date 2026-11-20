@@ -7,7 +7,7 @@
  * A tela só monta se quem está logado pode abri-la (canOpenPath): o link colado não passa do menu.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ShieldAlert } from 'lucide-react'
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { useUser } from '@/contexts/user-context'
 import { canOpenPath } from '@/lib/nav-access'
 import { mergeRolePermissions } from '@/lib/permissions'
+import { useStoredFlag } from '@/lib/use-stored-flag'
 
 const SIDEBAR_HIDDEN_PATHS = ['/login', '/reset-password']
 const COLLAPSED_KEY = 'promat:sidebar-collapsed'
@@ -41,19 +42,9 @@ function AccessDenied() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { user, ready } = useUser()
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useStoredFlag(COLLAPSED_KEY)
 
-  useEffect(() => {
-    setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === '1')
-  }, [])
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev
-      window.localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0')
-      return next
-    })
-  }, [])
+  const toggleCollapsed = useCallback(() => setCollapsed(!collapsed), [collapsed, setCollapsed])
 
   const hideSidebar = SIDEBAR_HIDDEN_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + '/')

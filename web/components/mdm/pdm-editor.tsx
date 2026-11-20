@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState, useSyncExternalStore } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Loader2 } from "lucide-react"
@@ -61,6 +62,21 @@ function attributesPayload(attributes: Attribute[]) {
   }))
 }
 
+async function loadPdmDetail(pdmId: number) {
+  const full = await getPdmById(pdmId)
+  const materialsCount = await getPdmMaterialsCount(full.internal_code ?? "")
+  return { full, materialsCount }
+}
+
+type PdmDetail = Awaited<ReturnType<typeof loadPdmDetail>>
+
+const subscribeNone = () => () => {}
+const readServerListHref = () => "/admin-pdm"
+const readListHref = () => {
+  const query = sessionStorage.getItem(PDM_LIST_STORAGE_KEY)
+  return query ? `/admin-pdm?${query}` : "/admin-pdm"
+}
+
 /** Detalhe de um PDM (pdmId) ou criação de um novo (pdmId null). */
 export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   const router = useRouter()
@@ -68,13 +84,33 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   /** Ver PDM abre a tela; criar, editar e clonar pedem "Editar PDM" (o banco também recusa). */
   const canEdit = can("can_edit_pdm")
   const isNew = pdmId == null
-  const [loading, setLoading] = useState(!isNew)
-  const [notFound, setNotFound] = useState(false)
+  const queryClient = useQueryClient()
+  // Detalhe do PDM é consulta com cache. Não recarrega ao voltar para a aba: isso sobrescreveria uma edição em andamento.
+  const pdmQ = useQuery({
+    queryKey: ["pdm-detail", pdmId] as const,
+    queryFn: () => loadPdmDetail(pdmId ?? 0),
+    enabled: pdmId != null,
+    refetchOnWindowFocus: false,
+  })
+  const loading = pdmId != null && pdmQ.isPending
+  const notFound = pdmQ.isError
+  const pdmData = pdmQ.data
+  const materialsCount = pdmData?.materialsCount ?? 0
   const [pdmName, setPdmName] = useState("")
   const [pdmCode, setPdmCode] = useState("")
   const [pdmActive, setPdmActive] = useState(true)
   const [attributes, setAttributes] = useState<Attribute[]>([])
-  const [materialsCount, setMaterialsCount] = useState(0)
+  // O formulário recebe os valores do servidor quando o detalhe muda (ajuste na renderização, sem efeito).
+  const [seenDetail, setSeenDetail] = useState<PdmDetail | undefined>(undefined)
+  if (seenDetail !== pdmData) {
+    setSeenDetail(pdmData)
+    if (pdmData) {
+      setPdmName(pdmData.full.name)
+      setPdmCode(pdmData.full.internal_code ?? "")
+      setPdmActive(pdmData.full.is_active ?? true)
+      setAttributes(toAttributes(pdmData.full.attributes ?? []))
+    }
+  }
   const [isEditMode, setIsEditMode] = useState(isNew)
   const [isDetailsOpen, setIsDetailsOpen] = useState(true)
   const [isAttributesOpen, setIsAttributesOpen] = useState(true)
@@ -84,31 +120,8 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
   const [cloneName, setCloneName] = useState("")
   const [cloneCode, setCloneCode] = useState("")
   const [cloneLoading, setCloneLoading] = useState(false)
-  const [listHref, setListHref] = useState("/admin-pdm")
-
-  useEffect(() => {
-    const query = sessionStorage.getItem(PDM_LIST_STORAGE_KEY)
-    if (query) setListHref(`/admin-pdm?${query}`)
-  }, [])
-
-  useEffect(() => {
-    if (pdmId == null) return
-    let cancelled = false
-    setLoading(true)
-    getPdmById(pdmId)
-      .then(async (full) => {
-        if (cancelled) return
-        setPdmName(full.name)
-        setPdmCode(full.internal_code ?? "")
-        setPdmActive(full.is_active ?? true)
-        setAttributes(toAttributes(full.attributes ?? []))
-        const count = await getPdmMaterialsCount(full.internal_code ?? "")
-        if (!cancelled) setMaterialsCount(count)
-      })
-      .catch(() => { if (!cancelled) setNotFound(true) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [pdmId])
+  // Caminho de volta para a lista (filtros guardados na sessão); valor externo lido sem efeito.
+  const listHref = useSyncExternalStore(subscribeNone, readListHref, readServerListHref)
 
   const handleOpenValueDictionary = useCallback((attrId: string) => {
     setSelectedAttrId(attrId)
@@ -159,6 +172,7 @@ export function PdmEditor({ pdmId }: { pdmId: number | null }) {
       })
       toast.success("Estrutura salva com sucesso!", { description: `PDM "${pdmName}" foi salvo.` })
       setIsEditMode(false)
+      void queryClient.invalidateQueries({ queryKey: ["pdm-detail", pdmId] })
       if (isNew) router.replace(`/admin-pdm/${saved.id}`)
     } catch (e) {
       toast.error("Falha ao salvar", { description: e instanceof Error ? e.message : "Erro ao salvar estrutura." })

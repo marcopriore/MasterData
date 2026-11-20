@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { History } from 'lucide-react'
 import { getMaterialHistory, getRequestHistory, getRequestOrigin, requestStatusLabel } from '@/lib/supabase-api'
 import {
@@ -12,6 +13,9 @@ import {
   type TimelineTone,
 } from '@/lib/material-timeline'
 import { PageLoading } from '@/components/ui/page-loading'
+
+const NO_ROWS: MaterialHistoryRow[] = []
+const NO_EVENTS: RequestEventLite[] = []
 
 const DOT: Record<TimelineTone, string> = {
   ok: 'bg-green-500',
@@ -38,31 +42,27 @@ export function MaterialHistory({
   createdAt: string | null
   labelOf: (fieldName: string) => string | undefined
 }) {
-  const [rows, setRows] = useState<MaterialHistoryRow[]>([])
-  const [requestEvents, setRequestEvents] = useState<RequestEventLite[]>([])
-  const [origin, setOrigin] = useState<{ requester: string | null; created_at: string | null } | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setFailed(false)
-    Promise.all([
-      getMaterialHistory(materialId),
-      requestId ? getRequestHistory(requestId).catch(() => []) : Promise.resolve([]),
-      requestId ? getRequestOrigin(requestId).catch(() => null) : Promise.resolve(null),
-    ])
-      .then(([history, events, req]) => {
-        if (cancelled) return
-        setRows(history)
-        setRequestEvents(events.map((e) => ({ ...e, created_at: e.created_at ?? null })))
-        setOrigin(req)
-      })
-      .catch(() => { if (!cancelled) setFailed(true) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [materialId, requestId])
+  // Histórico do material e, se houver, da solicitação de origem: uma consulta por material e pedido.
+  const historyQ = useQuery({
+    queryKey: ['material-history', materialId, requestId] as const,
+    queryFn: async () => {
+      const [history, events, req] = await Promise.all([
+        getMaterialHistory(materialId),
+        requestId ? getRequestHistory(requestId).catch(() => []) : Promise.resolve([]),
+        requestId ? getRequestOrigin(requestId).catch(() => null) : Promise.resolve(null),
+      ])
+      return {
+        rows: history,
+        requestEvents: events.map((e) => ({ ...e, created_at: e.created_at ?? null })) as RequestEventLite[],
+        origin: req,
+      }
+    },
+  })
+  const rows = historyQ.data?.rows ?? NO_ROWS
+  const requestEvents = historyQ.data?.requestEvents ?? NO_EVENTS
+  const origin = historyQ.data?.origin ?? null
+  const loading = historyQ.isPending
+  const failed = historyQ.isError
 
   const items = useMemo(() => buildTimeline(rows, requestEvents, { requestId, labelOf }), [rows, requestEvents, requestId, labelOf])
   const attendants = useMemo(() => originAttendants(requestEvents), [requestEvents])

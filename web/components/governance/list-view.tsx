@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { RequestCard, EmptyColumn, type MaterialRequest } from "./request-card"
 import type { RequestErpState } from "@/lib/request-erp-state"
@@ -20,8 +20,12 @@ interface ListViewProps {
 
 export function ListView({ requests, onCompleteData, onViewDetails, erpStates = {} }: ListViewProps) {
   const [page, setPage] = useState(1)
-  // Filtro ou busca novos voltam para a primeira página.
-  useEffect(() => { setPage(1) }, [requests.length])
+  // Filtro ou busca novos voltam para a primeira página (ajuste na renderização, sem efeito).
+  const [seenCount, setSeenCount] = useState(requests.length)
+  if (seenCount !== requests.length) {
+    setSeenCount(requests.length)
+    setPage(1)
+  }
 
   if (requests.length === 0) {
     return <EmptyColumn message="Nenhuma requisicao encontrada com os filtros atuais." />

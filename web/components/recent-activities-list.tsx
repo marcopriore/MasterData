@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { getRecentActivities } from '@/lib/supabase-api'
 import { Button } from '@/components/ui/button'
 import { ClipboardList, ArrowRight } from 'lucide-react'
@@ -23,6 +24,8 @@ function formatDate(iso: string | null): string {
   })
 }
 
+const NO_ACTIVITIES: ActivityItem[] = []
+
 function urgencyLabel(raw: string): string {
   return { low: 'Baixa', medium: 'Média', high: 'Alta' }[raw] ?? raw
 }
@@ -37,26 +40,19 @@ interface RecentActivitiesListProps {
 
 export function RecentActivitiesList({ fullPage = false }: RecentActivitiesListProps) {
   const limit = fullPage ? 20 : 5
-  const [activities, setActivities] = useState<ActivityItem[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
 
-  const fetchActivities = useCallback(
-    async (pageNum: number) => {
-      setLoading(true)
-      const offset = (pageNum - 1) * limit
-      const { data, count } = await getRecentActivities({ limit, offset })
-      setActivities((data ?? []) as ActivityItem[])
-      setTotal(count ?? 0)
-      setLoading(false)
+  // Cada página é uma consulta própria: voltar a uma página já vista sai do cache.
+  const activitiesQ = useQuery({
+    queryKey: ['recent-activities', limit, page] as const,
+    queryFn: async () => {
+      const { data, count } = await getRecentActivities({ limit, offset: (page - 1) * limit })
+      return { items: (data ?? []) as ActivityItem[], total: count ?? 0 }
     },
-    [limit]
-  )
-
-  useEffect(() => {
-    fetchActivities(page)
-  }, [page, fetchActivities])
+  })
+  const activities = activitiesQ.data?.items ?? NO_ACTIVITIES
+  const total = activitiesQ.data?.total ?? 0
+  const loading = activitiesQ.isPending
 
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const from = total === 0 ? 0 : (page - 1) * limit + 1

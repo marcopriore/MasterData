@@ -1,6 +1,7 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Pencil, Plus, Power, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -71,34 +72,34 @@ function fromView(view: ErpConnectionView): FormState {
   }
 }
 
-export function ErpConnectionsPanel({ tenantId }: { tenantId: number }) {
-  const baseUrl = `/api/admin/tenants/${tenantId}/erp-connections`
-  const [rows, setRows] = useState<ErpConnectionView[]>([])
-  const [secretBoxReady, setSecretBoxReady] = useState(true)
-  const [loading, setLoading] = useState(true)
+const NO_CONNECTIONS: ErpConnectionView[] = []
+
+async function loadErpConnections(baseUrl: string): Promise<{ connections: ErpConnectionView[]; secretBoxReady: boolean }> {
+  const res = await fetch(baseUrl)
+  const payload = await res.json() as { connections?: ErpConnectionView[]; secret_box_ready?: boolean; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Não foi possível carregar as integrações.')
+  return { connections: payload.connections ?? NO_CONNECTIONS, secretBoxReady: payload.secret_box_ready === true }
+}
+
+export function ErpConnectionsPanel({ tenantId }: { tenantId: number }) {  const baseUrl = `/api/admin/tenants/${tenantId}/erp-connections`
+  // Conexões são uma consulta por tenant; salvar, ativar ou remover a invalida.
+  const queryClient = useQueryClient()
+  const connectionsQ = useQuery({
+    queryKey: ['erp-connections', tenantId] as const,
+    queryFn: () => loadErpConnections(baseUrl),
+  })
+  const rows = connectionsQ.data?.connections ?? NO_CONNECTIONS
+  const secretBoxReady = connectionsQ.data?.secretBoxReady ?? true
+  const loading = connectionsQ.isPending
+  const load = () => queryClient.invalidateQueries({ queryKey: ['erp-connections', tenantId] })
+  useEffect(() => {
+    if (connectionsQ.error) toast.error(connectionsQ.error.message)
+  }, [connectionsQ.error])
   const [form, setForm] = useState<FormState>(EMPTY)
   const [editing, setEditing] = useState<ErpConnectionView | null>(null)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(baseUrl)
-      const payload = await res.json() as { connections?: ErpConnectionView[]; secret_box_ready?: boolean; error?: string }
-      if (!res.ok) {
-        toast.error(payload.error ?? 'Não foi possível carregar as integrações.')
-        setRows([])
-        return
-      }
-      setRows(payload.connections ?? [])
-      setSecretBoxReady(payload.secret_box_ready === true)
-    } finally {
-      setLoading(false)
-    }
-  }, [baseUrl])
-
-  useEffect(() => { void load() }, [load])
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))

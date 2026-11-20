@@ -353,27 +353,30 @@ export default function DatabaseDetailView({ id }: { id: number }) {
 
   const materialAttrs = material?.technical_attributes
 
-  /** Monta o nome e a descrição a partir do modelo do PDM e dos atributos que a tela já tem. */
-  useEffect(() => {
-    if (!pdmTemplate) return
-    const full = pdmTemplate
-    const currentAttrs = (materialAttrs as Record<string, string | { value: string; unit: string }>) || {}
-    const merged: Record<string, string | { value: string; unit: string }> = {}
-    const sortedAttrs = [...(full.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    sortedAttrs.forEach((attr) => {
-      merged[attr.id] = currentAttrs[attr.id] !== undefined ? currentAttrs[attr.id] : ''
-    })
-    setAttrValues(merged)
-    setGeneratedDesc(generateDescription(full.name || '', merged, full))
-    setDetailedDesc(
-      generateDetailedDescription(
-        full.name ?? '',
-        (full.attributes ?? []) as Array<{ id: string; name?: string }>,
-        merged
+  // Semente da edição: nome e descrição saem do modelo do PDM e dos atributos do material. Quando a
+  // fonte muda, a semente é refeita na renderização (sem efeito); a edição do usuário continua local.
+  const [seedSource, setSeedSource] = useState<{ template: typeof pdmTemplate; attrs: typeof materialAttrs } | null>(null)
+  if (seedSource?.template !== pdmTemplate || seedSource?.attrs !== materialAttrs) {
+    setSeedSource({ template: pdmTemplate, attrs: materialAttrs })
+    if (pdmTemplate) {
+      const full = pdmTemplate
+      const currentAttrs = (materialAttrs as Record<string, string | { value: string; unit: string }>) || {}
+      const merged: Record<string, string | { value: string; unit: string }> = {}
+      const sortedAttrs = [...(full.attributes || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      sortedAttrs.forEach((attr) => {
+        merged[attr.id] = currentAttrs[attr.id] !== undefined ? currentAttrs[attr.id] : ''
+      })
+      setAttrValues(merged)
+      setGeneratedDesc(generateDescription(full.name || '', merged, full))
+      setDetailedDesc(
+        generateDetailedDescription(
+          full.name ?? '',
+          (full.attributes ?? []) as Array<{ id: string; name?: string }>,
+          merged
+        )
       )
-    )
-  }, [pdmTemplate, materialAttrs, generateDescription])
-
+    }
+  }
   /** Material como ficaria com o que está na tela (regras por material, migration 040). */
   const draftMaterial = useCallback((extraAttrs?: Record<string, unknown>) => {
     if (!material) return null

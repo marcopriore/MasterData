@@ -1,6 +1,7 @@
 'use client'
 
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -25,31 +26,32 @@ function formatWhen(iso: string | null) {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('pt-BR')
 }
 
+async function loadApiClients(baseUrl: string): Promise<ApiClientRow[]> {
+  const res = await fetch(baseUrl)
+  const payload = await res.json() as { data?: ApiClientRow[]; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Não foi possível carregar as chaves.')
+  return payload.data ?? NO_API_CLIENTS
+}
+
+const NO_API_CLIENTS: ApiClientRow[] = []
+
 export function ApiKeysPanel({ tenantId }: { tenantId: number }) {
   const baseUrl = `/api/admin/tenants/${tenantId}/api-clients`
-  const [rows, setRows] = useState<ApiClientRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  // Chaves são uma consulta por tenant; a criação e a revogação atualizam a lista.
+  const clientsQ = useQuery({
+    queryKey: ['api-clients', tenantId] as const,
+    queryFn: () => loadApiClients(baseUrl),
+  })
+  const rows = clientsQ.data ?? NO_API_CLIENTS
+  const loading = clientsQ.isPending
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['api-clients', tenantId] })
+  useEffect(() => {
+    if (clientsQ.error) toast.error(clientsQ.error.message)
+  }, [clientsQ.error])
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [newKey, setNewKey] = useState<{ name: string; key: string } | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await fetch(baseUrl)
-      const payload = await res.json() as { data?: ApiClientRow[]; error?: string }
-      if (!res.ok) {
-        toast.error(payload.error ?? 'Não foi possível carregar as chaves.')
-        setRows([])
-        return
-      }
-      setRows(payload.data ?? [])
-    } finally {
-      setLoading(false)
-    }
-  }, [baseUrl])
-
-  useEffect(() => { void load() }, [load])
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault()
@@ -68,7 +70,7 @@ export function ApiKeysPanel({ tenantId }: { tenantId: number }) {
       }
       setNewKey({ name: name.trim(), key: payload.key })
       setName('')
-      await load()
+      await refresh()
     } finally {
       setSaving(false)
     }
@@ -83,7 +85,7 @@ export function ApiKeysPanel({ tenantId }: { tenantId: number }) {
       return
     }
     toast.success('Chave revogada.')
-    await load()
+    await refresh()
   }
 
   async function copyKey() {

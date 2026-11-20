@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -46,35 +47,33 @@ function origin(row: LogRow) {
   return row.client_name ?? 'Sem chave válida'
 }
 
+const NO_LOGS: LogRow[] = []
+
+async function loadIntegrationLogs(direction: string, system: string): Promise<LogRow[]> {
+  const params = new URLSearchParams()
+  if (direction !== 'todas') params.set('direction', direction)
+  if (system !== 'todos') params.set('system', system)
+  const res = await fetch(`/api/admin/integrations?${params.toString()}`).catch(() => null)
+  if (!res) throw new Error('Não foi possível carregar o monitor.')
+  const payload = await res.json().catch(() => ({})) as { data?: LogRow[]; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Não foi possível carregar o monitor.')
+  return payload.data ?? NO_LOGS
+}
+
 export function IntegrationMonitor() {
-  const [rows, setRows] = useState<LogRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [direction, setDirection] = useState('todas')
   const [system, setSystem] = useState('todos')
   const [selected, setSelected] = useState<LogRow | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (direction !== 'todas') params.set('direction', direction)
-      if (system !== 'todos') params.set('system', system)
-      const res = await fetch(`/api/admin/integrations?${params.toString()}`)
-      const payload = await res.json() as { data?: LogRow[]; error?: string }
-      if (!res.ok) {
-        toast.error(payload.error ?? 'Não foi possível carregar o monitor.')
-        setRows([])
-        return
-      }
-      setRows(payload.data ?? [])
-    } catch {
-      toast.error('Não foi possível carregar o monitor.')
-    } finally {
-      setLoading(false)
-    }
-  }, [direction, system])
-
-  useEffect(() => { void load() }, [load])
+  // Os registros são uma consulta por filtro; trocar o filtro busca de novo.
+  const logsQ = useQuery({
+    queryKey: ['integration-monitor', direction, system] as const,
+    queryFn: () => loadIntegrationLogs(direction, system),
+  })
+  const rows = logsQ.data ?? NO_LOGS
+  const loading = logsQ.isPending
+  useEffect(() => {
+    if (logsQ.error) toast.error(logsQ.error.message)
+  }, [logsQ.error])
 
   return (
     <>
@@ -98,8 +97,8 @@ export function IntegrationMonitor() {
                 <SelectItem value="erp">ERP</SelectItem>
               </SelectContent>
             </Select>
-            <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-              <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+            <Button type="button" variant="outline" size="sm" onClick={() => void logsQ.refetch()} disabled={logsQ.isFetching}>
+              <RefreshCw className={`size-4 ${logsQ.isFetching ? 'animate-spin' : ''}`} />
               Atualizar
             </Button>
           </div>

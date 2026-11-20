@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getValueDictionary,
   updateValueDictionaryEntry,
@@ -18,72 +18,87 @@ import type { ValueDictionaryEntry, DuplicateGroup, SimilarValuePair } from '@/l
 
 export type { ValueDictionaryEntry, DuplicateGroup, SimilarValuePair }
 
-export function useValueDictionary(_accessToken?: string | null) {
-  const [entries, setEntries] = useState<ValueDictionaryEntry[]>([])
-  const [similars, setSimilars] = useState<SimilarValuePair[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+/** Lista por busca; similares e duplicatas são da empresa inteira. */
+export const valueDictionaryKeys = {
+  all: ['value-dictionary'] as const,
+  entries: (search: string) => ['value-dictionary', 'entries', search] as const,
+  similars: ['value-dictionary', 'similars'] as const,
+  duplicates: ['value-dictionary', 'duplicates'] as const,
+}
 
-  // A busca dispara a cada letra: só a consulta mais recente atualiza a lista.
-  const fetchSeq = useRef(0)
-  const fetchEntries = useCallback(async (search?: string) => {
-    const seq = ++fetchSeq.current
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await getValueDictionary(search)
-      if (seq !== fetchSeq.current) return
-      setEntries(Array.isArray(data) ? data : [])
-    } catch (e) {
-      if (seq !== fetchSeq.current) return
-      setError((e as Error)?.message ?? 'Erro ao carregar')
-      setEntries([])
-    } finally {
-      if (seq === fetchSeq.current) setLoading(false)
+const NO_ENTRIES: ValueDictionaryEntry[] = []
+const NO_SIMILARS: SimilarValuePair[] = []
+const NO_DUPLICATES: DuplicateGroup[] = []
+
+/**
+ * Dicionário de valores: as listas são consultas com cache por busca. As gravações atualizam
+ * o cache (ou o invalidam) em vez de manter cópias locais.
+ */
+export function useValueDictionary(search: string, enabled: boolean) {
+  const queryClient = useQueryClient()
+
+  // Mantém a lista anterior enquanto a busca nova carrega (cada letra digitada é uma busca).
+  const entriesQ = useQuery({
+    queryKey: valueDictionaryKeys.entries(search),
+    queryFn: () => getValueDictionary(search || undefined),
+    enabled,
+    placeholderData: keepPreviousData,
+  })
+  const entries = entriesQ.data ?? NO_ENTRIES
+  const hasEntries = entries.length > 0
+
+  const similarsQ = useQuery({
+    queryKey: valueDictionaryKeys.similars,
+    queryFn: () => getSimilarValues(),
+    enabled: enabled && hasEntries,
+  })
+  const duplicatesQ = useQuery({
+    queryKey: valueDictionaryKeys.duplicates,
+    queryFn: () => getDuplicates(),
+    enabled: enabled && hasEntries,
+  })
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: valueDictionaryKeys.all })
+  const refreshDuplicates = () => queryClient.invalidateQueries({ queryKey: valueDictionaryKeys.duplicates })
+
+  async function updateEntry(id: number, abbreviation: string, value?: string) {
+    const body: { abbreviation: string; value?: string } = { abbreviation }
+    if (value !== undefined) body.value = value
+
+    const supabase = createClient()
+    const { data: current } = await supabase
+      .from('value_dictionary')
+      .select('value, abbreviation')
+      .eq('id', id)
+      .single()
+    const oldValue = (current?.value as string) ?? ''
+    const oldAbbreviation = (current?.abbreviation as string) ?? ''
+
+    const result = await updateValueDictionaryEntry(id, body)
+
+    void logAction({
+      category: 'fields',
+      action: 'value_updated',
+      description: 'Valor do dicionário atualizado',
+      event_data: { id, abbreviation: body.abbreviation, value: body.value },
+    })
+
+    const valueChanged = body.value !== undefined && body.value !== oldValue
+    if (valueChanged) {
+      await propagateValueToPdms(oldValue, body.value!, body.abbreviation ?? oldAbbreviation ?? '')
+      await propagateValueToMaterials(oldValue, body.value!)
+    } else if (body.abbreviation !== undefined && body.abbreviation !== oldAbbreviation) {
+      await propagateValueToPdms(oldValue, oldValue, body.abbreviation ?? '')
     }
-  }, [])
 
-  const updateEntry = useCallback(
-    async (id: number, abbreviation: string, value?: string) => {
-      const body: { abbreviation: string; value?: string } = { abbreviation }
-      if (value !== undefined) body.value = value
+    return result
+  }
 
-      const supabase = createClient()
-      const { data: current } = await supabase
-        .from('value_dictionary')
-        .select('value, abbreviation')
-        .eq('id', id)
-        .single()
-      const oldValue = (current?.value as string) ?? ''
-      const oldAbbreviation = (current?.abbreviation as string) ?? ''
-
-      const result = await updateValueDictionaryEntry(id, body)
-
-      void logAction({
-        category: 'fields',
-        action: 'value_updated',
-        description: 'Valor do dicionário atualizado',
-        event_data: { id, abbreviation: body.abbreviation, value: body.value },
-      })
-
-      const valueChanged = body.value !== undefined && body.value !== oldValue
-      if (valueChanged) {
-        await propagateValueToPdms(oldValue, body.value!, body.abbreviation ?? oldAbbreviation ?? '')
-        await propagateValueToMaterials(oldValue, body.value!)
-      } else if (body.abbreviation !== undefined && body.abbreviation !== oldAbbreviation) {
-        await propagateValueToPdms(oldValue, oldValue, body.abbreviation ?? '')
-      }
-
-      return result
-    },
-    []
-  )
-
-  const mergeEntries = useCallback(async (keepId: number, discardId: number) => {
+  async function mergeEntries(keepId: number, discardId: number) {
     return mergeDictionaryEntries(keepId, discardId)
-  }, [])
+  }
 
-  const syncWithPdms = useCallback(async (): Promise<{ created: number; updated: number }> => {
+  async function syncWithPdms(): Promise<{ created: number; updated: number }> {
     const result = await syncValueDictionary()
     void logAction({
       category: 'fields',
@@ -92,79 +107,63 @@ export function useValueDictionary(_accessToken?: string | null) {
       event_data: { created: result.created, updated: result.updated },
     })
     return { created: result.created, updated: result.updated }
-  }, [])
+  }
 
-  const getSimilars = useCallback(async (): Promise<SimilarValuePair[]> => {
-    try {
-      const data = await getSimilarValues()
-      setSimilars(data)
-      return data
-    } catch (e) {
-      console.error('Erro ao carregar similares:', e)
-      return []
-    }
-  }, [])
-
-  const dismissSimilar = useCallback(async (idA: number, idB: number) => {
+  async function dismissSimilar(idA: number, idB: number) {
     try {
       await dismissSimilarPair(idA, idB)
-      setSimilars((prev) =>
-        prev.filter(
-          (s) => !((s.id_a === idA && s.id_b === idB) || (s.id_a === idB && s.id_b === idA))
-        )
+      queryClient.setQueryData<SimilarValuePair[]>(valueDictionaryKeys.similars, (prev) =>
+        prev?.filter((s) => !((s.id_a === idA && s.id_b === idB) || (s.id_a === idB && s.id_b === idA)))
       )
     } catch (e) {
       console.error('Erro ao dispensar similar:', e)
       throw e
     }
-  }, [])
+  }
 
-  const mergeSimilar = useCallback(
-    async (keepId: number, discardId: number) => {
-      const keepEntry = entries.find((x) => x.id === keepId)
-      const discardEntry = entries.find((x) => x.id === discardId)
-      const keepValue = keepEntry?.value ?? ''
-      const keepAbbreviation = keepEntry?.abbreviation ?? ''
-      const discardValue = discardEntry?.value ?? ''
+  async function mergeSimilar(keepId: number, discardId: number) {
+    const keepEntry = entries.find((x) => x.id === keepId)
+    const discardEntry = entries.find((x) => x.id === discardId)
+    const keepValue = keepEntry?.value ?? ''
+    const keepAbbreviation = keepEntry?.abbreviation ?? ''
+    const discardValue = discardEntry?.value ?? ''
 
-      try {
-        await mergeEntries(keepId, discardId)
-        void logAction({
-          category: 'fields',
-          action: 'value_merged',
-          description: 'Valores mesclados no dicionário',
-          event_data: { keep_id: keepId, discard_id: discardId },
-        })
-        await propagateValueToPdms(discardValue, keepValue, keepAbbreviation)
-        await propagateValueToMaterials(discardValue, keepValue)
+    try {
+      await mergeEntries(keepId, discardId)
+      void logAction({
+        category: 'fields',
+        action: 'value_merged',
+        description: 'Valores mesclados no dicionário',
+        event_data: { keep_id: keepId, discard_id: discardId },
+      })
+      await propagateValueToPdms(discardValue, keepValue, keepAbbreviation)
+      await propagateValueToMaterials(discardValue, keepValue)
 
-        setSimilars((prev) =>
-          prev.filter((s) => s.id_a !== discardId && s.id_b !== discardId)
-        )
-        setEntries((prev) => prev.filter((x) => x.id !== discardId))
-      } catch (e) {
-        console.error('Erro ao mesclar similar:', e)
-        throw e
-      }
-    },
-    [entries, mergeEntries]
-  )
-
-  const getDuplicatesList = useCallback(async (): Promise<DuplicateGroup[]> => {
-    return getDuplicates()
-  }, [])
+      queryClient.setQueryData<SimilarValuePair[]>(valueDictionaryKeys.similars, (prev) =>
+        prev?.filter((s) => s.id_a !== discardId && s.id_b !== discardId)
+      )
+      queryClient.setQueriesData<ValueDictionaryEntry[]>(
+        { queryKey: ['value-dictionary', 'entries'] },
+        (prev) => prev?.filter((x) => x.id !== discardId)
+      )
+    } catch (e) {
+      console.error('Erro ao mesclar similar:', e)
+      throw e
+    }
+  }
 
   return {
     entries,
-    similars,
-    loading,
-    error,
-    fetchEntries,
+    similars: similarsQ.data ?? NO_SIMILARS,
+    duplicates: duplicatesQ.data ?? NO_DUPLICATES,
+    duplicatesError: duplicatesQ.error,
+    loading: entriesQ.isFetching,
+    error: entriesQ.error ? ((entriesQ.error as Error).message ?? 'Erro ao carregar') : null,
+    refresh,
+    refreshDuplicates,
     updateEntry,
     mergeEntries,
     syncWithPdms,
-    getDuplicates: getDuplicatesList,
-    getSimilars,
     dismissSimilar,
     mergeSimilar,
   }

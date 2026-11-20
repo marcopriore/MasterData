@@ -88,7 +88,6 @@ function MyRequestsContent() {
   const db = useMemo(() => createClient(), [])
   const tenantId = user?.tenant_id ?? null
   const [state, setState] = useState<MyRequestsState>(DEFAULT_MY_REQUESTS)
-  const [detailId, setDetailId] = useState<number | null>(null)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
@@ -120,15 +119,16 @@ function MyRequestsContent() {
     if (erpQ.error) toast.error((erpQ.error as Error)?.message ?? 'Falha ao consultar a situação no ERP')
   }, [erpQ.error])
 
+  // ?status= define a etapa do filtro quando a URL muda (ajuste na renderização). ?req= é o pedido aberto.
   const statusParam = searchParams.get('status')
   const reqParam = searchParams.get('req')
-  useEffect(() => {
+  const [seenStatusParam, setSeenStatusParam] = useState<string | null>(null)
+  if (statusParam !== seenStatusParam) {
+    setSeenStatusParam(statusParam)
     if (statusParam) setState((prev) => ({ ...prev, etapa: statusParam.toLowerCase(), pagina: 1 }))
-  }, [statusParam])
-  useEffect(() => {
-    const id = Number(reqParam)
-    if (Number.isInteger(id) && id > 0) setDetailId(id)
-  }, [reqParam])
+  }
+  const parsedReq = Number(reqParam)
+  const detailId = reqParam && Number.isInteger(parsedReq) && parsedReq > 0 ? parsedReq : null
 
   // Histórico e anexos só do pedido aberto. Ao abrir de novo, voltam do cache (ou da rede se venceram).
   const historyQ = useQuery({
@@ -202,10 +202,15 @@ function MyRequestsContent() {
     setState((prev) => ({ ...prev, ...changes, pagina: 'pagina' in changes ? changes.pagina ?? 1 : 1 }))
 
   const clearUrl = () => router.replace('/requests', { scroll: false })
-  const closeDetail = () => {
-    setDetailId(null)
-    if (reqParam) clearUrl()
+  /** Abrir ou fechar o pedido é mudar ?req= na URL; os outros parâmetros ficam. */
+  const setReqInUrl = (id: number | null) => {
+    const qs = new URLSearchParams(searchParams.toString())
+    if (id == null) qs.delete('req')
+    else qs.set('req', String(id))
+    const q = qs.toString()
+    router.replace(q ? `/requests?${q}` : '/requests', { scroll: false })
   }
+  const closeDetail = () => setReqInUrl(null)
 
   const hasFilter = state.q.trim() !== '' || state.situacao !== 'todas' || state.etapa != null
   const canAttend = can('can_attend')
@@ -366,7 +371,7 @@ function MyRequestsContent() {
                   return (
                     <tr
                       key={row.id}
-                      onClick={() => setDetailId(row.id)}
+                      onClick={() => setReqInUrl(row.id)}
                       className={`cursor-pointer border-b border-slate-100 last:border-b-0 transition-colors hover:bg-slate-50 dark:border-zinc-700/40 dark:hover:bg-muted/30 ${
                         erp?.tone === 'alert' ? 'bg-red-50/60 dark:bg-red-950/20' : ''
                       }`}

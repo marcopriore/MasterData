@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { usePathname } from 'next/navigation'
+import { useState, useEffect, FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getUsersApi, createUserApi, updateUserApi, getRoles, getTenants, downloadFile, uploadUsersImport, logAction } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { keysCoveredByGroups, PERMISSION_GROUPS } from '@/lib/permissions'
@@ -364,15 +364,34 @@ type UserImportRow = {
   warnings: string[]
 }
 
+/** Usuários, papéis e empresas da tela: uma consulta só, uma chave só. */
+type UsersData = { users: User[]; roles: Role[]; tenants: { id: number; name: string; slug?: string }[] }
+const USERS_KEY = ['admin', 'users'] as const
+
+async function loadUsersData(): Promise<UsersData> {
+  const [u, r, t] = await Promise.all([getUsersApi(), getRoles(), getTenants()])
+  return {
+    users: u.map((usr) => ({
+      ...usr,
+      role_name: (Array.isArray(usr.roles)
+        ? usr.roles[0]?.name
+        : (usr.roles as { name?: string } | null)?.name) ?? '—',
+    })) as User[],
+    roles: r,
+    tenants: t,
+  }
+}
+
 export default function UsersPage() {
-  const pathname = usePathname()
   const { can, user } = useUser()
   const canManageUsers = user?.is_master || can('can_manage_users')
 
-  const [users, setUsers] = useState<User[]>([])
-  const [roles, setRoles] = useState<Role[]>([])
-  const [tenants, setTenants] = useState<{ id: number; name: string; slug?: string }[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const usersQ = useQuery({ queryKey: USERS_KEY, queryFn: loadUsersData })
+  const users = usersQ.data?.users ?? []
+  const roles = usersQ.data?.roles ?? []
+  const tenants = usersQ.data?.tenants ?? []
+  const loading = usersQ.isPending
   const [search, setSearch] = useState('')
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -413,28 +432,13 @@ export default function UsersPage() {
   const [userImportConfirming, setUserImportConfirming] = useState(false)
   const [userImportError, setUserImportError] = useState<string | null>(null)
 
-  const fetchUsers = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [u, r, t] = await Promise.all([getUsersApi(), getRoles(), getTenants()])
-      setUsers(u.map((usr) => ({
-        ...usr,
-        role_name: (Array.isArray(usr.roles)
-          ? usr.roles[0]?.name
-          : (usr.roles as { name?: string } | null)?.name) ?? '—',
-      })) as User[])
-      setRoles(r)
-      setTenants(t)
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
-    fetchUsers()
-  }, [fetchUsers, pathname])
+    if (usersQ.error) toast.error((usersQ.error as Error).message)
+  }, [usersQ.error])
+
+  /** Aplica uma mudança só na lista de usuários, sem recarregar papéis e empresas. */
+  const patchUsers = (change: (list: User[]) => User[]) =>
+    queryClient.setQueryData<UsersData>(USERS_KEY, (prev) => prev && { ...prev, users: change(prev.users) })
 
   function openCreate() {
     setEditTarget(null)
@@ -449,7 +453,7 @@ export default function UsersPage() {
   }
 
   function handleSaved(saved: User) {
-    setUsers((prev) => {
+    patchUsers((prev) => {
       const idx = prev.findIndex((u) => u.id === saved.id)
       return idx >= 0
         ? prev.map((u) => (u.id === saved.id ? saved : u))
@@ -462,7 +466,7 @@ export default function UsersPage() {
     setTogglingId(u.id)
     try {
       const updated = await updateUserApi(u.id, { is_active: !u.is_active }) as User
-      setUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
+      patchUsers((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
       toast.success(updated.is_active ? 'Usuário ativado.' : 'Usuário desativado.')
     } catch (err) {
       toast.error((err as Error).message)
@@ -526,7 +530,7 @@ export default function UsersPage() {
     try {
       const res = await uploadUsersImport(userImportFile, false)
       toast.success(`Importação concluída: ${res.created ?? 0} criados, ${res.updated ?? 0} atualizados`)
-      fetchUsers()
+      void queryClient.invalidateQueries({ queryKey: USERS_KEY })
       closeUserImportModal()
     } catch (err) {
       setUserImportError((err as Error)?.message ?? 'Falha ao importar')

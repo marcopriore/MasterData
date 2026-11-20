@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import { useUser } from '@/contexts/user-context'
 import {
   getWorkflows,
@@ -128,11 +128,15 @@ function StepSettingsPanel({
   const [statusKey, setStatusKey] = useState(step.status_key || '')
   const [slaDays, setSlaDays] = useState(step.sla_days != null ? String(step.sla_days) : '')
 
-  useEffect(() => {
+  // Recarrega o formulário quando a etapa muda no servidor (ajuste na renderização, sem efeito).
+  const sourceKey = `${step.id}|${step.step_name}|${step.status_key ?? ''}|${step.sla_days ?? ''}`
+  const [seenSourceKey, setSeenSourceKey] = useState(sourceKey)
+  if (seenSourceKey !== sourceKey) {
+    setSeenSourceKey(sourceKey)
     setStepName(step.step_name)
     setStatusKey(step.status_key || '')
     setSlaDays(step.sla_days != null ? String(step.sla_days) : '')
-  }, [step.id, step.step_name, step.status_key, step.sla_days])
+  }
 
   const handleSave = () => {
     const updates: StepUpdate = {}
@@ -348,15 +352,56 @@ function SortableStepCard({
   )
 }
 
+const WORKFLOWS_KEY = ['workflows'] as const
+const NO_WORKFLOWS: WorkflowHeader[] = []
+const NO_STEPS: WorkflowStep[] = []
+
+/** Lista todos os workflows (de todos os tipos). Zera os caches de módulo para a leitura refletir a última mudança. */
+async function loadWorkflowHeaders(): Promise<WorkflowHeader[]> {
+  invalidateApiCache()
+  const list = await getWorkflows()
+  return list.map((w) => ({ ...w, is_active: w.is_active ?? true, request_type: w.request_type ?? 'cadastro' })) as WorkflowHeader[]
+}
+
 export default function WorkflowConfigPage() {
-  const pathname = usePathname()
   const { can } = useUser()
   /** Ver é can_view_workflows (a rota confere); mudar é can_edit_workflows (o banco também recusa). */
   const canEdit = can('can_edit_workflows')
-  const [workflows, setWorkflows] = useState<WorkflowHeader[]>([])
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
-  const [steps, setSteps] = useState<WorkflowStep[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  /** Tipo de solicitação em edição (migration 043): um workflow ativo por tipo. */
+  const [requestType, setRequestType] = useState<RequestType>('cadastro')
+  // Workflows e etapas são consultas com cache. Seleção e rascunho de etapas são estado local.
+  const workflowsQ = useQuery({ queryKey: WORKFLOWS_KEY, queryFn: loadWorkflowHeaders })
+  const allWorkflows = workflowsQ.data ?? NO_WORKFLOWS
+  const workflows = useMemo(
+    () => allWorkflows.filter((w) => (w.request_type ?? 'cadastro') === requestType),
+    [allWorkflows, requestType]
+  )
+  const [pickedWorkflowId, setPickedWorkflowId] = useState<number | null>(null)
+  // Sem escolha válida (ou ao trocar o tipo), vale o workflow ativo do tipo, ou o primeiro.
+  const selectedWorkflowId =
+    pickedWorkflowId != null && workflows.some((w) => w.id === pickedWorkflowId)
+      ? pickedWorkflowId
+      : (workflows.find((w) => w.is_active) ?? workflows[0])?.id ?? null
+  const stepsQ = useQuery({
+    queryKey: ['workflow-steps', selectedWorkflowId] as const,
+    queryFn: () => getWorkflowConfig(selectedWorkflowId ?? 0),
+    enabled: selectedWorkflowId != null,
+  })
+  const loading = selectedWorkflowId != null && stepsQ.isPending
+  useEffect(() => {
+    if (stepsQ.error) toast.error('Erro ao carregar etapas do workflow')
+  }, [stepsQ.error])
+  // Rascunho editável das etapas: semeado da consulta quando muda o workflow ou chegam dados novos.
+  const [seenSteps, setSeenSteps] = useState({ workflowId: selectedWorkflowId, data: stepsQ.data })
+  const [stepDraft, setStepDraft] = useState<WorkflowStep[] | undefined>(stepsQ.data)
+  if (seenSteps.workflowId !== selectedWorkflowId || seenSteps.data !== stepsQ.data) {
+    setSeenSteps({ workflowId: selectedWorkflowId, data: stepsQ.data })
+    setStepDraft(stepsQ.data)
+  }
+  const steps = stepDraft ?? NO_STEPS
+  const setSteps = (update: (prev: WorkflowStep[]) => WorkflowStep[]) =>
+    setStepDraft((prev) => update(prev ?? NO_STEPS))
   const [saving, setSaving] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [newStepName, setNewStepName] = useState('')
@@ -379,55 +424,8 @@ export default function WorkflowConfigPage() {
   const [stepMapping, setStepMapping] = useState<Record<string, string>>({})
   const [mappingLoading, setMappingLoading] = useState(false)
 
-  /** Tipo de solicitação em edição (migration 043): um workflow ativo por tipo. */
-  const [requestType, setRequestType] = useState<RequestType>('cadastro')
-  const [allWorkflows, setAllWorkflows] = useState<WorkflowHeader[]>([])
-
-  const fetchWorkflows = useCallback(() => {
-    invalidateApiCache()
-    getWorkflows()
-      .then((list) => setAllWorkflows(list.map((w) => ({ ...w, is_active: w.is_active ?? true, request_type: w.request_type ?? 'cadastro' })) as WorkflowHeader[]))
-      .catch(() => setAllWorkflows([]))
-  }, [])
-
-  useEffect(() => {
-    setWorkflows(allWorkflows.filter((w) => (w.request_type ?? 'cadastro') === requestType))
-  }, [allWorkflows, requestType])
-
-  useEffect(() => {
-    if (workflows.length === 0) {
-      if (selectedWorkflowId !== null && !allWorkflows.some((w) => w.id === selectedWorkflowId && w.request_type === requestType)) setSelectedWorkflowId(null)
-      return
-    }
-    if (selectedWorkflowId === null || !workflows.some((w) => w.id === selectedWorkflowId)) {
-      const active = workflows.find((w) => w.is_active) ?? workflows[0]
-      setSelectedWorkflowId(active.id)
-    }
-  }, [workflows, selectedWorkflowId, allWorkflows, requestType])
-
-  const fetchSteps = useCallback(() => {
-    if (!selectedWorkflowId) {
-      setSteps([])
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    getWorkflowConfig(selectedWorkflowId)
-      .then(setSteps)
-      .catch(() => {
-        setSteps([])
-        toast.error('Erro ao carregar etapas do workflow')
-      })
-      .finally(() => setLoading(false))
-  }, [selectedWorkflowId])
-
-  useEffect(() => {
-    fetchWorkflows()
-  }, [fetchWorkflows, pathname])
-
-  useEffect(() => {
-    fetchSteps()
-  }, [fetchSteps, pathname])
+  const refreshWorkflows = () => queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY })
+  const refreshSteps = () => queryClient.invalidateQueries({ queryKey: ['workflow-steps'] })
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -481,10 +479,10 @@ export default function WorkflowConfigPage() {
         event_data: { workflow_id: selectedWorkflowId, steps_count: steps.length },
       })
       toast.success('Fluxo salvo com sucesso!')
-      fetchSteps()
+      refreshSteps()
     } catch (err) {
       toast.error('Falha ao salvar fluxo', { description: err instanceof Error ? err.message : undefined })
-      fetchSteps()
+      refreshSteps()
     } finally {
       setSaving(false)
     }
@@ -630,8 +628,8 @@ export default function WorkflowConfigPage() {
       })
       setNewWorkflowModalOpen(false)
       setNewWorkflowName('')
-      await fetchWorkflows()
-      setSelectedWorkflowId(created.id)
+      await refreshWorkflows()
+      setPickedWorkflowId(created.id)
       toast.warning('Workflow criado como inativo. Ative-o quando estiver pronto para uso.')
     } catch {
       toast.error('Falha ao criar workflow')
@@ -669,7 +667,7 @@ export default function WorkflowConfigPage() {
     try {
       await updateWorkflow(selectedWorkflowId, { is_active: checked })
       toast.success(checked ? 'Workflow ativado' : 'Workflow desativado')
-      fetchWorkflows()
+      refreshWorkflows()
     } catch {
       toast.error('Falha ao atualizar status')
     } finally {
@@ -700,9 +698,9 @@ export default function WorkflowConfigPage() {
           ? `"${currentActive.name}" desativado. ${migratedCount} solicitação(ões) migrada(s) para o novo workflow.`
           : 'Workflow ativado'
       )
-      await fetchWorkflows()
-      setWorkflows((prev) =>
-        prev.map((w) => ({
+      await refreshWorkflows()
+      queryClient.setQueryData<WorkflowHeader[]>(WORKFLOWS_KEY, (prev) =>
+        prev?.map((w) => ({
           ...w,
           is_active: w.id === selectedWorkflowId,
         }))
@@ -736,9 +734,9 @@ export default function WorkflowConfigPage() {
       toast.success('Workflow arquivado')
       setArchiveModalOpen(false)
       setMigrationInfo(null)
-      fetchWorkflows()
+      refreshWorkflows()
       if (workflows.find((w) => w.id !== selectedWorkflowId)) {
-        setSelectedWorkflowId(workflows.find((w) => w.id !== selectedWorkflowId)!.id)
+        setPickedWorkflowId(workflows.find((w) => w.id !== selectedWorkflowId)!.id)
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Falha ao arquivar'
@@ -813,7 +811,7 @@ export default function WorkflowConfigPage() {
               </Label>
               <Select
                 value={selectedWorkflowId?.toString() ?? ''}
-                onValueChange={(v) => setSelectedWorkflowId(v ? Number(v) : null)}
+                onValueChange={(v) => setPickedWorkflowId(v ? Number(v) : null)}
               >
                 <SelectTrigger className="w-[240px] h-9 border-slate-200 dark:border-zinc-400/40">
                   <SelectValue placeholder="Selecione o workflow" />

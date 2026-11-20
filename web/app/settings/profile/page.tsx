@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { usePathname } from 'next/navigation'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useUser } from '@/contexts/user-context'
@@ -169,7 +169,6 @@ const NOTIFICATION_PREF_ROWS: {
 ]
 
 export default function ProfilePage() {
-  const pathname = usePathname()
   const { user, setUser, ready } = useUser()
   const { setTheme } = useTheme()
 
@@ -190,22 +189,16 @@ export default function ProfilePage() {
   const [savingPrefs, setSavingPrefs] = useState(false)
 
   // ── Preferências de Notificação ─────────────────────────────────────────────
-  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs | null>(null)
-  const [notifPrefsLoading, setNotifPrefsLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const notifKey = useMemo(() => ['user-notification-prefs', user?.id] as const, [user?.id])
+  const notifPrefsQ = useQuery({
+    queryKey: notifKey,
+    queryFn: async () => (await getUserNotificationPrefs()) as NotificationPrefs | null,
+    enabled: user != null,
+  })
+  const notifPrefs = notifPrefsQ.data ?? null
+  const notifPrefsLoading = user != null && notifPrefsQ.isPending
   const saveNotifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Fetch notification prefs on load
-  useEffect(() => {
-    if (!user) {
-      setNotifPrefsLoading(false)
-      return
-    }
-    setNotifPrefsLoading(true)
-    getUserNotificationPrefs()
-      .then((p) => setNotifPrefs(p as NotificationPrefs | null))
-      .catch(() => setNotifPrefs(null))
-      .finally(() => setNotifPrefsLoading(false))
-  }, [user, pathname])
 
   const saveNotifPrefs = useCallback(
     async (updates: Partial<NotificationPrefs>) => {
@@ -223,7 +216,7 @@ export default function ProfilePage() {
     (key: keyof NotificationPrefs, value: boolean) => {
       if (!notifPrefs) return
       const next = { ...notifPrefs, [key]: value }
-      setNotifPrefs(next)
+      queryClient.setQueryData(notifKey, next)
 
       if (saveNotifTimeoutRef.current) clearTimeout(saveNotifTimeoutRef.current)
       saveNotifTimeoutRef.current = setTimeout(() => {
@@ -231,7 +224,7 @@ export default function ProfilePage() {
         saveNotifTimeoutRef.current = null
       }, 500)
     },
-    [notifPrefs, saveNotifPrefs]
+    [notifPrefs, notifKey, queryClient, saveNotifPrefs]
   )
 
   useEffect(() => {
@@ -240,16 +233,18 @@ export default function ProfilePage() {
     }
   }, [])
 
-  // Populate fields once the user session is ready
-  useEffect(() => {
-    if (!ready) return
-    if (user) {
-      setName(user.name)
-      setEmail(user.email)
-      setThemeLocal(user.preferences?.theme ?? 'light')
-      setLanguage(user.preferences?.language ?? 'pt')
+  // Preenche os campos quando a sessão fica pronta ou o usuário muda (ajuste na renderização, sem efeito).
+  const profileUser = ready ? user : null
+  const [seededUser, setSeededUser] = useState<typeof profileUser>(null)
+  if (profileUser !== seededUser) {
+    setSeededUser(profileUser)
+    if (profileUser) {
+      setName(profileUser.name)
+      setEmail(profileUser.email)
+      setThemeLocal(profileUser.preferences?.theme ?? 'light')
+      setLanguage(profileUser.preferences?.language ?? 'pt')
     }
-  }, [ready, user, pathname])
+  }
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 

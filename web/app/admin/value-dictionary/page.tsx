@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { usePathname } from 'next/navigation'
+import { useState, useEffect, useRef } from 'react'
 import { useUser } from '@/contexts/user-context'
 import { toast, Toaster } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -16,33 +15,33 @@ import {
   Check,
   Pencil,
 } from 'lucide-react'
-import { useValueDictionary, type ValueDictionaryEntry, type DuplicateGroup } from '@/hooks/useValueDictionary'
+import { useValueDictionary, type ValueDictionaryEntry } from '@/hooks/useValueDictionary'
 
 const LIMIT = 100
 
 export default function ValueDictionaryPage() {
-  const pathname = usePathname()
   const { can } = useUser()
   const canAccess = can('can_manage_value_dictionary')
+
+  const [search, setSearch] = useState('')
   const {
     entries,
     similars,
+    duplicates,
+    duplicatesError,
     loading,
     error,
-    fetchEntries,
+    refresh,
+    refreshDuplicates,
     updateEntry,
     mergeEntries,
     syncWithPdms,
-    getDuplicates,
-    getSimilars,
     dismissSimilar,
     mergeSimilar,
-  } = useValueDictionary()
+  } = useValueDictionary(search, canAccess)
 
-  const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
   const [syncing, setSyncing] = useState(false)
-  const [duplicates, setDuplicates] = useState<DuplicateGroup[]>([])
   const [duplicatesOpen, setDuplicatesOpen] = useState(false)
   const [mergeKeepByGroup, setMergeKeepByGroup] = useState<Record<number, number>>({})
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -54,35 +53,15 @@ export default function ValueDictionaryPage() {
   const similarPopoverRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (canAccess) {
-      fetchEntries(search || undefined)
-      setOffset(0)
-    }
-  }, [canAccess, search, fetchEntries, pathname])
+    if (duplicatesError) toast.error((duplicatesError as Error).message)
+  }, [duplicatesError])
 
-  useEffect(() => {
-    if (canAccess && entries.length > 0) {
-      getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
-      getSimilars()
-    }
-  }, [canAccess, entries.length, getDuplicates, getSimilars, pathname])
-
-  const loadDuplicates = useCallback(async () => {
-    try {
-      const d = await getDuplicates()
-      setDuplicates(Array.isArray(d) ? d : [])
-      setMergeKeepByGroup({})
-      setDuplicatesOpen(true)
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
-  }, [getDuplicates])
-
-  useEffect(() => {
-    if (duplicatesOpen && duplicates.length === 0) {
-      getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
-    }
-  }, [duplicatesOpen, duplicates.length, getDuplicates])
+  /** Abre o saneamento com a lista de duplicatas recalculada. */
+  const openDuplicates = () => {
+    setMergeKeepByGroup({})
+    setDuplicatesOpen(true)
+    void refreshDuplicates()
+  }
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -104,9 +83,9 @@ export default function ValueDictionaryPage() {
     try {
       const res = await syncWithPdms()
       toast.success(`Sincronizado: ${res.created ?? 0} entradas criadas, ${res.updated ?? 0} atualizadas`)
-      fetchEntries(search || undefined)
-      loadDuplicates()
-      getSimilars()
+      refresh()
+      setMergeKeepByGroup({})
+      setDuplicatesOpen(true)
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
@@ -132,8 +111,7 @@ export default function ValueDictionaryPage() {
     try {
       await updateEntry(editingId, editAbbr, editValue)
       toast.success('Valor atualizado e propagado para PDMs e materiais')
-      fetchEntries(search || undefined)
-      getSimilars()
+      refresh()
       cancelEdit()
     } catch (e) {
       toast.error((e as Error).message)
@@ -153,8 +131,7 @@ export default function ValueDictionaryPage() {
     try {
       await mergeEntries(keepId, discardId)
       toast.success('Merge realizado')
-      fetchEntries(search || undefined)
-      getDuplicates().then((d) => setDuplicates(Array.isArray(d) ? d : []))
+      refresh()
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -217,7 +194,7 @@ export default function ValueDictionaryPage() {
         <Input
           placeholder="Buscar por valor..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setOffset(0) }}
           className="max-w-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-600"
         />
       </div>
@@ -226,7 +203,7 @@ export default function ValueDictionaryPage() {
       {dupCount > 0 && (
         <button
           type="button"
-          onClick={loadDuplicates}
+          onClick={openDuplicates}
           className="flex w-full items-center justify-between gap-4 rounded-lg border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 px-4 py-3 text-left hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors cursor-pointer"
           role="alert"
         >
@@ -337,7 +314,7 @@ export default function ValueDictionaryPage() {
                                             await mergeSimilar(e.id, otherId)
                                             toast.success(`"${otherValue}" mesclado em "${e.value}"`)
                                             setSimilarPopoverId(null)
-                                            fetchEntries(search || undefined)
+                                            refresh()
                                           } catch {
                                             toast.error('Falha ao mesclar')
                                           } finally {

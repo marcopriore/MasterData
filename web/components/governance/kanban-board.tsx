@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -167,12 +167,16 @@ export function KanbanBoard({
 
   // Local copy of requests for optimistic updates
   const [localRequests, setLocalRequests] = useState<MaterialRequest[]>(requests)
+  // Sync local copy when parent prop changes (e.g. after a refetch): ajuste na renderização, sem efeito.
+  const [seenRequests, setSeenRequests] = useState(requests)
+  if (seenRequests !== requests) {
+    setSeenRequests(requests)
+    setLocalRequests(requests)
+  }
   // Track which card is being dragged
   const [activeCard, setActiveCard] = useState<MaterialRequest | null>(null)
   // Track which column the dragged card is hovering over
   const [overColumnId, setOverColumnId] = useState<string | null>(null)
-  // Sync local copy when parent prop changes (e.g. after a refetch)
-  useEffect(() => { setLocalRequests(requests) }, [requests])
 
   const handleIniciarAtendimento = async (req: MaterialRequest) => {
     try {

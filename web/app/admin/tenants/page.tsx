@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, FormEvent } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
+import { useState, useEffect, FormEvent } from 'react'
+import { useRouter } from 'next/navigation'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTheme } from 'next-themes'
 import { getTenants, createTenantOnboardingApi, updateTenantApi } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
@@ -399,38 +400,35 @@ function TenantModal({ mode, initial, onClose, onSaved }: TenantModalProps) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+/** Empresas do administrador master: uma chave, usada pela lista e pelas gravações. */
+const TENANTS_KEY = ['admin', 'tenants'] as const
+const NO_TENANTS: Tenant[] = []
+
 export default function TenantsPage() {
-  const pathname = usePathname()
   const { user, switchTenant } = useUser()
   const router = useRouter()
   const { resolvedTheme } = useTheme()
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  // Só o administrador master lista as empresas.
+  const tenantsQ = useQuery({
+    queryKey: TENANTS_KEY,
+    queryFn: async () => (await getTenants()) as Tenant[],
+    enabled: user?.is_master === true,
+  })
+  const tenants = tenantsQ.data ?? NO_TENANTS
+  const loading = user?.is_master ? tenantsQ.isPending : user == null
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [editModal, setEditModal] = useState<Tenant | null>(null)
 
-  const fetchTenants = useCallback(async () => {
-    try {
-      const data = await getTenants()
-      setTenants(data as Tenant[])
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  useEffect(() => {
+    if (tenantsQ.error) toast.error((tenantsQ.error as Error).message)
+  }, [tenantsQ.error])
 
   useEffect(() => {
-    if (user && !user.is_master) {
-      router.replace('/')
-      return
-    }
-    if (user?.is_master) {
-      fetchTenants()
-    } else {
-      setLoading(false)
-    }
-  }, [user, user?.is_master, fetchTenants, router, pathname])
+    if (user && !user.is_master) router.replace('/')
+  }, [user, router])
+
+  const reloadTenants = () => queryClient.invalidateQueries({ queryKey: TENANTS_KEY })
 
   const handleEnter = async (t: Tenant) => {
     try {
@@ -556,7 +554,7 @@ export default function TenantsPage() {
       {onboardingOpen && (
         <OnboardingModal
           onClose={() => setOnboardingOpen(false)}
-          onSuccess={() => fetchTenants()}
+          onSuccess={() => void reloadTenants()}
         />
       )}
 
@@ -566,7 +564,7 @@ export default function TenantsPage() {
           initial={editModal}
           onClose={() => setEditModal(null)}
           onSaved={(saved) => {
-            setTenants((prev) => prev.map((t) => (t.id === saved.id ? { ...t, ...saved } : t)))
+            queryClient.setQueryData<Tenant[]>(TENANTS_KEY, (prev) => prev?.map((t) => (t.id === saved.id ? { ...t, ...saved } : t)))
             setEditModal(null)
           }}
         />

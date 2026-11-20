@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -55,11 +56,28 @@ const EMPTY_DRAFT: Draft = {
  * Valores padrão por condição (migration 052). Uma regra preenche um campo da etapa que o cobra, quando o PDM
  * ou um campo de lista tem o valor da condição. Quem edita tem can_manage_fields (a página já exige).
  */
+const DEFAULTS_PANEL_KEY = ['field-defaults-panel'] as const
+const NO_DEFAULT_RULES: FieldDefaultRule[] = []
+const NO_DEFAULT_PROFILES: FieldRuleProfile[] = []
+const NO_DEFAULT_PDMS: PDMTemplate[] = []
+
+async function loadDefaultsPanelData() {
+  const [rules, profiles, pdms] = await Promise.all([getFieldDefaultRules(), getFieldRules(), getPdms()])
+  return { rules, profiles, pdms }
+}
+
 export function DefaultValuesPanel({ fields, onChanged }: { fields: RuleField[]; onChanged: () => void }) {
-  const [loading, setLoading] = useState(true)
-  const [rules, setRules] = useState<FieldDefaultRule[]>([])
-  const [profiles, setProfiles] = useState<FieldRuleProfile[]>([])
-  const [pdms, setPdms] = useState<PDMTemplate[]>([])
+  // Regras padrão, perfis e PDMs vêm de uma consulta com cache; salvar ou excluir a invalida.
+  const queryClient = useQueryClient()
+  const dataQ = useQuery({ queryKey: DEFAULTS_PANEL_KEY, queryFn: loadDefaultsPanelData })
+  const rules = dataQ.data?.rules ?? NO_DEFAULT_RULES
+  const profiles = dataQ.data?.profiles ?? NO_DEFAULT_PROFILES
+  const pdms = dataQ.data?.pdms ?? NO_DEFAULT_PDMS
+  const loading = dataQ.isPending
+  const load = () => queryClient.invalidateQueries({ queryKey: DEFAULTS_PANEL_KEY })
+  useEffect(() => {
+    if (dataQ.error) toast.error((dataQ.error as Error).message)
+  }, [dataQ.error])
   const [draft, setDraft] = useState<Draft | null>(null)
   const [showErrors, setShowErrors] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -80,21 +98,6 @@ export function DefaultValuesPanel({ fields, onChanged }: { fields: RuleField[];
   const targetFields = useMemo(() => activeFields.filter((f) => !blockedTargets.has(f.field_name)), [activeFields, blockedTargets])
   const overlaps = useMemo(() => overlappingTargets(rules), [rules])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [r, p, pd] = await Promise.all([getFieldDefaultRules(), getFieldRules(), getPdms()])
-      setRules(r)
-      setProfiles(p)
-      setPdms(pd)
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
 
   function openNew() {
     setShowErrors(false)

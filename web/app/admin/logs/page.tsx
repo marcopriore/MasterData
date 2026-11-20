@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { usePathname } from 'next/navigation'
+import React, { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { getSystemLogs, getUsersApi, downloadFile } from '@/lib/supabase-api'
 import { useUser } from '@/contexts/user-context'
 import { Button } from '@/components/ui/button'
@@ -168,16 +168,10 @@ function EventDataContent({ data }: { data: Record<string, unknown> }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLogsPage() {
-  const pathname = usePathname()
   const { user, can } = useUser()
   const canViewLogs = user?.is_master || can('can_view_logs')
-  const [logs, setLogs] = useState<LogItem[]>([])
-  const [users, setUsers] = useState<UserItem[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
   const limit = 50
-  const totalPages = Math.max(1, Math.ceil(total / limit))
 
   const [category, setCategory] = useState('')
   const [userId, setUserId] = useState<string>('')
@@ -199,42 +193,29 @@ export default function AdminLogsPage() {
     })
   }
 
-  // Só a consulta mais recente atualiza a tabela (troca rápida de página ou filtro).
-  const fetchSeq = useRef(0)
-  const fetchLogs = useCallback(() => {
-    const seq = ++fetchSeq.current
-    setLoading(true)
-    getSystemLogs({
+  // Cada página e filtro aplicado é uma consulta própria: voltar a uma página já vista sai do cache.
+  const logsQ = useQuery({
+    queryKey: ['admin', 'logs', { page, limit, category: appliedCategory, userId: appliedUserId, from: appliedDateFrom, to: appliedDateTo }] as const,
+    queryFn: () => getSystemLogs({
       page,
       limit,
       category: appliedCategory || undefined,
       user_id: appliedUserId || undefined,
       from: appliedDateFrom ? appliedDateFrom + 'T00:00:00' : undefined,
       to: appliedDateTo ? appliedDateTo + 'T23:59:59' : undefined,
-    })
-      .then((data) => {
-        if (seq !== fetchSeq.current) return
-        setLogs(data.items ?? [])
-        setTotal(data.total ?? 0)
-      })
-      .catch(() => {
-        if (seq !== fetchSeq.current) return
-        setLogs([])
-        setTotal(0)
-      })
-      .finally(() => { if (seq === fetchSeq.current) setLoading(false) })
-  }, [page, limit, appliedCategory, appliedUserId, appliedDateFrom, appliedDateTo])
+    }),
+  })
+  const logs: LogItem[] = logsQ.data?.items ?? []
+  const total = logsQ.data?.total ?? 0
+  const loading = logsQ.isFetching
+  const totalPages = Math.max(1, Math.ceil(total / limit))
 
-  useEffect(() => {
-    if (!canViewLogs) return
-    getUsersApi()
-      .then((list) => setUsers(list ?? []))
-      .catch(() => setUsers([]))
-  }, [canViewLogs, pathname])
-
-  useEffect(() => {
-    fetchLogs()
-  }, [fetchLogs, pathname])
+  const usersQ = useQuery({
+    queryKey: ['admin', 'log-users'] as const,
+    queryFn: () => getUsersApi(),
+    enabled: canViewLogs,
+  })
+  const users: UserItem[] = usersQ.data ?? []
 
   const handleFilter = () => {
     setAppliedCategory(category)

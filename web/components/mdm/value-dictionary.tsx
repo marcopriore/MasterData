@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import {
   Sheet,
   SheetContent,
@@ -41,11 +41,13 @@ export function ValueDictionary({
   const [editValue, setEditValue] = useState("")
   const [editAbbrev, setEditAbbrev] = useState("")
 
-  useEffect(() => {
-    if (!open || !attribute) {
-      setEditingIndex(null)
-    }
-  }, [open, attribute?.id])
+  // Fechar o diálogo ou trocar de atributo cancela a edição em curso (ajuste na renderização, sem efeito).
+  const attributeId = attribute?.id
+  const [seenEditScope, setSeenEditScope] = useState({ open, attributeId })
+  if (seenEditScope.open !== open || seenEditScope.attributeId !== attributeId) {
+    setSeenEditScope({ open, attributeId })
+    if (!open || !attribute) setEditingIndex(null)
+  }
 
   if (!attribute) return null
 
