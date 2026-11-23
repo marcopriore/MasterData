@@ -11,10 +11,20 @@ PRO-MAT é o sistema de cadastro padronizado de materiais (PDM), governança por
 | Tema | `next-themes` — modo claro/escuro próprio da aplicação |
 | Dados e auth | Supabase (PostgreSQL, Auth, Storage, Realtime, RLS) |
 | Cliente | `@supabase/supabase-js` e `@supabase/ssr` |
+| Cache de consultas | TanStack Query (`@tanstack/react-query`) — um cliente por usuário/empresa |
 | Planilhas | `xlsx` 0.20.3 do CDN da SheetJS (importação e exportação; a do npm parou na 0.18.5, com falhas conhecidas) |
 | Testes | Vitest em `web/lib/**/*.test.ts` (regressão de acesso) e Playwright em `tests/e2e` |
 
 Carregamento: `components/ui/page-loading.tsx` (`PageLoading`, spinner com "Carregando...", no bloco ou cobrindo a tela) é o padrão para tela ou lista esperando dados. `components/navigation-progress.tsx`, montado no `AppShell`, mostra a barra no topo ao clicar num link interno e, depois de 180 ms, a camada "Carregando..." até a rota mudar (desiste após 20 s). `app/loading.tsx` cobre a renderização da rota no servidor.
+
+### Carga de dados
+
+- O layout carrega o usuário no servidor (`lib/server-user.ts` / `getServerCurrentUser`) e entrega ao `UserProvider`. A tela não espera 4–5 consultas no navegador para desenhar o menu.
+- Telas com lista ou detalhe usam `useQuery` (chaves em `lib/queries/*` ou na própria tela). O que a rota precisa ao abrir pode vir pré-carregado no Server Component (`HydrationBoundary` + `lib/query/server.ts`).
+- `QueryProvider` remonta o cliente com a chave `user.id:tenant_id`: login, logout e troca de empresa descartam o cache inteiro. Não há cache de módulo em `supabase-api.ts`.
+- Padrão do cliente: `staleTime: 0` (mostra o cache e atualiza por trás). Dado pré-carregado no servidor vale `SERVER_FRESH_MS` (15 s) para não refetchar na hidratação. Unidades de medida e similares declaram janela própria.
+- Estado derivado de props, URL ou valor externo não usa `useEffect` + `setState`. A regra `react-hooks/set-state-in-effect` é **erro**. Exceção documentada: sincronizar o contexto de usuário com a sessão do Supabase quando o servidor não resolveu.
+- Harness de medição (tempo até os dados): `tests/perf` (`PERF_PAGES`, `PERF_RUNS`, `PERF_LABEL`). Não grava no banco; só lê as telas.
 
 Suporte: as telas de `/support` usam a paleta do Valore (classe `.theme-valore` em `globals.css`, aplicada em `app/support/layout.tsx`): azul como cor principal, fundo claro, bordas suaves e etiquetas de status coloridas. Diálogos e listas de seleção abrem fora da página (portal) e recebem a classe também. O botão expõe `data-variant` para o tema trocar o azul-marinho fixo do botão principal. O resto do sistema continua com a paleta institucional (azul-marinho e dourado).
 
@@ -37,13 +47,19 @@ MasterData/
 │   └── create-demo-users.js   # tenant Empresa Demo via Admin API
 ├── web/                       # aplicação Next.js
 │   ├── app/                   # páginas e route handlers
-│   ├── components/
+│   ├── components/            # UI; QueryProvider em components/query-provider.tsx
 │   ├── contexts/              # usuário e notificações
-│   ├── lib/supabase-api.ts    # acesso a dados
+│   ├── lib/
+│   │   ├── supabase-api.ts    # leituras/escritas do browser (sem cache de módulo)
+│   │   ├── data/              # leituras puras (recebem o cliente Supabase)
+│   │   ├── queries/           # queryOptions e prefetch no servidor (*.server.ts)
+│   │   └── query/             # makeQueryClient, SERVER_FRESH_MS, getServerQueryClient
 │   ├── security/              # gate de segurança (testes) e exceções da auditoria
 │   ├── scripts/security-audit.mjs
 │   └── proxy.ts               # sessão Supabase em toda página e API (antigo middleware.ts)
-└── tests/e2e/                 # Playwright
+└── tests/
+    ├── e2e/                   # Playwright (grava tenant temporário)
+    └── perf/                  # medição de tempo até os dados (só leitura)
 ```
 
 ## Como rodar
@@ -190,3 +206,4 @@ Enquanto o banco for único, a rodada grava em produção, sempre num tenant pr�
 | 051 | `report_incomplete_materials`: materiais (menos Obsoleto) sem campo obrigatório pela regra por material, com a lista dos campos; `can_view_reports`, só o tenant em uso |
 | 052 | Valores padrão por condição: tabela `field_default_rules` (condição por PDM ou campo de lista, campo alvo, valor, fixo, prioridade), coluna `material_requests.default_fields`, `apply_field_defaults` ao criar, entrar em etapa ou trocar o PDM no reenvio, e evento `defaults` no histórico |
 | 053 | Valores padrão: condição pode estar na mesma etapa do campo que recebe (recusa só se vier depois); `apply_field_defaults` também roda quando um campo de condição muda, para campos vazios |
+| 054 | `request_duplicate_codes`: trava de duplicidade de solicitação comparada no banco (mesmo critério de `lib/material-duplicates.ts`); quem chama é o servidor (service role) |

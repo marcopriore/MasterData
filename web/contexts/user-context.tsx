@@ -16,7 +16,7 @@ import {
   useState,
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { invalidateApiCache, logAction } from '@/lib/supabase-api'
+import { logAction } from '@/lib/supabase-api'
 import { identityFromMetadata, loadCurrentUser, type CurrentUser } from '@/lib/current-user'
 import type { RolePermissions } from '@/lib/permissions'
 
@@ -135,8 +135,7 @@ export function UserProvider({
           return { ok: false, error: INACTIVE_MESSAGE }
         }
 
-        // O login não recarrega a página: nada lido pelo usuário anterior pode sobrar em memória.
-        invalidateApiCache()
+        // O login não recarrega a página: o QueryProvider remonta com a chave do novo usuário e descarta o cache.
         const loaded = await loadUserFromSession()
         if (!loaded) {
           return {

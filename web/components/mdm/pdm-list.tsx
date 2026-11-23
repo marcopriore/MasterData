@@ -48,7 +48,7 @@ export function PdmList() {
 
   // A lista de PDMs é uma consulta com cache; importar ou criar a invalida.
   const queryClient = useQueryClient()
-  const pdmsQ = useQuery({ queryKey: PDM_LIST_KEY, queryFn: () => getPdms() })
+  const pdmsQ = useQuery({ queryKey: PDM_LIST_KEY, queryFn: () => getPdms({ withCounts: true }) })
   const pdms = pdmsQ.data ?? NO_PDM_ROWS
   const loading = pdmsQ.isPending
   const refreshPdms = () => queryClient.invalidateQueries({ queryKey: PDM_LIST_KEY })

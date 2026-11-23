@@ -42,26 +42,6 @@ import {
   type RejectionRow,
 } from '@/lib/reports'
 
-// ─── Cache (5 min) para dados estáticos ─────────────────────────────────────
-
-const CACHE_TTL_MS = 5 * 60 * 1000
-
-let cachedFields: unknown[] | null = null
-let cachedFieldsTime = 0
-
-let cachedRoles: unknown[] | null = null
-let cachedRolesTime = 0
-
-let cachedWorkflows: unknown[] | null = null
-let cachedWorkflowsTime = 0
-
-/** Invalida caches (chamar após criar/editar fields, units, roles, workflows) */
-export function invalidateApiCache(): void {
-  cachedFields = null
-  cachedRoles = null
-  cachedWorkflows = null
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function handleError(err: unknown): never {
@@ -248,17 +228,30 @@ export type PDMTemplate = {
   materials_count?: number
 }
 
-/** Colunas leves para listagem (sem attributes JSONB) */
+/** Colunas leves para listagem (sem attributes JSONB). */
 const PDM_LIST_COLS = 'id, name, internal_code, is_active'
 
-export async function getPdms(): Promise<PDMTemplate[]> {
+/**
+ * Lista de PDMs do tenant em uso (sem attributes).
+ * Contagem de materiais só com `withCounts` (a lista admin precisa; o restante não).
+ */
+export async function getPdms(opts?: { withCounts?: boolean }): Promise<PDMTemplate[]> {
   const supabase = createClient()
   // Master enxerga todos os tenants pela RLS; a lista é sempre do tenant em uso.
   const tenantId = await getCurrentUserTenantId()
-  const [pdmsRes, countsRes] = await Promise.all([
-    supabase.from('pdm_templates').select(PDM_LIST_COLS).eq('tenant_id', tenantId).order('name'),
-    supabase.rpc('pdm_material_counts'),
-  ])
+  const pdmsPromise = supabase.from('pdm_templates').select(PDM_LIST_COLS).eq('tenant_id', tenantId).order('name')
+  if (!opts?.withCounts) {
+    const { data: pdms, error } = await pdmsPromise
+    if (error) handleError(error)
+    return (pdms ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      internal_code: p.internal_code,
+      is_active: p.is_active ?? true,
+      attributes: [],
+    }))
+  }
+  const [pdmsRes, countsRes] = await Promise.all([pdmsPromise, supabase.rpc('pdm_material_counts')])
   const { data: pdms, error } = pdmsRes
   if (error) handleError(error)
 
@@ -1383,15 +1376,10 @@ export type WorkflowStep = {
 }
 
 export async function getWorkflows(): Promise<WorkflowHeader[]> {
-  if (cachedWorkflows && Date.now() - cachedWorkflowsTime < CACHE_TTL_MS) {
-    return cachedWorkflows as WorkflowHeader[]
-  }
   const supabase = createClient()
   const { data, error } = await supabase.from('workflow_header').select('id, name, description, is_active, request_type').order('id')
   if (error) handleError(error)
-  cachedWorkflows = data ?? []
-  cachedWorkflowsTime = Date.now()
-  return cachedWorkflows as WorkflowHeader[]
+  return (data ?? []) as WorkflowHeader[]
 }
 
 /** Workflow ativo do tipo no tenant em uso (um por tipo, migration 043). */
@@ -1425,7 +1413,6 @@ export async function createWorkflow(payload: { name: string; description?: stri
   const tenantId = await getCurrentUserTenantId()
   const { data, error } = await supabase.from('workflow_header').insert({ ...payload, tenant_id: tenantId, is_active: false }).select().single()
   if (error) handleError(error)
-  invalidateApiCache()
   return data
 }
 
@@ -1433,7 +1420,6 @@ export async function updateWorkflow(id: number, payload: Partial<WorkflowHeader
   const supabase = createClient()
   const { data, error } = await supabase.from('workflow_header').update(payload).eq('id', id).select().single()
   if (error) handleError(error)
-  invalidateApiCache()
   return data
 }
 
@@ -1465,7 +1451,6 @@ export async function bulkUpdateWorkflowConfig(payload: {
       : await supabase.from('workflow_config').insert(row)
     if (error) handleError(error)
   }
-  invalidateApiCache()
 }
 
 // ─── Materials ───────────────────────────────────────────────────────────────
@@ -1904,20 +1889,12 @@ export async function dismissSimilarPair(
 export type FieldDictionary = Record<string, unknown>
 
 export async function getFieldDictionary(erpView?: string): Promise<FieldDictionary[]> {
-  if (!erpView && cachedFields && Date.now() - cachedFieldsTime < CACHE_TTL_MS) {
-    return cachedFields as FieldDictionary[]
-  }
   const supabase = createClient()
   let q = supabase.from('field_dictionary').select('*').eq('is_active', true).order('display_order')
   if (erpView) q = q.eq('erp_view', erpView)
   const { data, error } = await q
   if (error) handleError(error)
-  const result = data ?? []
-  if (!erpView) {
-    cachedFields = result
-    cachedFieldsTime = Date.now()
-  }
-  return result
+  return data ?? []
 }
 
 /** Admin: all fields including inactive */
@@ -1943,7 +1920,6 @@ export async function createField(body: Record<string, unknown>): Promise<FieldD
   const row = body.options !== undefined ? { ...body, options: toErpDeep(body.options) } : body
   const { data, error } = await supabase.from('field_dictionary').insert({ ...row, tenant_id: tenantId }).select().single()
   if (error) handleError(error)
-  invalidateApiCache()
   return data
 }
 
@@ -1952,7 +1928,6 @@ export async function updateField(id: number, body: Record<string, unknown>): Pr
   const row = body.options !== undefined ? { ...body, options: toErpDeep(body.options) } : body
   const { data, error } = await supabase.from('field_dictionary').update(row).eq('id', id).select().single()
   if (error) handleError(error)
-  invalidateApiCache()
   return data
 }
 
@@ -1960,7 +1935,6 @@ export async function deleteField(id: number): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('field_dictionary').update({ is_active: false }).eq('id', id)
   if (error) handleError(error)
-  invalidateApiCache()
 }
 
 /** Área da etapa = nome da etapa em maiúsculas (como can_act_on_stage); fechada não tem campos. */
@@ -2142,9 +2116,6 @@ export async function getFieldLabels(): Promise<FieldLabelItem[]> {
 export type Role = { id: number; name: string; role_type?: string; permissions?: Record<string, boolean>; user_count?: number }
 
 export async function getRoles(): Promise<Role[]> {
-  if (cachedRoles && Date.now() - cachedRolesTime < CACHE_TTL_MS) {
-    return cachedRoles as Role[]
-  }
   const supabase = createClient()
   const [{ data: roles, error }, { data: counts }] = await Promise.all([
     supabase.from('roles').select('id, name, role_type, permissions').order('id'),
@@ -2157,10 +2128,7 @@ export async function getRoles(): Promise<Role[]> {
     const rid = u.role_id as number
     if (rid != null) countMap[rid] = (countMap[rid] ?? 0) + 1
   })
-  const result: Role[] = roleList.map((r) => ({ ...r, user_count: countMap[r.id] ?? 0 }))
-  cachedRoles = result
-  cachedRolesTime = Date.now()
-  return result
+  return roleList.map((r) => ({ ...r, user_count: countMap[r.id] ?? 0 }))
 }
 
 export async function createRole(body: { name: string; role_type?: string; permissions?: Record<string, boolean> }): Promise<Role> {
@@ -2168,7 +2136,6 @@ export async function createRole(body: { name: string; role_type?: string; permi
   const tenantId = await getCurrentUserTenantId()
   const { data, error } = await supabase.from('roles').insert({ ...body, tenant_id: tenantId }).select().single()
   if (error) handleError(error)
-  invalidateApiCache()
   return data
 }
 
@@ -2176,7 +2143,6 @@ export async function updateRole(id: number, body: Partial<Role>): Promise<Role>
   const supabase = createClient()
   const { data, error } = await supabase.from('roles').update(body).eq('id', id).select().single()
   if (error) handleError(error)
-  invalidateApiCache()
   return data
 }
 
@@ -2188,7 +2154,6 @@ export async function deleteRole(id: number): Promise<void> {
   }
   const { error } = await supabase.from('roles').delete().eq('id', id)
   if (error) handleError(error)
-  invalidateApiCache()
 }
 
 // ─── Tenants ─────────────────────────────────────────────────────────────────

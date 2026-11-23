@@ -2,7 +2,7 @@
 
 Resumo para quem abre o repositório. Detalhe em `docs/`.
 
-Última revisão: outubro de 2026.
+Última revisão: novembro de 2026.
 
 ## O que é
 
@@ -10,7 +10,7 @@ Cadastro mestre de materiais por cliente (tenant): solicitação com PDM, govern
 
 ## Stack
 
-Next.js 16 + React 19 + TypeScript + Tailwind 4 + Supabase (Auth, Postgres, RLS, Storage). Não há mais API FastAPI.
+Next.js 16 + React 19 + TypeScript + Tailwind 4 + Supabase (Auth, Postgres, RLS, Storage) + TanStack Query (cache por usuário/empresa). Não há mais API FastAPI.
 
 ```powershell
 cd C:\Dev\MasterData\web

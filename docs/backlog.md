@@ -32,12 +32,10 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
   - Captcha no login e na redefinição de senha, se aparecer tentativa em massa.
   - Rodar a sonda (`npm run security:probe`) no CI contra um banco de desenvolvimento, quando ele existir.
 
-- **Desempenho das telas: carga de dados fora do `useEffect` (a fazer, pedido em 19/11/2026; prioridade alta).** O lint aponta 64 pontos em cerca de 40 telas (`react-hooks/set-state-in-effect`, hoje como aviso em `web/eslint.config.mjs`). A tela desenha vazia, o efeito liga o carregamento e ela desenha de novo; o React Compiler não otimiza esses componentes. Caminho:
-  - o que a tela precisa ao abrir vem do servidor (Server Component ou rota), sem esperar o efeito no navegador;
-  - nas telas que continuam no navegador, uma camada de cache de consultas (TanStack Query, SWR ou equivalente; escolher no começo) no lugar de `useState` + `useEffect`, com cancelamento e reaproveitamento entre telas;
-  - estado que só copia outro (rascunho de busca, filtro vindo da URL) passa a ser calculado no render;
-  - medir antes e depois em cada tela (tempo até mostrar os dados e número de renders), começando por Governança, Base de Dados e Minhas Solicitações;
-  - no fim, a regra volta a ser erro.
+- ~~**Desempenho das telas: carga de dados fora do `useEffect`**~~ (feito em 20–23/11/2026, v3.24.0 e o restante no branch `perf/data-loading`). Usuário e dados iniciais no servidor; TanStack Query com cache por usuário/empresa; estado derivado sem efeito; `react-hooks/set-state-in-effect` de volta a erro. Restos conhecidos:
+  - medição final (`PERF_LABEL=fase5-final`, 23/11/2026) vs base (`antes`): Início 2176→828 ms, Governança 4549→1593, Solicitações 5914→1107, Base 2432→903; Relatórios 591 ms na entrada (Incompletos só ao abrir a aba);
+  - Governança (~1,6 s) e Gestão de Usuários (~1,4 s) ainda são as mais lentas na carga fria;
+  - com dezenas de milhares de abertas na Governança, o próximo passo continua sendo buscar por página no banco (item acima).
 - **Valores padrão por condição (feito em 18/11/2026, migrations 052 e 053, v3.23.0).** A 053 permite a condição na mesma etapa do campo que recebe (recusa só se vier depois) e reaplica a regra quando o campo de condição muda na etapa. Tela de parametrização para pré-preencher campos conforme uma condição, para reduzir o preenchimento manual nas etapas do workflow. Exemplos pedidos: o Grupo de Mercadorias vir preenchido pelo PDM escolhido; o Grupo de Compradores, a Classe de Avaliação e outros campos vindos de uma condição. Pontos levantados na modelagem:
   - a condição (PDM, tipo de material, centro, outro campo ou combinação de campos) e o valor preenchido;
   - se o valor é sugestão (o usuário pode trocar) ou fixo (só muda pela regra);
@@ -65,7 +63,7 @@ Itens observados no código em outubro de 2026. Não é uma fila priorizada com 
 ## Documentação e engenharia
 
 - Manter `docs/` junto com mudança de regra. Se nascer permissão, etapa de workflow ou RPC, atualizar `regras.md` e `funcionalidades.md` no mesmo trabalho.
-- **Lista com filtro:** só a consulta mais recente atualiza a tela (Base de Dados, governança, logs, dicionário de valores, campos). Lista nova com busca no servidor segue o mesmo padrão (`useRef` com número da consulta).
+- **Lista com filtro:** a chave da consulta inclui o filtro (TanStack Query). Trocar o filtro busca de novo; a resposta antiga não sobrescreve a nova.
 - E2E ainda sem suíte de troca de tenant pelo Master, importação de planilha, anexos, notificações e integração ERP (simulada). Rodar o E2E no CI depende do banco de desenvolvimento.
 - Senha dos usuários demo continua hardcoded no script de criação. Aceitável para demo; não usar esse valor fora do tenant de demonstração.
 

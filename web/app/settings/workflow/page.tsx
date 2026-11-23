@@ -12,7 +12,6 @@ import {
   updateWorkflow,
   migrateRequestsToWorkflow,
   logAction,
-  invalidateApiCache,
   REQUEST_TYPE_LABEL,
   type RequestType,
 } from '@/lib/supabase-api'
@@ -356,9 +355,8 @@ const WORKFLOWS_KEY = ['workflows'] as const
 const NO_WORKFLOWS: WorkflowHeader[] = []
 const NO_STEPS: WorkflowStep[] = []
 
-/** Lista todos os workflows (de todos os tipos). Zera os caches de módulo para a leitura refletir a última mudança. */
+/** Lista todos os workflows (de todos os tipos). O cache fica no useQuery; invalidar a consulta atualiza a lista. */
 async function loadWorkflowHeaders(): Promise<WorkflowHeader[]> {
-  invalidateApiCache()
   const list = await getWorkflows()
   return list.map((w) => ({ ...w, is_active: w.is_active ?? true, request_type: w.request_type ?? 'cadastro' })) as WorkflowHeader[]
 }

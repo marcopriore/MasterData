@@ -98,8 +98,16 @@
 - **ERP simulado:** sem integração ativa, a simulação roda no servidor (`lib/erp/simulate.ts`), depois da permissão e da trava de duplicidade.
 - **Rotas com service role** (ignoram a RLS) filtram `tenant_id` pelo tenant em uso e conferem que o id recebido pertence a ele antes de alterar.
 - **Permissões do Master:** tem todas as permissões em qualquer tenant (`allPermissions`), porque o papel dele fica no tenant de origem.
-- **Troca de tenant:** exclusiva de quem tem `is_master` no metadata de auth. Se o servidor recusar, nada muda. Depois da troca a página recarrega, o que também limpa os caches do navegador.
+- **Troca de tenant:** exclusiva de quem tem `is_master` no metadata de auth. Se o servidor recusar, nada muda. Depois da troca a página recarrega; o `QueryProvider` também descarta o cache de consultas porque a chave muda com o tenant.
 - Unidades de medida são globais.
+
+## Carga de dados e cache
+
+- **Usuário no servidor:** o layout resolve a sessão e o perfil (`getServerCurrentUser`) e passa ao `UserProvider`. Sem sessão resolvida no servidor, o navegador carrega uma vez (exceção documentada em `user-context.tsx`).
+- **Consultas:** listas e detalhes usam TanStack Query. A chave inclui o que muda o resultado (filtro, id, tipo). Depois de criar, editar, excluir ou importar, a tela invalida a consulta (`invalidateQueries`) ou atualiza o cache (`setQueryData`); não há `invalidateApiCache` de módulo.
+- **Escopo do cache:** um `QueryClient` por `user.id:tenant_id`. Login, logout e troca de empresa não reaproveitam dado da sessão anterior.
+- **Sem `setState` em efeito para carregar dado:** a regra `react-hooks/set-state-in-effect` é erro. Dado vem de `useQuery` ou do servidor; estado que só acompanha props/URL ajusta na renderização.
+- **Lista PDM:** `getPdms()` é leve (sem `attributes` e sem contagem). A lista admin pede `getPdms({ withCounts: true })` quando precisa do total de materiais.
 
 ## Autenticação
 
@@ -203,7 +211,7 @@ Regra de evolução: tela nova ganha flag `can_*`, entra no grupo de `web/lib/pe
 A regra fica em `web/lib/material-duplicates.ts` e vale igual para o selo **DUP** da base, para a checagem da solicitação e para a trava do servidor (`web/lib/erp/duplicate-guard.ts`). A marcação não é gravada: é calculada na hora, dentro do tenant.
 
 - **Base:** dois materiais são duplicados quando têm a mesma descrição detalhada (sem diferenciar maiúsculas) ou, sem detalhada, a mesma descrição curta no mesmo PDM.
-- **Solicitação:** os mesmos atributos que entram na descrição, no mesmo PDM, que outro material ou outra solicitação aberta.
+- **Solicitação:** os mesmos atributos que entram na descrição, no mesmo PDM, que outro material ou outra solicitação aberta. A comparação no servidor roda no banco (`request_duplicate_codes`, migration 054), com o mesmo critério de `lib/material-duplicates.ts`.
 - Material **Obsoleto** não conta para nenhum dos dois lados. Bloqueado conta.
 - Material marcado como duplicado **não é criado nem alterado no ERP**, por nenhum caminho: botão no detalhe, lote na base, conclusão da última etapa e simulação sem integração ativa. A chamada volta como ignorada com os códigos duplicados e grava `erp_blocked_duplicate` no log do sistema.
 - **Eliminar no ERP continua liberado** para duplicado: eliminar um dos itens é uma das formas de resolver.
